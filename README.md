@@ -1,7 +1,7 @@
 # Eyra - AI-Powered Screen Analysis Assistant
 
 
-![screenshot](https://raw.githubusercontent.com/gabrimatic/eyra/main/screenshot.png "screenshot")
+![screenshot](https://raw.githubusercontent.com/gabrimatic/eyra/master/screenshot.png "screenshot")
 
 Eyra is an AI-powered, interactive Python application that integrates OpenAI's vision models with system automation to deliver an enhanced screen analysis and chat experience. It combines powerful AI capabilities with automation to help you understand what's on your screen and provide real-time insights in an intuitive, interactive way.
 
@@ -91,7 +91,7 @@ This structure allows a modular and clean architecture, making it easier to exte
 
 ## License
 
-[The MIT License (MIT)](https://raw.githubusercontent.com/gabrimatic/eyra/main/LICENSE)
+[The MIT License (MIT)](https://raw.githubusercontent.com/gabrimatic/eyra/refs/heads/master/LICENCE)
 
 ## Developer
 By [Hossein Yousefpour](https://gabrimatic.info "Hossein Yousefpour")
