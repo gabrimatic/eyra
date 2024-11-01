@@ -19,7 +19,6 @@ async def simulate_typing(text: str):
     Args:
         text (str): Text to be displayed during animation (currently unused)
     """
-    print("\nEyra is typing", end="")
     for _ in range(3):
         await asyncio.sleep(0.1)
         print(".", end="", flush=True)

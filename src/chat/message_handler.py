@@ -74,7 +74,6 @@ def get_completion(client: OpenAI, messages: List[Dict]) -> Dict:
     """Get completion from OpenAI API."""
     loading = LoadingAnimator()
     loading.start()
-    print("\Eyra is typing", end="")
     try:
         settings = Settings.load_from_env()
         response = client.chat.completions.create(
@@ -84,5 +83,4 @@ def get_completion(client: OpenAI, messages: List[Dict]) -> Dict:
         )
     finally:
         loading.stop()
-    print("\nEyra is typing", end="")
     return response.choices[0].message

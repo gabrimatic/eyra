@@ -37,8 +37,6 @@ class ManualMode(BaseMode):
                 
             self.messages.append({"role": "user", "content": user_input})
             
-            print("\nEyra is thinking...")
-            
             if '#selfie' in user_input:
                 response = await process_message_with_image(self.client, self.messages, self.settings.IMAGE_PATH, use_selfie=True)
             elif '#image' in user_input:
@@ -47,4 +45,4 @@ class ManualMode(BaseMode):
                 response = get_completion(self.client, self.messages)
 
             self.messages.append({"role": "assistant", "content": response.content})
-            print(f"\Eyra:", response.content)
+            print(f"\nEyra:", response.content)
