@@ -91,7 +91,7 @@ This structure allows a modular and clean architecture, making it easier to exte
 
 ## License
 
-[The MIT License (MIT)](https://raw.githubusercontent.com/gabrimatic/eyra/master/LICENSE)
+[The MIT License (MIT)](https://raw.githubusercontent.com/gabrimatic/eyra/refs/heads/master/LICENCE)
 
 ## Developer
 By [Hossein Yousefpour](https://gabrimatic.info "Hossein Yousefpour")
