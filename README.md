@@ -2,6 +2,8 @@
 
 Eyra is an advanced AI-driven Python application designed to analyze your screen content in real time, leveraging OpenAI's vision models to provide insightful feedback through both chat and voice. Whether you're researching, multitasking, or seeking real-time insights, Eyra delivers an efficient, interactive, and automated experience. With its robust feature set and ease of use, Eyra stands out as a powerful productivity and accessibility tool.
 
+![screenshot](https://raw.githubusercontent.com/gabrimatic/eyra/master/screenshot.png "screenshot")
+
 ## Why Eyra is Useful
 
 Eyra takes the hassle out of manual screen analysis, making it an invaluable tool for professionals, researchers, and power users who need to keep track of screen content, take quick notes, or extract data seamlessly. Its automated analysis capabilities help users quickly interpret visual information, be it from a document, website, or software application. This makes Eyra particularly useful for individuals dealing with large volumes of information, ensuring nothing important is missed while streamlining the process of accessing and understanding visual content.
