@@ -7,6 +7,7 @@ import time
 import threading
 import itertools
 
+
 class LoadingAnimator:
     """Provides animated loading indicator."""
 
@@ -16,12 +17,12 @@ class LoadingAnimator:
 
     def animate(self):
         """Animation loop for loading indicator."""
-        chars = itertools.cycle(['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
+        chars = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
         while not self.stop_loading:
-            sys.stdout.write('\r' + 'Thinking ' + next(chars))
+            sys.stdout.write("\r" + "Thinking " + next(chars))
             sys.stdout.flush()
             time.sleep(0.1)
-        sys.stdout.write('\r')
+        sys.stdout.write("\r")
         sys.stdout.flush()
 
     def start(self):

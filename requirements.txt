@@ -1,0 +1,21 @@
+# Core dependencies
+openai           # OpenAI API client for interacting with OpenAI services
+pillow           # Library for image processing tasks
+python-dotenv    # Tool for managing environment variables from .env files
+pynput           # Library for monitoring and controlling keyboard input
+asyncio          # Support for asynchronous I/O operations
+
+# Image capture dependencies
+imagesnap; sys_platform == 'darwin'     # Utility for capturing images from the webcam on macOS
+
+# Optional but recommended
+pyaudio          # Library for audio playback and recording
+
+# Required for webcam capture
+brew install imagesnap                 # Install imagesnap for macOS
+
+# Required for sound playback
+brew install portaudio                 # Install portaudio for audio playback
+
+# Required for webcam capture and for sound playback
+brew install imagesnap portaudio       # Install both imagesnap and portaudio

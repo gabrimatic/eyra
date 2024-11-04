@@ -1,93 +1,126 @@
 # Eyra - AI-Powered Screen Analysis Assistant
 
+Eyra is an advanced AI-driven Python application designed to analyze your screen content in real time, leveraging OpenAI's vision models to provide insightful feedback through both chat and voice. Whether you're researching, multitasking, or seeking real-time insights, Eyra delivers an efficient, interactive, and automated experience. With its robust feature set and ease of use, Eyra stands out as a powerful productivity and accessibility tool.
 
-![screenshot](https://raw.githubusercontent.com/gabrimatic/eyra/master/screenshot.png "screenshot")
+## Why Eyra is Useful
 
-Eyra is an AI-powered, interactive Python application that integrates OpenAI's vision models with system automation to deliver an enhanced screen analysis and chat experience. It combines powerful AI capabilities with automation to help you understand what's on your screen and provide real-time insights in an intuitive, interactive way.
+Eyra takes the hassle out of manual screen analysis, making it an invaluable tool for professionals, researchers, and power users who need to keep track of screen content, take quick notes, or extract data seamlessly. Its automated analysis capabilities help users quickly interpret visual information, be it from a document, website, or software application. This makes Eyra particularly useful for individuals dealing with large volumes of information, ensuring nothing important is missed while streamlining the process of accessing and understanding visual content.
 
-## Overview
-Eyra enables both manual and live screen analysis modes, enhancing your productivity by letting you interact with your system naturally. Whether you're conducting research, giving presentations, or working on your next project, Eyra is your intelligent companion to process and interpret visual data in real time.
+### Key Advantages
 
-## Features
+1. **Automated Insights**: Eyra leverages state-of-the-art AI to automatically extract key details from visual content, saving you time and effort.
+2. **Accessibility Enhancement**: Eyra's voice feedback ensures that you can stay updated on important visual information even when you’re on the move or away from the screen, improving accessibility for visually impaired users.
+3. **Cross-Platform Flexibility**: Eyra is built to run on all major operating systems, providing a consistent experience regardless of your preferred platform.
+4. **Real-Time Interaction**: Through both manual and live modes, users have the flexibility to interact with Eyra on demand or let it autonomously monitor and provide feedback in real time.
 
-- **Manual Mode**: Engage in an interactive chat where you can capture and analyze your screen or webcam images. Perfect for on-demand insights and focused interactions.
+## Features Overview
 
-- **Live Mode**: Real-time automated screen analysis, featuring voice feedback to keep you informed. This mode is ideal for continuous monitoring or hands-free operation.
+### 1. **Manual Mode**
+- **Interactive Capture and Analysis**: Users can engage directly with Eyra, capturing screen or webcam images as needed.
+- **Command-Based Interaction**: Simple commands like `#image` or `#selfie` allow users to capture the screen or webcam view for immediate AI analysis.
 
-- **Cross-Platform Support**: Eyra is built to work seamlessly across macOS, Windows, and Linux environments, ensuring wide usability.
+### 2. **Live Mode**
+- **Continuous Monitoring**: Eyra actively monitors the screen, capturing visual data at predefined intervals and providing automated analysis.
+- **Hands-Free Voice Feedback**: The built-in text-to-speech feature converts insights into audio, ensuring users receive immediate, actionable information.
 
-- **Text-to-Speech Integration**: Includes built-in text-to-speech functionality, allowing Eyra to communicate insights through voice in real time.
+### 3. **Voice Feedback Integration**
+- **Text-to-Speech Responses**: Eyra provides real-time auditory responses to analyzed content, which enhances accessibility and productivity by allowing users to focus elsewhere while still receiving relevant updates.
 
-- **Image Optimization**: Automatic image processing for optimized API usage, ensuring the best performance and cost efficiency.
+### 4. **Cross-Platform Support**
+- Compatible with macOS, Windows, and Linux, Eyra is designed for maximum versatility, providing native support for system-level features across platforms.
 
-## Prerequisites
+### 5. **Image Optimization**
+- **Pre-Processing for Efficiency**: Eyra automatically optimizes captured images to ensure efficient use of the OpenAI API, managing resolution and file size without sacrificing analytical accuracy.
 
-To run Eyra, you need the following:
+### 6. **Keyboard Shortcuts for Seamless Interaction**
+- Users can quickly switch between manual and live modes using intuitive keyboard shortcuts (`Ctrl+Shift+L` for Live Mode, `Ctrl+Shift+M` for Manual Mode), providing a seamless and responsive user experience.
 
-- **Python 3.8 or higher**
-- **An OpenAI API key**
-- **System-specific dependencies**:
+## Technical Requirements
+
+To use Eyra effectively, you'll need the following:
+
+- **Python Version**: Python 3.8 or newer.
+- **OpenAI API Key**: Required for leveraging the AI analysis capabilities.
+- **Platform-Specific Dependencies**:
   - **macOS**: `imagesnap` for webcam capture.
-  - **Windows**: PowerShell access for capturing screenshots.
+  - **Windows**: PowerShell access.
   - **Linux**: `espeak` for text-to-speech, `paplay` for audio playback.
 
-## Installation
+## Installation Guide
 
-### Step 1: Clone the Repository
-    ```bash
-    git clone https://github.com/gabrimatic/eyra.git
-    cd eyra
-    ```
+Follow these steps to install Eyra:
 
-### Step 2: Install Required Packages
-    Use `pip` to install the necessary dependencies.
-    ```bash
-    pip install openai pillow python-dotenv
-    ```
+1. **Clone the Repository**:
+   ```bash
+   git clone https://github.com/gabrimatic/eyra.git
+   cd eyra
+   ```
 
-### Step 3: Set Up Environment Variables
-   Create a `.env` file in the project root to store your environment variables:
-    ```plaintext
-    OPENAI_API_KEY=your_api_key_here
-    MODEL_NAME=gpt-4o
-    MAX_TOKENS=300
-    IMAGE_PATH=./images/image.jpg
-    USE_MOCK_CLIENT=false
-    ```
-   These settings allow you to configure various aspects of the application's behavior, such as model selection, token limits, and paths for image storage.
+2. **Install Python Dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-## Usage
+3. **Install System-Specific Dependencies (macOS Example)**:
+   ```bash
+   brew install imagesnap portaudio
+   ```
 
-### Run the Main Application
-    ```bash
-    python src/main.py
-    ```
+4. **Configure Environment Variables**:
+   Create a `.env` file to set up API keys and other configurations:
+   ```plaintext
+   OPENAI_API_KEY=your_api_key_here
+   MODEL_NAME=gpt-4o-mini
+   MAX_TOKENS=300
+   IMAGE_PATH=./images/image.jpg
+   USE_MOCK_CLIENT=false
+   ```
 
-### Select Desired Mode
-   - **Manual Mode**: Allows you to interact via chat commands for capturing and analyzing images from your screen or webcam.
-   - **Live Mode**: Provides continuous screen analysis with voice feedback, ideal for monitoring tasks.
+## Usage Instructions
 
-## Configuration
-
-Eyra offers several configuration options to customize your experience:
-
-- **Environment Variables**: Use the `.env` file to configure parameters like the OpenAI model, image paths, and token limits.
-
-- **Mock Client**: If you wish to test the application without using actual API credits, enable the mock client by adding `USE_MOCK_CLIENT=true` to your `.env` file. This is especially useful during development to simulate interactions without incurring costs.
-
-## Directory Structure
-
-The project is organized for ease of development and maintainability:
-
-```plaintext
-src/
-├── chat/           # Chat and message handling components
-├── config/         # Configuration and settings
-├── image/          # Image capture, optimization, and processing
-├── modes/          # Application modes (Manual and Live)
-└── utils/          # Utility functions and helpers
+### Starting Eyra
+To launch Eyra, run:
+```bash
+python src/main.py
 ```
-This structure allows a modular and clean architecture, making it easier to extend or modify functionalities in the future.
+
+### Manual Mode
+- Use chat commands to interact with Eyra:
+  - `#image`: Capture a screenshot for analysis.
+  - `#selfie`: Capture a webcam image for analysis.
+  - `/history`: View past analyses and chat history.
+  - `/quit`: Exit the application.
+- To switch to **Live Mode**, press `Ctrl+Shift+L`.
+
+### Live Mode
+- Eyra will continuously capture and analyze your screen.
+- Voice feedback will provide results automatically.
+- To switch back to **Manual Mode**, press `Ctrl+Shift+M`.
+- Press `Ctrl+C` to exit at any time.
+
+## Development and Extension
+
+Eyra is designed with modularity in mind, allowing developers to easily extend or modify its capabilities. Below is an overview of the project structure:
+
+```
+src/
+├── chat/           # Handles chat messaging and user interactions
+├── config/         # Configuration and settings management
+├── image/          # Image capture and processing
+├── modes/          # Logic for switching between manual and live modes
+└── utils/          # Helper utilities and common functions
+```
+
+### Mock Client for Testing
+If you need to test Eyra without incurring API costs, set `USE_MOCK_CLIENT=true` in your `.env` file. This will simulate API responses for development purposes.
+
+### Configuration Options
+Image paths, model parameters, and other settings can be customized via environment variables, making it easy to tailor Eyra to your specific use case.
+
+## Future Plans
+The next version of Eyra will focus on integrating with **Ollama's local offline AI models**. This enhancement will allow users to choose between using the OpenAI API or a local AI model, offering greater flexibility and cost savings.
+
+By leveraging offline models, Eyra aims to provide a completely free, privacy-focused experience that does not rely on external cloud services. Stay tuned for this exciting update, which will make Eyra even more versatile and accessible for all users.
 
 ## License
 
