@@ -1,0 +1,9 @@
+Vision:
+- Reading PDFs, analyzing them, and extracting information while interacting with voice and screen share.
+
+
+Tasks:
+- Change the name to Eyra AI
+- Create a new logo
+- Add whisper
+- Add training based on pdf collections functionality

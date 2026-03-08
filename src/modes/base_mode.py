@@ -1,47 +1,38 @@
+# base_mode.py
+
 """
-Base class for application modes.
-Defines the interface and common functionality for all modes.
+BaseMode is an abstract class that each mode (ManualMode, LiveMode, etc.) extends.
 """
 
+import logging
 from abc import ABC, abstractmethod
-from openai import OpenAI
-from config.settings import Settings
+from typing import Optional
+
+from clients.base_client import BaseAIClient
+from clients.ollama_client import OllamaClient
+from utils.settings import Settings
 
 
 class BaseMode(ABC):
     """
-    Abstract base class for application modes.
-
-    Attributes:
-        client (OpenAI): OpenAI client instance for API communication
-        settings (Settings): Application settings
-        messages (list): Chat history storage
+    BaseMode provides shared attributes & initialization logic for each mode.
     """
 
-    def __init__(self, client: OpenAI, settings: Settings, messages=None):
-        """
-        Initialize the base mode.
-
-        Args:
-            client (OpenAI): OpenAI client instance
-            settings (Settings): Application settings
-            messages (list, optional): Shared message history
-        """
-        self.client = client
+    def __init__(self, settings: Settings):
         self.settings = settings
-        self.messages = (
-            messages
-            if messages is not None
-            else [
-                {
-                    "role": "system",
-                    "content": "You are Eyra, a highly helpful AI assistant with the ability to understand and analyze both text and images. Your primary role is to assist users by interpreting the content of the screenshots or selfies they provide and answering any related questions they may have. Ensure your responses are clear, accurate, and supportive to enhance the user’s understanding and experience.",
-                }
-            ]
-        )
-        self.switch_requested = False
+        self.client: Optional[BaseAIClient] = self._initialize_client()
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+    def _initialize_client(self) -> BaseAIClient:
+        """
+        By default, use an OllamaClient for any mode.
+        If you want a different client, override in a subclass or adjust as needed.
+        """
+        return OllamaClient(self.settings)
 
     @abstractmethod
-    async def run(self):
-        """Run the mode. Must be implemented by subclasses."""
+    async def run(self) -> None:
+        """
+        Each mode must implement a run() method for its main logic.
+        """
         pass

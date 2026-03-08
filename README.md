@@ -1,137 +1,246 @@
-# Eyra - AI-Powered Screen Analysis Assistant
+# Eyra
 
-Eyra is an advanced AI-driven Python application designed to analyze your screen content in real time, leveraging OpenAI's vision models to provide insightful feedback through both chat and voice. Whether you're researching, multitasking, or seeking real-time insights, Eyra delivers an efficient, interactive, and automated experience. With its robust feature set and ease of use, Eyra stands out as a powerful productivity and accessibility tool.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENCE)
+[![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)]()
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)]()
 
-![screenshot](https://raw.githubusercontent.com/gabrimatic/eyra/master/screenshot.png "screenshot")
+**Real-time AI screen analysis from the terminal.**
 
-## Why Eyra is Useful
+Eyra captures screenshots or webcam frames, routes them through a vision model, and responds in text or voice. Processing is local by default, with an optional cloud fallback for complex tasks.
 
-Eyra takes the hassle out of manual screen analysis, making it an invaluable tool for professionals, researchers, and power users who need to keep track of screen content, take quick notes, or extract data seamlessly. Its automated analysis capabilities help users quickly interpret visual information, be it from a document, website, or software application. This makes Eyra particularly useful for individuals dealing with large volumes of information, ensuring nothing important is missed while streamlining the process of accessing and understanding visual content.
+<p align="center"><img src="screenshot.png" width="800" alt="Eyra terminal screenshot"></p>
 
-### Key Advantages
+---
 
-1. **Automated Insights**: Eyra leverages state-of-the-art AI to automatically extract key details from visual content, saving you time and effort.
-2. **Accessibility Enhancement**: Eyra's voice feedback ensures that you can stay updated on important visual information even when you’re on the move or away from the screen, improving accessibility for visually impaired users.
-3. **Cross-Platform Flexibility**: Eyra is built to run on all major operating systems, providing a consistent experience regardless of your preferred platform.
-4. **Real-Time Interaction**: Through both manual and live modes, users have the flexibility to interact with Eyra on demand or let it autonomously monitor and provide feedback in real time.
+## Quick Start
 
-## Features Overview
-
-### 1. **Manual Mode**
-- **Interactive Capture and Analysis**: Users can engage directly with Eyra, capturing screen or webcam images as needed.
-- **Command-Based Interaction**: Simple commands like `#image` or `#selfie` allow users to capture the screen or webcam view for immediate AI analysis.
-
-### 2. **Live Mode**
-- **Continuous Monitoring**: Eyra actively monitors the screen, capturing visual data at predefined intervals and providing automated analysis.
-- **Hands-Free Voice Feedback**: The built-in text-to-speech feature converts insights into audio, ensuring users receive immediate, actionable information.
-
-### 3. **Voice Feedback Integration**
-- **Text-to-Speech Responses**: Eyra provides real-time auditory responses to analyzed content, which enhances accessibility and productivity by allowing users to focus elsewhere while still receiving relevant updates.
-
-### 4. **Cross-Platform Support**
-- Compatible with macOS, Windows, and Linux, Eyra is designed for maximum versatility, providing native support for system-level features across platforms.
-
-### 5. **Image Optimization**
-- **Pre-Processing for Efficiency**: Eyra automatically optimizes captured images to ensure efficient use of the OpenAI API, managing resolution and file size without sacrificing analytical accuracy.
-
-### 6. **Keyboard Shortcuts for Seamless Interaction**
-- Users can quickly switch between manual and live modes using intuitive keyboard shortcuts (`Ctrl+Shift+L` for Live Mode, `Ctrl+Shift+M` for Manual Mode), providing a seamless and responsive user experience.
-
-## Technical Requirements
-
-To use Eyra effectively, you'll need the following:
-
-- **Python Version**: Python 3.8 or newer.
-- **OpenAI API Key**: Required for leveraging the AI analysis capabilities.
-- **Platform-Specific Dependencies**:
-  - **macOS**: `imagesnap` for webcam capture.
-  - **Windows**: PowerShell access.
-  - **Linux**: `espeak` for text-to-speech, `paplay` for audio playback.
-
-## Installation Guide
-
-Follow these steps to install Eyra:
-
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/gabrimatic/eyra.git
-   cd eyra
-   ```
-
-2. **Install Python Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Install System-Specific Dependencies (macOS Example)**:
-   ```bash
-   brew install imagesnap portaudio
-   ```
-
-4. **Configure Environment Variables**:
-   Create a `.env` file to set up API keys and other configurations:
-   ```plaintext
-   OPENAI_API_KEY=your_api_key_here
-   MODEL_NAME=gpt-4o-mini
-   MAX_TOKENS=300
-   IMAGE_PATH=./images/image.jpg
-   USE_MOCK_CLIENT=false
-   ```
-
-## Usage Instructions
-
-### Starting Eyra
-To launch Eyra, run:
 ```bash
+git clone https://github.com/gabrimatic/eyra.git
+cd eyra
+chmod +x setup.sh && ./setup.sh
+cp .env.example .env   # edit as needed
 python src/main.py
 ```
 
+| Prompt | What happens |
+|--------|--------------|
+| `python src/main.py` | Mode selection menu |
+| `1` | Manual mode |
+| `2` | Live mode |
+| `3` | Voice mode |
+
+---
+
+## What It Does
+
+- Captures screenshots in memory via `mss`, no disk I/O
+- Captures webcam frames via OpenCV with AVFoundation backend
+- Scores task complexity using spaCy NLP and optionally CLIP
+- Routes to Ollama (local) or Google Gemini (cloud) based on score
+- Streams AI responses sentence by sentence
+- Synthesizes voice responses locally via Coqui TTS or pyttsx3 fallback
+
+---
+
+## Modes
+
+| Mode | Trigger | What it does |
+|------|---------|--------------|
+| Manual | Type a prompt | Interactive chat. Append `#image` for a screenshot or `#selfie` for webcam. |
+| Live | Select at startup | Captures a screenshot every second, sends to AI, streams response. Runs until interrupted. |
+| Voice | Hold Space, release | Records audio, transcribes via Whisper, sends to LLM, plays TTS response. Mic mutes while speaking. |
+
 ### Manual Mode
-- Use chat commands to interact with Eyra:
-  - `#image`: Capture a screenshot for analysis.
-  - `#selfie`: Capture a webcam image for analysis.
-  - `/history`: View past analyses and chat history.
-  - `/quit`: Exit the application.
-- To switch to **Live Mode**, press `Ctrl+Shift+L`.
+
+Type any prompt at the `>` input. Attach visual context with keywords:
+
+- `#image` — captures the current screen
+- `#selfie` — captures a webcam frame
+
+Both are encoded as base64 JPEG in memory and sent with the message.
 
 ### Live Mode
-- Eyra will continuously capture and analyze your screen.
-- Voice feedback will provide results automatically.
-- To switch back to **Manual Mode**, press `Ctrl+Shift+M`.
-- Press `Ctrl+C` to exit at any time.
 
-## Development and Extension
+Runs a continuous loop. Each iteration:
 
-Eyra is designed with modularity in mind, allowing developers to easily extend or modify its capabilities. Below is an overview of the project structure:
+1. Screenshot captured via `mss`
+2. Complexity scored
+3. Routed to appropriate model
+4. Response streamed to terminal
+
+Interrupt with `Ctrl+C`.
+
+### Voice Mode
+
+<details><summary><strong>Setup</strong></summary>
+
+The bundled Whisper model is at `src/modes/voice/models/tiny.en.pt`.
+
+Coqui TTS installs via `requirements.txt`. If it fails to initialize, the pipeline falls back to `pyttsx3`.
+
+Spacebar hold/release is handled via `keyboard` library. Run with sufficient permissions on macOS (Accessibility access may be required).
+
+</details>
+
+Full pipeline per utterance:
+
+1. Hold Space — recording starts
+2. Release Space — recording stops, Whisper transcribes locally
+3. Transcript sent to LLM
+4. Response synthesized sentence by sentence
+5. Audio plays while next sentence generates
+
+---
+
+## Complexity Routing
+
+Every request is scored by `ComplexityScorer` before dispatch.
+
+Scoring factors:
+
+- Vocabulary richness (spaCy)
+- Syntactic depth (dependency parse)
+- Named entity density
+- CLIP image embedding distance (image tasks)
+
+| Score | Text model | Image model |
+|-------|-----------|-------------|
+| Simple | phi3 (Ollama) | llava (Ollama) |
+| Moderate | gemini-1.5-flash | gemini-1.5-flash |
+| Complex | gemini-1.5-flash | gemini-1.5-flash |
+
+---
+
+## Configuration
+
+<details><summary><strong>.env reference</strong></summary>
+
+```env
+OLLAMA_HOST=localhost
+OLLAMA_PORT=11434
+GOOGLE_API_KEY=your_key_here
+USE_MOCK_CLIENT=false
+VOICE_MODEL_PATH=src/modes/voice/models/tiny.en.pt
+VOICE_LANG=en
+VOICE_TTS_FALLBACK=true
+```
+
+`GOOGLE_API_KEY` is only used when complexity routing selects Gemini. Leave blank to restrict all processing to Ollama.
+
+`USE_MOCK_CLIENT=true` runs a local stub instead of any AI backend, useful for development.
+
+</details>
+
+---
+
+## Privacy
+
+| Component | Where it runs |
+|-----------|--------------|
+| Ollama (phi3, llava) | localhost:11434 |
+| Whisper STT | In-process, fully offline |
+| Coqui TTS | In-process, fully offline |
+| Google Gemini | Cloud, only when complexity score requires it |
+| Screenshots / webcam | In-memory only, never written to disk |
+
+No telemetry. No analytics. No network calls except Ollama (local) and Gemini (optional).
+
+---
+
+## Architecture
 
 ```
-src/
-├── chat/           # Handles chat messaging and user interactions
-├── config/         # Configuration and settings management
-├── image/          # Image capture and processing
-├── modes/          # Logic for switching between manual and live modes
-└── utils/          # Helper utilities and common functions
+eyra/
+├── pyproject.toml
+├── setup.sh
+├── requirements.txt
+├── src/
+│   ├── main.py
+│   ├── chat/
+│   │   ├── capture.py           # In-memory screenshot and webcam capture
+│   │   ├── complexity_scorer.py # NLP + CLIP task complexity routing
+│   │   ├── message_handler.py   # Message history and AI client routing
+│   │   └── words.py             # Complexity indicator vocabulary
+│   ├── clients/
+│   │   ├── base_client.py       # BaseAIClient abstract
+│   │   ├── ollama_client.py     # Ollama async HTTP client
+│   │   └── google_client.py     # Google Gemini client
+│   ├── modes/
+│   │   ├── base_mode.py
+│   │   ├── manual_mode.py
+│   │   ├── live_mode.py
+│   │   └── voice/
+│   │       ├── voice_mode.py    # Voice pipeline (STT + LLM + TTS)
+│   │       └── models/
+│   │           └── tiny.en.pt   # Bundled Whisper model
+│   └── utils/
+│       ├── settings.py
+│       ├── image_history.py
+│       ├── sound_player.py
+│       ├── speach.py            # System TTS fallback
+│       └── mock_client.py
 ```
 
-### Mock Client for Testing
-If you need to test Eyra without incurring API costs, set `USE_MOCK_CLIENT=true` in your `.env` file. This will simulate API responses for development purposes.
+---
 
-### Configuration Options
-Image paths, model parameters, and other settings can be customized via environment variables, making it easy to tailor Eyra to your specific use case.
+## Troubleshooting
 
-## Future Plans
-The next version of Eyra will focus on integrating with **Ollama's local offline AI models**. This enhancement will allow users to choose between using the OpenAI API or a local AI model, offering greater flexibility and cost savings.
+<details><summary><strong>Ollama not responding</strong></summary>
 
-By leveraging offline models, Eyra aims to provide a completely free, privacy-focused experience that does not rely on external cloud services. Stay tuned for this exciting update, which will make Eyra even more versatile and accessible for all users.
+Verify the service is running:
+
+```bash
+ollama list
+curl http://localhost:11434/api/tags
+```
+
+Check `OLLAMA_HOST` and `OLLAMA_PORT` in `.env` match your setup.
+
+</details>
+
+<details><summary><strong>Voice mode not detecting keypresses</strong></summary>
+
+macOS requires Accessibility permissions for the `keyboard` library. Go to System Settings → Privacy & Security → Accessibility and add your terminal.
+
+</details>
+
+<details><summary><strong>Coqui TTS fails to initialize</strong></summary>
+
+Set `VOICE_TTS_FALLBACK=true` in `.env` to fall back to `pyttsx3`. Coqui requires a model download on first run; ensure network access during setup.
+
+</details>
+
+<details><summary><strong>Webcam not opening</strong></summary>
+
+Eyra uses OpenCV with the AVFoundation backend. Grant camera access to your terminal in System Settings → Privacy & Security → Camera.
+
+</details>
+
+---
+
+## Development
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+cp .env.example .env
+USE_MOCK_CLIENT=true python src/main.py
+```
+
+**Adding a new AI backend:** subclass `BaseAIClient` in `src/clients/base_client.py`, implement `generate` and `generate_with_image`, then register it in `message_handler.py`.
+
+**Adding a new mode:** subclass `BaseMode` in `src/modes/base_mode.py`, implement `run`, then add a menu entry in `src/main.py`.
+
+---
 
 ## License
 
-[The MIT License (MIT)](https://raw.githubusercontent.com/gabrimatic/eyra/refs/heads/master/LICENCE)
+MIT. See [LICENCE](LICENCE).
 
-## Developer
-By [Hossein Yousefpour](https://gabrimatic.info "Hossein Yousefpour")
+---
 
-&copy; All rights reserved.
+Created by [Soroush Yousefpour](https://gabrimatic.info)
 
-## Donate
-<a href="https://www.buymeacoffee.com/gabrimatic" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Book" style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/gabrimatic)

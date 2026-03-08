@@ -1,1 +1,9 @@
 .env
+test.jpg
+*.pyc
+.vscode/*
+.venv/*
+node_modules/*
+models_cache/*
+*.wav
+.DS_Store
