@@ -74,11 +74,9 @@ Interrupt with `Ctrl+C`.
 
 <details><summary><strong>Setup</strong></summary>
 
-The bundled Whisper model is at `src/modes/voice/models/tiny.en.pt`.
+Voice mode requires [local-whisper](https://github.com/gabrimatic/local-whisper) installed and running.
 
-Coqui TTS installs via `requirements.txt`. If it fails to initialize, the pipeline falls back to `pyttsx3`.
-
-Spacebar hold/release is handled via `keyboard` library. Run with sufficient permissions on macOS (Accessibility access may be required).
+Once set up, `wh` handles recording, transcription, and speech. No additional configuration needed.
 
 </details>
 
