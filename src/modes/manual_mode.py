@@ -302,7 +302,6 @@ Available Commands
 - #image: Capture and include a new screenshot
 - #selfie: Capture and include webcam image
 - /history: Show chat history
-- Ctrl+Shift+L: Switch to live mode
 - /quit: Exit
         """
         print(help_text)

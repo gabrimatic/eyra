@@ -45,15 +45,17 @@ except Exception as e:
 ###############################################################################
 # SPACY SETUP
 ###############################################################################
-try:
-    # Use a larger model for better doc similarity if possible:
-    nlp = spacy.load("en_core_web_trf")
-    logger.info("Loaded spaCy model: en_core_web_trf.")
-except OSError:
-    logger.warning(
-        "Falling back to en_core_web_md, doc similarity may be less accurate."
+for _model in ("en_core_web_trf", "en_core_web_md", "en_core_web_sm"):
+    try:
+        nlp = spacy.load(_model)
+        logger.info(f"Loaded spaCy model: {_model}.")
+        break
+    except OSError:
+        continue
+else:
+    raise RuntimeError(
+        "No spaCy model found. Run: uv run python -m spacy download en_core_web_md"
     )
-    nlp = spacy.load("en_core_web_md")
 
 ###############################################################################
 # CREATE REFERENCE DOCS FOR SEMANTIC COMPARISON

@@ -5,10 +5,10 @@
 Privacy is a core constraint, not a feature toggle.
 
 - **All processing is local.** Screenshots, webcam frames, and voice input are handled entirely on your Mac.
-- **No network calls** except to localhost (Ollama on port 11434).
-- **No telemetry, no analytics, no cloud.** Zero data leaves your machine.
+- **No network calls** except to the configured AI backend. By default this is localhost.
+- **No telemetry, no analytics, no cloud.** No tracking data ever leaves your machine.
 - **Screenshots and webcam frames** exist only in memory and are never written to disk.
-- **No outbound connections.** The app makes no internet requests.
+- **First-run model download.** On first launch, the CLIP model (~340 MB) is downloaded to `~/.cache/clip/` by the `openai-clip` package. After that, no outbound connections occur except to the configured AI backend.
 
 ## Permissions
 
@@ -17,7 +17,7 @@ Privacy is a core constraint, not a feature toggle.
 | **Screen capture** | Screenshot mode and Live mode | On demand, not continuous |
 | **Camera** | `#selfie` keyword in Manual mode | On demand, single frame |
 | **Microphone** | Voice mode recording | Delegated to local-whisper (`wh`) |
-| **Network (localhost)** | Ollama API | Loopback only, no external exposure |
+| **Network** | AI backend API | Loopback by default; follows `API_BASE_URL` |
 
 All permissions are requested on demand. Nothing runs in the background between interactions.
 
@@ -25,7 +25,7 @@ All permissions are requested on demand. Nothing runs in the background between 
 
 | Boundary | Trust Level | Notes |
 |----------|-------------|-------|
-| Ollama at localhost:11434 | Trusted | Loopback only, no external exposure |
+| AI backend at `API_BASE_URL` | User-controlled | Loopback by default; remote if configured |
 | wh (local-whisper) | Trusted | Subprocess, runs on localhost, no network |
 | `.env` file | User-controlled | Must not be committed |
 | User prompts | Untrusted input | Passed to AI backends, no shell execution |
@@ -51,7 +51,7 @@ Expect acknowledgment within 48 hours.
 
 These are not considered vulnerabilities:
 
-- Issues in third-party dependencies (Ollama, local-whisper, spaCy, CLIP)
+- Issues in third-party dependencies (AI providers, local-whisper, spaCy, CLIP)
 - Issues requiring physical access to the machine
 - Denial-of-service via resource exhaustion on private machines
 
