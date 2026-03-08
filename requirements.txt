@@ -11,7 +11,7 @@ opencv-python>=4.9.0
 # NLP and ML
 spacy>=3.8.3
 sentence-transformers>=3.3.1
-numpy>=1.22,<2.1
+numpy>=1.22,<2.5
 openai-clip>=1.0.1
 
 # Voice mode

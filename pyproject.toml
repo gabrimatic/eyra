@@ -11,7 +11,7 @@ dependencies = [
     "llvmlite>=0.43.0",
     "mss>=10.0.0",
     "numba>=0.60.0",
-    "numpy>=1.22,<2.1",
+    "numpy>=1.22,<2.5",
     "openai-whisper",
     "CLIP",
     "opencv-python>=4.10.0.84",
