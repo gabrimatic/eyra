@@ -5,16 +5,13 @@ import logging
 import os
 import warnings
 
-import spacy
-
 from utils.settings import Settings
 from modes.manual_mode import ManualMode
 from modes.live_mode import LiveMode
 from modes.voice.voice_mode import (
     VoiceMode,
-)  # <-- import your new async voice mode here
+)
 from chat.complexity_scorer import ComplexityScorer
-from clients.ollama_client import OllamaClient
 from chat.message_handler import close_all_clients
 
 warnings.filterwarnings(

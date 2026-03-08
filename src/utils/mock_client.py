@@ -3,7 +3,7 @@ Mock AI client for testing purposes.
 Simulates the behavior of the AI API for development and testing.
 """
 
-from typing import AsyncGenerator, List, Dict, Optional
+from typing import List, Dict, Optional
 from clients.base_client import BaseAIClient
 
 

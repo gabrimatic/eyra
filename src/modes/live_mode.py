@@ -6,7 +6,6 @@ Live mode implementation for continuous screen analysis with voice feedback.
 
 import asyncio
 import logging
-import platform
 from datetime import datetime
 from typing import Optional, Any
 
