@@ -18,6 +18,8 @@ cp .env.example .env
 
 Set `USE_MOCK_CLIENT=true` in `.env` to run without any AI backend during development.
 
+Voice mode requires local-whisper running locally. Check with `wh status`.
+
 ---
 
 ## Architecture
@@ -41,13 +43,10 @@ eyra/
 │   │   ├── live_mode.py
 │   │   └── voice/
 │   │       ├── voice_mode.py    # Voice pipeline (STT + LLM + TTS)
-│   │       └── models/
-│   │           └── tiny.en.pt   # Bundled Whisper model
 │   └── utils/
 │       ├── settings.py
 │       ├── image_history.py
 │       ├── sound_player.py
-│       ├── speach.py            # System TTS fallback
 │       └── mock_client.py
 ```
 
@@ -84,7 +83,7 @@ There is no automated test suite at this time. Manual verification flow:
 2. Manual mode: send a text prompt, confirm streamed response
 3. Manual mode: send `test #image`, confirm screenshot is captured and sent
 4. Live mode: run for 5 seconds, confirm loop output, interrupt with `Ctrl+C`
-5. Voice mode: hold Space, speak, release, confirm transcription and TTS playback
+5. Voice mode: run mode 3, speak when prompted, confirm response is spoken back via local-whisper
 
 For new clients, test with both text and image inputs at each complexity level.
 

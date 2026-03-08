@@ -6,12 +6,12 @@ Live mode implementation for continuous screen analysis with voice feedback.
 
 import asyncio
 import logging
+import shutil
 from datetime import datetime
 from typing import Optional, Any
 
 from .base_mode import BaseMode
 from chat.message_handler import process_task_stream
-from .voice.voice_mode import AudioUtils  # Import AudioUtils from voice_mode
 
 
 class LiveMode(BaseMode):
@@ -45,15 +45,9 @@ class LiveMode(BaseMode):
         self.logger.addHandler(handler)
         self.logger.setLevel(logging.INFO)
 
-        # Initialize AudioUtils
-        self.audio_utils = AudioUtils(
-            whisper_model_path=self.settings.VOICE_MODEL_PATH,
-            device=None,
-            tts_model_name="tts_models/en/vctk/vits",
-        )
-        
-        if not self.audio_utils.tts_available:
-            self.logger.warning("TTS not available. Voice feedback will be disabled.")
+        self.wh_available = shutil.which("wh") is not None
+        if not self.wh_available:
+            self.logger.warning("local-whisper (wh) not found. Voice feedback will be disabled.")
             self.muted = True
 
     async def run(self) -> None:
@@ -131,8 +125,12 @@ Live Mode Started
                 self.messages.append({"role": "assistant", "content": full_response})
                 if not self.muted and full_response.strip():
                     self.logger.info("Playing voice feedback...")
-                    wav_data = await self.audio_utils.generate_tts_wav(full_response)
-                    await self.audio_utils.play_wav_data(wav_data)
+                    proc = await asyncio.create_subprocess_exec(
+                        "wh", "whisper", full_response,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await proc.wait()
                     self.logger.info("Voice feedback completed.")
 
                 # Sleep before next capture
@@ -163,8 +161,8 @@ Live Mode Started
         Ask user if they want voice feedback muted.
         Skip if TTS is not available.
         """
-        if not self.audio_utils.tts_available:
-            self.logger.info("TTS not available. Voice feedback is disabled.")
+        if not self.wh_available:
+            self.logger.info("local-whisper not found. Voice feedback is disabled.")
             self.muted = True
             return
 

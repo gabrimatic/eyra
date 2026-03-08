@@ -15,8 +15,7 @@
 |-----------|-----|-------|
 | Screen capture | Screenshot mode and Live mode | On demand, not continuous |
 | Camera | `#selfie` keyword in Manual mode | On demand, single frame |
-| Microphone | Voice mode recording | Only while Space is held |
-| Accessibility (keyboard events) | Space bar detection in Voice mode | Voice mode only |
+| Microphone | Voice mode recording | Delegated to local-whisper (`wh`) for voice mode |
 | Network (localhost) | Ollama API | Always, loopback only |
 | Network (external) | Google Gemini API | Only when complexity score routes to cloud |
 
@@ -27,8 +26,7 @@
 | Boundary | Trust Level | Notes |
 |----------|------------|-------|
 | Ollama at localhost:11434 | Trusted | Loopback only, no external exposure |
-| Whisper STT | Fully trusted | In-process, no network |
-| Coqui TTS | Fully trusted | In-process, no network |
+| wh (local-whisper) | Trusted | Subprocess, runs on localhost, no network |
 | Google Gemini | Partially trusted | Cloud service, only invoked when needed |
 | `.env` file | User-controlled | Contains API key, must not be committed |
 | User prompts | Untrusted input | Passed to AI backends, no shell execution |
@@ -48,7 +46,7 @@ Do not open a public issue for security vulnerabilities.
 
 ## Out of Scope
 
-- Issues in third-party dependencies (Ollama, Whisper, Coqui, spaCy, CLIP)
+- Issues in third-party dependencies (Ollama, local-whisper, spaCy, CLIP)
 - Google Gemini service-side behavior or data handling
 - Issues requiring physical access to the machine
 - Denial-of-service via resource exhaustion on private machines
