@@ -180,10 +180,10 @@ async def process_task(
             task_type,
             image_base64=base64_image,
         )
-        print(f"[Complexity] Determined complexity: {cresponse.classification}")
-        print(f"[Complexity] Confidence score: {cresponse.confidence:.2f}")
+        print(f"[Complexity] Determined complexity: {response.classification}")
+        print(f"[Complexity] Confidence score: {response.confidence:.2f}")
 
-        model_name = select_model(cresponse.classification, task_type, settings)
+        model_name = select_model(response.classification, task_type, settings)
         print(f"[Model] Selected model: {model_name}")
 
         client = get_ai_client(model_name, settings)
