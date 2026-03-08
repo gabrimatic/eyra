@@ -17,12 +17,11 @@ from chat.capture import (
     capture_selfie_and_encode,
 )
 
-from chat.complexity_scorer import ComplexityScorer, ComplexityLevel, ComplexityResponse
+from chat.complexity_scorer import ComplexityScorer, ComplexityLevel
 from clients.base_client import BaseAIClient
 from clients.ollama_client import OllamaClient
 from clients.google_client import GoogleAIClient
 from utils.mock_client import MockAIClient
-from utils.image_history import manage_message_history
 from utils.settings import Settings
 
 # Single global cache of AI clients keyed by model name

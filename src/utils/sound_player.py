@@ -37,6 +37,6 @@ async def play_sound(sound_type: str = "camera"):
         )
         await process.wait()
 
-    except Exception as e:
+    except Exception:
         # Silently handle any sound playback errors
         pass
