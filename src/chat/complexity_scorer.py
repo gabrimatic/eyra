@@ -495,7 +495,7 @@ class ComplexityScorer:
             image_input = preprocess(pil_image).unsqueeze(0).to(device)
             text_input = clip.tokenize([text_excerpt or "a photograph"]).to(device)
 
-            async with torch.no_grad():
+            with torch.no_grad():
                 image_features = model.encode_image(image_input)
                 text_features = model.encode_text(text_input)
 

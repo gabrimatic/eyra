@@ -1,33 +1,22 @@
-# # #!/bin/bash
+#!/bin/bash
+set -e
 
-# # # Create a virtual environment
-# # python3.11 -m venv .venv
+echo "Setting up Eyra..."
 
-# # # Activate the virtual environment
-# # source .venv/bin/activate
+if ! command -v python3.11 &>/dev/null && ! python3 -c "import sys; assert sys.version_info >= (3,11)" 2>/dev/null; then
+    echo "Python 3.11 or higher is required."
+    exit 1
+fi
 
-# # # Upgrade pip
-# # pip3 install --upgrade pip
+if ! command -v uv &>/dev/null; then
+    echo "uv is required. Install it: curl -LsSf https://astral.sh/uv/install.sh | sh"
+    exit 1
+fi
 
-# # # Install the required packages
-# # pip3 install -r requirements.txt
+uv sync
+uv run python -m spacy download en_core_web_sm
 
-# # # Upgrade the installed packages
-# # pip3 install --upgrade -r requirements.txt
-
-# # echo "Setup complete. Virtual environment created and packages installed."
-
-# # python3 src/main.py
-
-
-# uv init
-
-# uv add --requirements requirements.txt       
-
-# uv lock --upgrade && uv sync
-
-# uv add pip
-
-# uv run python -m spacy download en_core_web_sm
-
-# wget -O src/modes/voice/models/tiny.en.pt https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt
+echo ""
+echo "Setup complete."
+echo "Copy .env.example to .env and fill in your values."
+echo "Run: uv run python src/main.py"
