@@ -29,8 +29,7 @@ eyra/
 │   │   └── words.py             # Complexity indicator vocabulary
 │   ├── clients/
 │   │   ├── base_client.py       # BaseAIClient abstract class
-│   │   ├── ollama_client.py     # Ollama async HTTP client
-│   │   └── google_client.py     # Google Gemini client
+│   │   └── ollama_client.py     # Ollama async HTTP client
 │   ├── modes/
 │   │   ├── base_mode.py         # BaseMode abstract class
 │   │   ├── manual_mode.py
@@ -93,7 +92,7 @@ Include:
 - Ollama version (`ollama --version`) if relevant
 - Full terminal output including traceback
 - Steps to reproduce
-- `.env` contents with `GOOGLE_API_KEY` redacted
+- `.env` contents (no secrets)
 
 ## Vulnerability Reporting
 

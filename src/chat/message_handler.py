@@ -20,7 +20,6 @@ from chat.capture import (
 from chat.complexity_scorer import ComplexityScorer, ComplexityLevel
 from clients.base_client import BaseAIClient
 from clients.ollama_client import OllamaClient
-from clients.google_client import GoogleAIClient
 from utils.mock_client import MockAIClient
 from utils.settings import Settings
 
@@ -38,8 +37,6 @@ def get_ai_client(model_name: str, settings: Settings) -> BaseAIClient:
 
     if settings.USE_MOCK_CLIENT:
         client = MockAIClient()
-    elif model_name.startswith("gemini"):
-        client = GoogleAIClient(settings, model_name=model_name)
     else:
         client = OllamaClient(settings, model_name=model_name)
 

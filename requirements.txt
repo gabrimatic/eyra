@@ -1,21 +1,19 @@
 # Core
-python-dotenv>=1.0.1
+python-dotenv>=1.1.0
 pillow>=11.0.0
-aiohttp>=3.11.11
-google-generativeai>=0.8.3
+aiohttp>=3.13.0
 
 # Image capture
-mss>=10.0.0
-opencv-python>=4.10.0.84
+mss>=10.1.0
+opencv-python>=4.11.0
 
 # NLP and ML
-spacy>=3.8.3
-sentence-transformers>=3.3.1
-numpy>=1.22,<2.5
+spacy>=3.8.4
+sentence-transformers>=3.4.0
+numpy>=2.2.0
 openai-clip>=1.0.1
 
 # Complexity routing
-torch>=2.5.1
-torchvision>=0.20.1
-torchaudio>=2.5.1
-
+torch>=2.6.0
+torchvision>=0.21.0
+torchaudio>=2.6.0
