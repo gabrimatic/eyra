@@ -1,6 +1,6 @@
 # Eyra
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENCE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)]()
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)]()
 
@@ -227,7 +227,7 @@ USE_MOCK_CLIENT=true python src/main.py
 
 ## License
 
-MIT. See [LICENCE](LICENCE).
+MIT. See [LICENSE](LICENSE).
 
 ---
 

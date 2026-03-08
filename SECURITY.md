@@ -1,13 +1,13 @@
-# Security
+# Security Policy
 
 ## Privacy by Design
+
+Privacy is a core constraint, not a feature toggle.
 
 - All default processing runs locally on the user's machine
 - No data is sent over the network unless complexity routing selects Google Gemini
 - No telemetry, analytics, or usage reporting of any kind
 - Screenshots and webcam frames exist only in memory and are never written to disk
-
----
 
 ## Permissions
 
@@ -19,7 +19,7 @@
 | Network (localhost) | Ollama API | Always, loopback only |
 | Network (external) | Google Gemini API | Only when complexity score routes to cloud |
 
----
+All permissions are requested on demand. Nothing runs in the background between interactions.
 
 ## Trust Boundaries
 
@@ -31,31 +31,34 @@
 | `.env` file | User-controlled | Contains API key, must not be committed |
 | User prompts | Untrusted input | Passed to AI backends, no shell execution |
 
----
+User input is passed to AI backends as message content only. No shell commands are constructed from user input.
 
 ## Vulnerability Reporting
 
-Do not open a public issue for security vulnerabilities.
+Report vulnerabilities responsibly:
 
-1. Go to [https://github.com/gabrimatic/eyra/security/advisories/new](https://github.com/gabrimatic/eyra/security/advisories/new)
-2. Describe the vulnerability, affected versions, and reproduction steps
-3. Include potential impact and, if known, a suggested fix
-4. Allow up to 7 days for an initial response before any public disclosure
+1. **Do not open a public issue.** Public disclosure before a fix is available puts users at risk.
+2. Use [GitHub's private vulnerability reporting](https://github.com/gabrimatic/eyra/security/advisories/new) to submit.
+3. Include:
+   - Steps to reproduce
+   - Demonstrated impact
+   - Suggested fix (if any)
 
----
+Reports without reproduction steps or demonstrated impact are deprioritized.
+
+Expect acknowledgment within 48 hours.
 
 ## Out of Scope
+
+These are not considered vulnerabilities:
 
 - Issues in third-party dependencies (Ollama, local-whisper, spaCy, CLIP)
 - Google Gemini service-side behavior or data handling
 - Issues requiring physical access to the machine
 - Denial-of-service via resource exhaustion on private machines
 
----
-
 ## Supported Versions
 
 | Version | Supported |
-|---------|----------|
-| 2.x | Yes |
-| 1.x | No |
+|---------|-----------|
+| 1.x     | Yes       |
