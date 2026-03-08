@@ -1,21 +1,40 @@
-# Core dependencies
-openai           # OpenAI API client for interacting with OpenAI services
-pillow           # Library for image processing tasks
-python-dotenv    # Tool for managing environment variables from .env files
-pynput           # Library for monitoring and controlling keyboard input
-asyncio          # Support for asynchronous I/O operations
+# # Core dependencies
+# python-dotenv>=1.0.1    # Environment variable management
+# pillow>=11.0.0         # Image processing library
+# pynput>=1.7.7         # Keyboard and mouse control
+# asyncio>=3.4.3        # Async I/O support
+# aiohttp>=3.11.11        # Async HTTP client for Ollama API
+# prompt_toolkit>=3.0.48  # Interactive CLI support
+# google-generativeai>=0.8.3  # Google AI Gemini model support
 
-# Image capture dependencies
-imagesnap; sys_platform == 'darwin'     # Utility for capturing images from the webcam on macOS
+# # Image and Screen Capture
+# pyautogui>=0.9.54     # Screen capture and automation
+# python-magic>=0.4.27  # File type detection
 
-# Optional but recommended
-pyaudio          # Library for audio playback and recording
+# # NLP and ML
+# spacy>=3.8.3          # NLP library
+# sentence-transformers>=3.3.1  # Text embeddings
+# numpy>=1.22,<2.1         # Numerical computations
 
-# Required for webcam capture
-brew install imagesnap                 # Install imagesnap for macOS
+# # Data Handling
+# pydantic>=2.10.4       # Data validation
+# typing-extensions>=4.12.2  # Type hinting
+# requests>=2.32.3      # HTTP client
+# python-multipart>=0.0.20  # Form data handling
+# packaging>=24.2       # Version management
 
-# Required for sound playback
-brew install portaudio                 # Install portaudio for audio playback
+# # Voice Mode Dependencies
+# torch>=2.5.1          # PyTorch for Whisper model
+# torchvision>=0.20.1   # PyTorch vision utilities
+# torchaudio>=2.5.1     # PyTorch audio utilities
+# pyttsx3>=2.98         # Text-to-speech engine
+# openai-whisper @ git+https://github.com/openai/whisper.git  # Whisper model
+# PyAudio>=0.2.14       # Audio input/output
+# numba>=0.60.0         # JIT compiler
+# mss>=10.0.0
+# # System-specific dependencies (commented, install manually)
+# # macOS: brew install imagesnap portaudio
 
-# Required for webcam capture and for sound playback
-brew install imagesnap portaudio       # Install both imagesnap and portaudio
+# # source .venv/bin/activate
+# # pip3 install -r requirements.txt
+# # pip3 install --upgrade -r requirements.txt

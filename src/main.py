@@ -1,85 +1,135 @@
-"""
-Main entry point for the Artemis application.
-This module initializes the application, handles mode selection,
-and manages the main execution flow.
-"""
+# main.py
 
 import asyncio
+import logging
 import os
-import sys
-from openai import OpenAI
-from config.settings import Settings
-from config.mock_client import MockOpenAIClient
+import warnings
+
+import spacy
+
+from utils.settings import Settings
 from modes.manual_mode import ManualMode
 from modes.live_mode import LiveMode
+from modes.voice.voice_mode import (
+    VoiceMode,
+)  # <-- import your new async voice mode here
+from chat.complexity_scorer import ComplexityScorer
+from clients.ollama_client import OllamaClient
+from chat.message_handler import close_all_clients
+
+warnings.filterwarnings(
+    "ignore",
+    message="FutureWarning: You are using `torch.load` with `weights_only=False`",
+)
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
-def check_accessibility_permissions():
-    return True
-
-
-def show_permission_instructions():
-    """Display instructions for enabling accessibility permissions."""
-    print("\nAccessibility permissions required!")
-    print("Please follow these steps:")
-    print("1. Open System Preferences")
-    print("2. Go to Security & Privacy > Privacy > Accessibility")
-    print("3. Click the lock icon to make changes")
-    print("4. Add and enable Terminal (or your Python IDE)")
-    print("\nAfter granting permissions, restart the application.")
-
-
-async def simulate_typing(text: str):
-    """
-    Simulate a typing animation effect.
-
-    Args:
-        text (str): Text to be displayed during animation (currently unused)
-    """
-    for _ in range(3):
-        await asyncio.sleep(0.1)
-        print(".", end="", flush=True)
-    print("\n")
-
-
-async def main():
+async def main() -> None:
     """
     Main application entry point.
 
-    Handles:
-    - Loading configuration
-    - Client initialization (real or mock)
-    - Mode selection
-    - Application execution
+    1. Load spaCy model once (async).
+    2. Load settings from environment or config file.
+    3. Initialize a default OllamaClient for complexity scoring only.
+    4. Provide a menu for the user to pick Manual Mode, Live Mode, or Voice Mode.
+    5. Run until the user chooses to exit.
+    6. Close all clients gracefully.
     """
-    # Check permissions first
-    if not check_accessibility_permissions():
-        show_permission_instructions()
+    # Configure logging globally
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s] %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    logger = logging.getLogger("Main")
+
+    logger.info("Starting application...")
+
+    # Step 2: Load settings
+    try:
+        settings = Settings.load_from_env()
+        logger.info("Settings loaded successfully.")
+    except Exception as e:
+        logger.error(f"Failed to load settings: {e}")
         return
 
-    settings = Settings.load_from_env()
-    use_mock = os.getenv("USE_MOCK_CLIENT", "false").lower() == "true"
-    client = MockOpenAIClient() if use_mock else OpenAI(api_key=settings.API_KEY)
+    try:
+        complexity_scorer = ComplexityScorer()
+        logger.info("ComplexityScorer initialized successfully.")
+    except Exception as e:
+        logger.error(f"Failed to initialize ComplexityScorer: {e}")
+        return
 
-    print("\nSelect mode:")
-    print("1. Manual Mode (Interactive chat)")
-    print("2. Live Mode (Automatic screenshot analysis)")
+    # Step 4: Provide a menu
+    menu_text = """
+Select Mode
+1. Manual Mode (Interactive chat)
+2. Live Mode (Automatic screenshot analysis)
+3. Voice Mode (Voice interaction)
+    """
+    print(menu_text)
 
-    messages = []  # Initialize shared message history
-    while True:
-        mode_choice = input("\nEnter mode number (1 or 2): ").strip()
-        if mode_choice in ["1", "2"]:
-            mode = (
-                ManualMode(client, settings, messages)
-                if mode_choice == "1"
-                else LiveMode(client, settings, messages)
-            )
-            await mode.run()
-            if not mode.switch_requested:
+    # We keep a single `messages` list across mode switches
+    messages = []
+    try:
+        while True:
+            mode_choice = input("Enter mode number (1, 2, or 3): ").strip()
+            if mode_choice not in ["1", "2", "3"]:
+                logger.warning("Invalid choice. Please enter 1, 2, or 3.")
+                continue
+
+            if mode_choice == "1":
+                selected_mode = "Manual"
+            elif mode_choice == "2":
+                selected_mode = "Live"
+            else:
+                selected_mode = "Voice"  # We'll call this 'Voice'
+
+            logger.info(f"Starting {selected_mode} Mode...")
+
+            # Create the mode instance
+            if selected_mode == "Manual":
+                mode_instance = ManualMode(
+                    settings=settings,
+                    messages=messages,
+                    complexity_scorer=complexity_scorer,
+                )
+            elif selected_mode == "Live":
+                mode_instance = LiveMode(
+                    settings=settings,
+                    messages=messages,
+                    complexity_scorer=complexity_scorer,
+                )
+            else:
+                # Use your new async VoiceMode with sentence-based partial TTS
+                mode_instance = VoiceMode(
+                    settings=settings,
+                    messages=messages,
+                    complexity_scorer=complexity_scorer,
+                )
+
+            try:
+                # 5) Run the selected mode *asynchronously*—no nested loop calls
+                await mode_instance.run()
+
+                # If the user didn't request a switch, we break the menu loop
+                if not getattr(mode_instance, "switch_requested", False):
+                    logger.info(f"{selected_mode} Mode completed without switching.")
+                    break
+            except Exception as e:
+                logger.error(f"Error while running {selected_mode} Mode: {e}")
                 break
-        else:
-            print("Invalid choice. Please enter 1 or 2.")
+
+    finally:
+        await close_all_clients()
+        logger.info("Application closed successfully.")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.getLogger("Main").info("Application interrupted by user. Exiting...")
+    except Exception as e:
+        logging.getLogger("Main").error(f"Unhandled exception: {e}")

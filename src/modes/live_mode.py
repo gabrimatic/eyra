@@ -1,125 +1,190 @@
+# live_mode.py
+
 """
-Live mode implementation for continuous screen analysis.
-Provides automated screenshot capture and analysis with voice feedback.
+Live mode implementation for continuous screen analysis with voice feedback.
 """
 
 import asyncio
+import logging
+import platform
 from datetime import datetime
-from pynput import keyboard
+from typing import Optional, Any
+
 from .base_mode import BaseMode
-from chat.message_handler import process_message_with_image
-from utils.text_to_speech import speak_text
+from chat.message_handler import process_task_stream
+from .voice.voice_mode import AudioUtils  # Import AudioUtils from voice_mode
 
 
 class LiveMode(BaseMode):
     """
-    Live mode implementation for continuous screen analysis.
-    Captures and analyzes screenshots at regular intervals.
+    Continuously captures screenshots at intervals, analyzing them via the complexity_scorer.
+    Optionally provides TTS feedback.
     """
 
-    def __init__(self, client, settings, messages=None):
-        super().__init__(client, settings)
+    def __init__(
+        self,
+        settings: Any,
+        messages: Optional[list] = None,
+        complexity_scorer: Optional[Any] = None,
+    ):
+        super().__init__(settings)
         self.messages = messages if messages is not None else []
+        self.complexity_scorer = complexity_scorer
         self.switch_requested = False
-        self.keyboard_listener = None
-        self.current_keys = set()
+        self.description_prompt: Optional[str] = None
+        self.muted: bool = False
+        self.error_count = 0
+        self.max_consecutive_errors = 3
         self.running = True
 
-    async def setup_keyboard_listener(self):
-        def on_press(key):
-            try:
-                self.current_keys.add(key)
-                if (
-                    keyboard.Key.shift in self.current_keys
-                    and keyboard.Key.ctrl in self.current_keys
-                    and hasattr(key, "char")
-                    and key.char == "m"
-                ):
-                    self.switch_requested = True
-                    self.running = False
-                    print("\nSwitching to manual mode...")
-                    return False
-            except AttributeError:
-                pass
-
-        def on_release(key):
-            try:
-                self.current_keys.discard(key)
-            except KeyError:
-                pass
-
-        self.keyboard_listener = keyboard.Listener(
-            on_press=on_press, on_release=on_release
+        self.logger = logging.getLogger(self.__class__.__name__)
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            "[%(asctime)s] %(levelname)s - %(message)s", "%Y-%m-%d %H:%M:%S"
         )
-        self.keyboard_listener.start()
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+        self.logger.setLevel(logging.INFO)
 
-    async def main_loop(self):
+        # Initialize AudioUtils
+        self.audio_utils = AudioUtils(
+            whisper_model_path=self.settings.VOICE_MODEL_PATH,
+            device=None,
+            tts_model_name="tts_models/en/vctk/vits",
+        )
+        
+        if not self.audio_utils.tts_available:
+            self.logger.warning("TTS not available. Voice feedback will be disabled.")
+            self.muted = True
+
+    async def run(self) -> None:
+        """
+        Main entry for Live Mode:
+          1) Ask for description prompt
+          2) Ask if user wants TTS muted
+          3) Start main loop, capturing screenshots at intervals
+        """
+        self.logger.info("Running Live Mode...")
+        await self._prompt_for_description()
+        await self._prompt_for_mute()
+
+        while True:
+            self.running = True
+            self.switch_requested = False
+
+            # Show some instructions
+            help_text = """
+Live Mode Started
+- Press Ctrl+Shift+M to switch to manual mode
+- Press Ctrl+C to exit
+            """
+            print(help_text)
+
+            await self._main_loop()
+
+            if self.switch_requested:
+                from .manual_mode import ManualMode
+
+                manual_mode = ManualMode(
+                    self.settings,
+                    self.messages,
+                    self.complexity_scorer,
+                )
+                await manual_mode.run()
+
+                if manual_mode.switch_requested:
+                    # If manual mode wants to come back to Live mode
+                    self.logger.info("Restarting Live Mode after manual mode switch.")
+                    continue
+                else:
+                    # Done
+                    self.logger.info("Exiting Live Mode after manual mode.")
+                    break
+            else:
+                self.logger.info("Exiting Live Mode by user choice.")
+                break
+
+    async def _main_loop(self) -> None:
+        """
+        Continuously capture screenshots, analyze them, speak results if not muted.
+        """
         while self.running:
             try:
                 if self.switch_requested:
+                    self.logger.info("Switch requested. Exiting main loop.")
                     break
 
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                print(f"\n[{timestamp}] Capturing screenshot...")
+                self.logger.info(f"{timestamp} - Capturing screenshot...")
 
-                self.messages.append(
-                    {
-                        "role": "user",
-                        "content": "Provide a general description of the photo in no more than 20 words. Keep it concise.",
-                    }
-                )
+                print("\nEyra:", end="", flush=True)
+                full_response = ""
+                async for chunk in process_task_stream(
+                    task_type="image",
+                    complexity_scorer=self.complexity_scorer,
+                    settings=self.settings,
+                    messages=[{"role": "user", "content": self.description_prompt}],
+                ):
+                    print(chunk, end="", flush=True)
+                    full_response += chunk
+                print()
 
-                response = await process_message_with_image(
-                    self.client,
-                    self.messages,
-                    self.settings.IMAGE_PATH,
-                    use_selfie=False,
-                )
+                self.messages.append({"role": "assistant", "content": full_response})
+                if not self.muted and full_response.strip():
+                    self.logger.info("Playing voice feedback...")
+                    wav_data = await self.audio_utils.generate_tts_wav(full_response)
+                    await self.audio_utils.play_wav_data(wav_data)
+                    self.logger.info("Voice feedback completed.")
 
-                self.messages.append({"role": "assistant", "content": response.content})
-                print(f"[{timestamp}] Eyra: {response.content}")
-
-                print("[Speaking...]")
-                await speak_text(response.content)
-                print("[Speech completed]")
-                await asyncio.sleep(
-                    0.4
-                )  # Small delay to prevent rapid screenshot capture
+                # Sleep before next capture
+                await asyncio.sleep(self.settings.SCREENSHOT_INTERVAL)
 
             except KeyboardInterrupt:
-                print("\nExiting live mode...")
+                self.logger.info("Keyboard interrupt. Stopping live mode.")
+                self.running = False
                 break
+            except Exception as e:
+                if not await self._handle_error(e):
+                    break
 
-    async def run(self):
-        while True:
-            # Reset state at the beginning of each run
-            self.running = True
-            self.switch_requested = False
-            self.current_keys = set()
+    async def _prompt_for_description(self) -> None:
+        """
+        Prompt user for a description or use a default if empty.
+        """
+        self.logger.info("Enter the description prompt for analyzing screenshots:")
+        dp = await asyncio.to_thread(input, "> ")
+        dp = dp.strip()
+        if not dp:
+            dp = "Provide a general description of the photo in no more than 20 words."
+            self.logger.info("No description provided. Using default prompt.")
+        self.description_prompt = dp
 
-            print(
-                "Live mode started. Press Ctrl+Shift+M to switch to manual mode, or Ctrl+C to exit."
-            )
+    async def _prompt_for_mute(self) -> None:
+        """
+        Ask user if they want voice feedback muted.
+        Skip if TTS is not available.
+        """
+        if not self.audio_utils.tts_available:
+            self.logger.info("TTS not available. Voice feedback is disabled.")
+            self.muted = True
+            return
 
-            await self.setup_keyboard_listener()
+        self.logger.info("Do you want to mute voice feedback? (y/n):")
+        ans = await asyncio.to_thread(input, "> ")
+        self.muted = ans.lower().startswith("y")
+        self.logger.info(f"Muted TTS: {self.muted}")
 
-            try:
-                await self.main_loop()
+    async def _handle_error(self, error: Exception) -> bool:
+        """
+        If repeated errors exceed max_consecutive_errors, exit.
+        Otherwise, attempt to continue.
+        """
+        self.error_count += 1
+        self.logger.error(f"Live mode error: {error}")
+        if self.error_count >= self.max_consecutive_errors:
+            self.logger.error("Too many consecutive errors. Stopping live mode.")
+            return False
 
-                if self.switch_requested:
-                    from .manual_mode import ManualMode
-
-                    manual_mode = ManualMode(self.client, self.settings, self.messages)
-                    await manual_mode.run()
-
-                    # Check if we need to restart live mode
-                    if manual_mode.switch_requested:
-                        continue  # Restart live mode
-                    else:
-                        break  # Exit live mode
-                else:
-                    break  # Exit live mode if not switching
-            finally:
-                if self.keyboard_listener:
-                    self.keyboard_listener.stop()
-                    self.keyboard_listener = None
+        self.logger.info("Retrying after short pause...")
+        await asyncio.sleep(1)
+        return True
