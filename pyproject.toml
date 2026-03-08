@@ -1,9 +1,10 @@
 [project]
-name = "eyra-v2"
-version = "0.1.0"
-description = "Add your description here"
+name = "eyra"
+version = "1.0.0"
+description = "Real-time AI screen analysis from the terminal."
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [{ name = "Soroush Yousefpour", email = "gabrimatic@gmail.com" }]
 dependencies = [
     "aiohttp>=3.11.11",
     "asyncio>=3.4.3",
@@ -40,4 +41,7 @@ dependencies = [
 
 [tool.uv.sources]
 openai-whisper = { git = "https://github.com/openai/whisper.git" }
-CLIP = {git = "https://github.com/openai/CLIP.git"}
+CLIP = { git = "https://github.com/openai/CLIP.git" }
+
+[tool.uv.extra-build-dependencies]
+openai-whisper = ["setuptools"]
