@@ -1,17 +1,13 @@
-# Contributing to Eyra
+# Contributing
 
-Contributions are welcome. This document covers setup, architecture, and the process for submitting changes.
-
----
+Bug fixes, new modes and backends, better docs. Here's how to get involved.
 
 ## Dev Setup
 
 ```bash
 git clone https://github.com/gabrimatic/eyra.git
 cd eyra
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv sync
 python -m spacy download en_core_web_sm
 cp .env.example .env
 ```
@@ -19,8 +15,6 @@ cp .env.example .env
 Set `USE_MOCK_CLIENT=true` in `.env` to run without any AI backend during development.
 
 Voice mode requires local-whisper running locally. Check with `wh status`.
-
----
 
 ## Architecture
 
@@ -52,8 +46,6 @@ eyra/
 
 The routing path for every request: `message_handler.py` → `complexity_scorer.py` → client selection → response streaming.
 
----
-
 ## New AI Backend
 
 1. Create a file in `src/clients/`, e.g. `src/clients/my_client.py`
@@ -64,16 +56,12 @@ The routing path for every request: `message_handler.py` → `complexity_scorer.
 
 Keep streaming behavior consistent with existing clients. Responses should yield string chunks, not complete strings.
 
----
-
 ## New Mode
 
 1. Create a file in `src/modes/`, e.g. `src/modes/my_mode.py`
 2. Subclass `BaseMode` from `src/modes/base_mode.py`
 3. Implement `run()`
 4. Add a menu entry in `src/main.py`
-
----
 
 ## Testing
 
@@ -87,8 +75,6 @@ There is no automated test suite at this time. Manual verification flow:
 
 For new clients, test with both text and image inputs at each complexity level.
 
----
-
 ## PR Checklist
 
 - Code follows the style of the surrounding file (indentation, naming, structure)
@@ -97,8 +83,6 @@ For new clients, test with both text and image inputs at each complexity level.
 - No credentials, API keys, or personal data in any file
 - Manual verification flow passes
 - PR description explains what changed and why
-
----
 
 ## Reporting Issues
 
@@ -111,8 +95,6 @@ Include:
 - Steps to reproduce
 - `.env` contents with `GOOGLE_API_KEY` redacted
 
----
-
 ## Vulnerability Reporting
 
-See [SECURITY.md](SECURITY.md).
+See [SECURITY.md](SECURITY.md). Do **not** open public issues for security vulnerabilities. Use GitHub's private vulnerability reporting.
