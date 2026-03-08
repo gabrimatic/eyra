@@ -68,7 +68,6 @@ class LiveMode(BaseMode):
             # Show some instructions
             help_text = """
 Live Mode Started
-- Press Ctrl+Shift+M to switch to manual mode
 - Press Ctrl+C to exit
             """
             print(help_text)

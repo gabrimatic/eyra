@@ -14,10 +14,7 @@ from modes.voice.voice_mode import (
 from chat.complexity_scorer import ComplexityScorer
 from chat.message_handler import close_all_clients
 
-warnings.filterwarnings(
-    "ignore",
-    message="FutureWarning: You are using `torch.load` with `weights_only=False`",
-)
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*weights_only.*")
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -28,7 +25,7 @@ async def main() -> None:
 
     1. Load spaCy model once (async).
     2. Load settings from environment or config file.
-    3. Initialize a default OllamaClient for complexity scoring only.
+    3. Initialize ComplexityScorer for task routing.
     4. Provide a menu for the user to pick Manual Mode, Live Mode, or Voice Mode.
     5. Run until the user chooses to exit.
     6. Close all clients gracefully.

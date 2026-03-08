@@ -19,9 +19,10 @@ from chat.capture import (
 
 from chat.complexity_scorer import ComplexityScorer, ComplexityLevel
 from clients.base_client import BaseAIClient
-from clients.ollama_client import OllamaClient
+from clients.ai_client import AIClient
 from utils.mock_client import MockAIClient
 from utils.settings import Settings
+from utils.image_history import manage_message_history
 
 # Single global cache of AI clients keyed by model name
 _AI_CLIENTS_CACHE: Dict[str, BaseAIClient] = {}
@@ -38,7 +39,7 @@ def get_ai_client(model_name: str, settings: Settings) -> BaseAIClient:
     if settings.USE_MOCK_CLIENT:
         client = MockAIClient()
     else:
-        client = OllamaClient(settings, model_name=model_name)
+        client = AIClient(settings, model_name=model_name)
 
     _AI_CLIENTS_CACHE[model_name] = client
     return client
@@ -185,18 +186,19 @@ async def process_task(
         client = get_ai_client(model_name, settings)
         print("[Client] AI client initialized")
 
+        context = manage_message_history(messages)
+
         print("\n[Request] Sending request to AI model...")
 
         if task_type == "text":
             if not text_content:
                 return {"content": "Error: Text content required for text task"}
-            final = await _collect_response_from_text(client, messages, model_name)
+            final = await _collect_response_from_text(client, context, model_name)
             return {"content": final}
 
         elif task_type == "image":
-            # We use the base64_image we just captured
             final = await _collect_response_from_image(
-                client, messages, base64_image, model_name
+                client, context, base64_image, model_name
             )
             return {"content": final}
 
@@ -323,6 +325,8 @@ async def process_task_stream(
         client = get_ai_client(model_name, settings)
         print("[Client] AI client initialized")
 
+        context = manage_message_history(messages)
+
         print("\n[Request] Streaming response from AI model...")
         if task_type == "text":
             if not text_content:
@@ -331,11 +335,11 @@ async def process_task_stream(
 
             if hasattr(client, "generate_completion_stream"):
                 async for chunk in client.generate_completion_stream(
-                    messages, model_name=model_name
+                    context, model_name=model_name
                 ):
                     yield chunk
             else:
-                resp = await client.generate_completion(messages, model_name=model_name)
+                resp = await client.generate_completion(context, model_name=model_name)
                 if isinstance(resp, str):
                     yield resp
                 elif isinstance(resp, dict) and "content" in resp:
@@ -346,12 +350,12 @@ async def process_task_stream(
         elif task_type == "image":
             if hasattr(client, "generate_completion_with_image_stream"):
                 async for chunk in client.generate_completion_with_image_stream(
-                    messages=messages, image_base64=base64_image, model_name=model_name
+                    messages=context, image_base64=base64_image, model_name=model_name
                 ):
                     yield chunk
             else:
                 resp = await client.generate_completion_with_image(
-                    messages=messages, image_base64=base64_image, model_name=model_name
+                    messages=context, image_base64=base64_image, model_name=model_name
                 )
                 if isinstance(resp, str):
                     yield resp

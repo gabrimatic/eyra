@@ -26,7 +26,7 @@ async def play_sound(sound_type: str = "camera"):
                     return
 
         elif system == "Windows":
-            cmd = "powershell -c (New-Object Media.SoundPlayer 'C:\Windows\Media\Camera.wav').PlaySync()"
+            cmd = r"powershell -c (New-Object Media.SoundPlayer 'C:\Windows\Media\Camera.wav').PlaySync()"
         elif system == "Linux":
             cmd = "paplay /usr/share/sounds/freedesktop/stereo/camera-shutter.oga"
         else:

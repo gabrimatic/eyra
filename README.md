@@ -6,7 +6,7 @@
 
 **Real-time AI screen analysis from the terminal.**
 
-Eyra captures screenshots or webcam frames, routes them through a vision model, and responds in text or voice. Processing is local by default, with an optional cloud fallback for complex tasks.
+Eyra captures screenshots or webcam frames, routes them through a vision model, and responds in text or voice. Works with any OpenAI-compatible provider — local or cloud.
 
 <p align="center"><img src="screenshot.png" width="800" alt="Eyra terminal screenshot"></p>
 
@@ -14,17 +14,24 @@ Eyra captures screenshots or webcam frames, routes them through a vision model, 
 
 ## Quick Start
 
+Requires an AI provider with an OpenAI-compatible API. Defaults to [Ollama](https://ollama.com) at `localhost:11434`. Point `API_BASE_URL` in `.env` at any other provider.
+
 ```bash
 git clone https://github.com/gabrimatic/eyra.git
 cd eyra
 chmod +x setup.sh && ./setup.sh
-cp .env.example .env   # edit as needed
-python src/main.py
 ```
 
-| Prompt | What happens |
-|--------|--------------|
-| `python src/main.py` | Mode selection menu |
+Setup creates `.env` from `.env.example`. Open it, set your models, then run.
+
+> **First run:** the CLIP model (~340 MB) is downloaded to `~/.cache/clip/` on startup. This is a one-time download.
+
+```bash
+uv run python src/main.py
+```
+
+| Input | What happens |
+|-------|--------------|
 | `1` | Manual mode |
 | `2` | Live mode |
 | `3` | Voice mode |
@@ -36,7 +43,7 @@ python src/main.py
 - Captures screenshots in memory via `mss`, no disk I/O
 - Captures webcam frames via OpenCV with AVFoundation backend
 - Scores task complexity using spaCy NLP and optionally CLIP
-- Routes to the appropriate Qwen3.5 model via Ollama based on score
+- Routes to the appropriate model via any OpenAI-compatible provider based on score
 - Streams AI responses sentence by sentence
 - Speaks AI responses via local-whisper (`wh whisper`), using Kokoro TTS
 
@@ -101,9 +108,11 @@ Scoring factors:
 
 | Score | Text model | Image model |
 |-------|-----------|-------------|
-| Simple | qwen3.5:4b-q4_K_M (Ollama) | qwen3.5:4b-q4_K_M (Ollama) |
-| Moderate | qwen3.5:9b-q4_K_M (Ollama) | qwen3.5:9b-q4_K_M (Ollama) |
-| Complex | qwen3.5:27b-q4_K_M (Ollama) | qwen3.5:27b-q4_K_M (Ollama) |
+| Simple | `SIMPLE_TEXT_MODEL` | `SIMPLE_IMAGE_MODEL` |
+| Moderate | `MODERATE_TEXT_MODEL` | `MODERATE_IMAGE_MODEL` |
+| Complex | `COMPLEX_MODEL` | `COMPLEX_MODEL` |
+
+All model names are set in `.env`. Any model supported by your provider works.
 
 ---
 
@@ -112,12 +121,25 @@ Scoring factors:
 <details><summary><strong>.env reference</strong></summary>
 
 ```env
-OLLAMA_HOST=localhost
-OLLAMA_PORT=11434
+# Provider — any OpenAI-compatible endpoint
+API_BASE_URL=http://localhost:11434/v1
+API_KEY=ollama        # leave as-is for local; set your key for cloud providers
+
 USE_MOCK_CLIENT=false
+
+SCREENSHOT_INTERVAL=1   # seconds between captures in Live mode
+
+# Model names — set to any model your provider supports
+SIMPLE_TEXT_MODEL=...
+MODERATE_TEXT_MODEL=...
+SIMPLE_IMAGE_MODEL=...
+MODERATE_IMAGE_MODEL=...
+COMPLEX_MODEL=...
 ```
 
-`USE_MOCK_CLIENT=true` runs a local stub instead of any AI backend, useful for development.
+`.env.example` ships with working defaults. Copy, fill in your models, done.
+
+`API_BASE_URL` accepts any OpenAI-compatible endpoint. Point it at Ollama (default), LM Studio, vLLM, OpenRouter, Groq, or OpenAI itself. `API_KEY` is ignored by local providers but required for cloud ones. `USE_MOCK_CLIENT=true` runs a local stub with no backend at all, useful for development.
 
 </details>
 
@@ -127,12 +149,12 @@ USE_MOCK_CLIENT=false
 
 | Component | Where it runs |
 |-----------|--------------|
-| Ollama (qwen3.5) | localhost:11434 |
+| AI backend | `API_BASE_URL` (default: localhost:11434) |
 | wh listen (local-whisper) | Subprocess, fully local |
 | wh whisper (local-whisper) | Subprocess, fully local |
 | Screenshots / webcam | In-memory only, never written to disk |
 
-No telemetry. No analytics. No network calls. Everything runs on your machine.
+No telemetry. No analytics. By default everything runs on your machine. If you point `API_BASE_URL` at a remote provider, prompts and images will leave your machine to that provider.
 
 ---
 
@@ -152,13 +174,13 @@ eyra/
 │   │   └── words.py             # Complexity indicator vocabulary
 │   ├── clients/
 │   │   ├── base_client.py       # BaseAIClient abstract
-│   │   └── ollama_client.py     # Ollama async HTTP client
+│   │   └── ai_client.py         # OpenAI-compatible async client
 │   ├── modes/
 │   │   ├── base_mode.py
 │   │   ├── manual_mode.py
 │   │   ├── live_mode.py
 │   │   └── voice/
-│   │       ├── voice_mode.py    # Voice pipeline (STT + LLM + TTS)
+│   │       └── voice_mode.py    # Voice pipeline (STT + LLM + TTS)
 │   └── utils/
 │       ├── settings.py
 │       ├── image_history.py
@@ -170,16 +192,16 @@ eyra/
 
 ## Troubleshooting
 
-<details><summary><strong>Ollama not responding</strong></summary>
+<details><summary><strong>AI backend not responding</strong></summary>
 
-Verify the service is running:
+Check that your backend is running and reachable at the URL in `API_BASE_URL`. For Ollama (default):
 
 ```bash
 ollama list
 curl http://localhost:11434/api/tags
 ```
 
-Check `OLLAMA_HOST` and `OLLAMA_PORT` in `.env` match your setup.
+If using a different provider, verify `API_BASE_URL` and `API_KEY` in `.env` are correct.
 
 </details>
 
@@ -206,19 +228,34 @@ Eyra uses OpenCV with the AVFoundation backend. Grant camera access to your term
 ## Development
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m spacy download en_core_web_sm
-cp .env.example .env
-USE_MOCK_CLIENT=true python src/main.py
+git clone https://github.com/gabrimatic/eyra.git
+cd eyra
+./setup.sh
+USE_MOCK_CLIENT=true uv run python src/main.py
 ```
 
-**Adding a new AI backend:** subclass `BaseAIClient` in `src/clients/base_client.py`, implement `generate` and `generate_with_image`, then register it in `message_handler.py`.
+**Adding a new AI backend:** subclass `BaseAIClient` from `src/clients/base_client.py`, implement `generate_completion_stream` and `generate_completion_with_image_stream`, then register it in `message_handler.py`. See `CONTRIBUTING.md` for the full steps.
 
 **Adding a new mode:** subclass `BaseMode` in `src/modes/base_mode.py`, implement `run`, then add a menu entry in `src/main.py`.
 
 ---
+
+## Credits
+
+[Ollama](https://ollama.com) · [local-whisper](https://github.com/gabrimatic/local-whisper) (STT + TTS via Kokoro) · [spaCy](https://spacy.io) · [CLIP](https://github.com/openai/CLIP) by OpenAI · [mss](https://github.com/BoboTiG/python-mss) · [OpenCV](https://opencv.org)
+
+<details>
+<summary><strong>Legal notices</strong></summary>
+
+### Trademarks
+
+"Ollama" is a trademark of its respective owner. All trademark names are used solely to describe compatibility with their respective technologies. This project is not affiliated with, endorsed by, or sponsored by any trademark holder.
+
+### Third-Party Licenses
+
+All dependencies use MIT, BSD, or Apache 2.0 licenses. See each package for details.
+
+</details>
 
 ## License
 

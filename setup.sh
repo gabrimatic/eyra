@@ -28,11 +28,6 @@ fi
 echo "Installing dependencies..."
 uv sync
 
-# ── Models ────────────────────────────────────────────────────────────────────
-
-echo "Downloading spaCy language model..."
-uv run python -m spacy download en_core_web_sm
-
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 if [[ ! -f .env ]]; then
