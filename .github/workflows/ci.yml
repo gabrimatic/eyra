@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  python-checks:
+    name: Python checks
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh && echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Download spaCy model
+        run: uv run python -m spacy download en_core_web_sm
+
+      - name: Import smoke test
+        run: |
+          uv run python -c "
+          import sys
+          sys.path.insert(0, 'src')
+          from chat.complexity_scorer import ComplexityScorer
+          from clients.base_client import BaseAIClient
+          from clients.ollama_client import OllamaClient
+          from clients.google_client import GoogleAIClient
+          from utils.settings import Settings
+          from utils.mock_client import MockAIClient
+          print('All imports OK')
+          "
+
+      - name: Lint with ruff
+        run: uv run ruff check src/
+
+  setup-check:
+    name: setup.sh syntax check
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check setup.sh syntax
+        run: bash -n setup.sh

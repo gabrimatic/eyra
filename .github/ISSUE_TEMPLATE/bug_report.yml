@@ -1,0 +1,97 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A single sentence describing what's broken.
+      placeholder: "Voice mode crashes after the first utterance when using Coqui TTS."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Shortest path to reproduce the issue.
+      placeholder: |
+        1. Run python src/main.py
+        2. Select Voice Mode (3)
+        3. Hold Space and speak
+        4. Release Space
+        5. Observe crash
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What correct behavior looks like.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened, including any error messages or tracebacks.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Python version
+      placeholder: "3.11.9"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: macOS version and chip
+      placeholder: "macOS 15.3, M4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Manual
+        - Live
+        - Voice
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: AI backend
+      options:
+        - Ollama (local)
+        - Google Gemini (cloud)
+        - Mock client
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Terminal output
+      description: Paste relevant terminal output or traceback. Redact any personal content.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else that might help with triage.
+    validations:
+      required: false
