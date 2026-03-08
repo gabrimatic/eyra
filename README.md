@@ -38,7 +38,7 @@ python src/main.py
 - Scores task complexity using spaCy NLP and optionally CLIP
 - Routes to Ollama (local) or Google Gemini (cloud) based on score
 - Streams AI responses sentence by sentence
-- Synthesizes voice responses locally via Coqui TTS or pyttsx3 fallback
+- Speaks AI responses via local-whisper (`wh whisper`), using Kokoro TTS
 
 ---
 
@@ -48,7 +48,7 @@ python src/main.py
 |------|---------|--------------|
 | Manual | Type a prompt | Interactive chat. Append `#image` for a screenshot or `#selfie` for webcam. |
 | Live | Select at startup | Captures a screenshot every second, sends to AI, streams response. Runs until interrupted. |
-| Voice | Hold Space, release | Records audio, transcribes via Whisper, sends to LLM, plays TTS response. Mic mutes while speaking. |
+| Voice | `wh listen` | Records audio, transcribes via local-whisper, sends to LLM, speaks response via `wh whisper`. |
 
 ### Manual Mode
 
@@ -82,11 +82,9 @@ Once set up, `wh` handles recording, transcription, and speech. No additional co
 
 Full pipeline per utterance:
 
-1. Hold Space — recording starts
-2. Release Space — recording stops, Whisper transcribes locally
-3. Transcript sent to LLM
-4. Response synthesized sentence by sentence
-5. Audio plays while next sentence generates
+1. `wh listen` captures audio and returns the transcription
+2. Transcript sent to LLM
+3. Response spoken via `wh whisper`
 
 ---
 
@@ -118,9 +116,6 @@ OLLAMA_HOST=localhost
 OLLAMA_PORT=11434
 GOOGLE_API_KEY=your_key_here
 USE_MOCK_CLIENT=false
-VOICE_MODEL_PATH=src/modes/voice/models/tiny.en.pt
-VOICE_LANG=en
-VOICE_TTS_FALLBACK=true
 ```
 
 `GOOGLE_API_KEY` is only used when complexity routing selects Gemini. Leave blank to restrict all processing to Ollama.
@@ -136,8 +131,8 @@ VOICE_TTS_FALLBACK=true
 | Component | Where it runs |
 |-----------|--------------|
 | Ollama (phi3, llava) | localhost:11434 |
-| Whisper STT | In-process, fully offline |
-| Coqui TTS | In-process, fully offline |
+| wh listen (local-whisper) | Subprocess, fully local |
+| wh whisper (local-whisper) | Subprocess, fully local |
 | Google Gemini | Cloud, only when complexity score requires it |
 | Screenshots / webcam | In-memory only, never written to disk |
 
@@ -169,13 +164,10 @@ eyra/
 │   │   ├── live_mode.py
 │   │   └── voice/
 │   │       ├── voice_mode.py    # Voice pipeline (STT + LLM + TTS)
-│   │       └── models/
-│   │           └── tiny.en.pt   # Bundled Whisper model
 │   └── utils/
 │       ├── settings.py
 │       ├── image_history.py
 │       ├── sound_player.py
-│       ├── speach.py            # System TTS fallback
 │       └── mock_client.py
 ```
 
@@ -196,15 +188,15 @@ Check `OLLAMA_HOST` and `OLLAMA_PORT` in `.env` match your setup.
 
 </details>
 
-<details><summary><strong>Voice mode not detecting keypresses</strong></summary>
+<details><summary><strong>Voice mode not working</strong></summary>
 
-macOS requires Accessibility permissions for the `keyboard` library. Go to System Settings → Privacy & Security → Accessibility and add your terminal.
+Voice mode requires local-whisper to be installed and running. Check with:
 
-</details>
+```bash
+wh status
+```
 
-<details><summary><strong>Coqui TTS fails to initialize</strong></summary>
-
-Set `VOICE_TTS_FALLBACK=true` in `.env` to fall back to `pyttsx3`. Coqui requires a model download on first run; ensure network access during setup.
+If the service is not running: `wh start`. See [local-whisper](https://github.com/gabrimatic/local-whisper) for setup instructions.
 
 </details>
 

@@ -7,7 +7,7 @@ body:
     attributes:
       label: Summary
       description: A single sentence describing what's broken.
-      placeholder: "Voice mode crashes after the first utterance when using Coqui TTS."
+      placeholder: "Voice mode does not produce a spoken response after transcription."
     validations:
       required: true
 
@@ -19,9 +19,9 @@ body:
       placeholder: |
         1. Run python src/main.py
         2. Select Voice Mode (3)
-        3. Hold Space and speak
-        4. Release Space
-        5. Observe crash
+        3. Speak when prompted
+        4. Observe no audio response
+
     validations:
       required: true
 

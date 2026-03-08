@@ -10,7 +10,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
-- Voice mode: local Whisper STT, Coqui TTS, sentence-buffered playback for lower latency
+- Voice mode: speech input and output via local-whisper (`wh listen` / `wh whisper`)
 - Adaptive model routing via `ComplexityScorer` (spaCy NLP + CLIP), dispatching to Ollama or Gemini based on task complexity
 - Google Gemini backend as cloud fallback for moderate and complex tasks
 - In-memory screenshot and webcam capture via `mss` and OpenCV, no files written to disk
