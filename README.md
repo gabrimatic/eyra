@@ -36,7 +36,7 @@ python src/main.py
 - Captures screenshots in memory via `mss`, no disk I/O
 - Captures webcam frames via OpenCV with AVFoundation backend
 - Scores task complexity using spaCy NLP and optionally CLIP
-- Routes to Ollama (local) or Google Gemini (cloud) based on score
+- Routes to the appropriate Qwen3.5 model via Ollama based on score
 - Streams AI responses sentence by sentence
 - Speaks AI responses via local-whisper (`wh whisper`), using Kokoro TTS
 
@@ -101,9 +101,9 @@ Scoring factors:
 
 | Score | Text model | Image model |
 |-------|-----------|-------------|
-| Simple | phi3 (Ollama) | llava (Ollama) |
-| Moderate | gemini-1.5-flash | gemini-1.5-flash |
-| Complex | gemini-1.5-flash | gemini-1.5-flash |
+| Simple | qwen3.5:4b-q4_K_M (Ollama) | qwen3.5:4b-q4_K_M (Ollama) |
+| Moderate | qwen3.5:9b-q4_K_M (Ollama) | qwen3.5:9b-q4_K_M (Ollama) |
+| Complex | qwen3.5:27b-q4_K_M (Ollama) | qwen3.5:27b-q4_K_M (Ollama) |
 
 ---
 
@@ -114,11 +114,8 @@ Scoring factors:
 ```env
 OLLAMA_HOST=localhost
 OLLAMA_PORT=11434
-GOOGLE_API_KEY=your_key_here
 USE_MOCK_CLIENT=false
 ```
-
-`GOOGLE_API_KEY` is only used when complexity routing selects Gemini. Leave blank to restrict all processing to Ollama.
 
 `USE_MOCK_CLIENT=true` runs a local stub instead of any AI backend, useful for development.
 
@@ -130,13 +127,12 @@ USE_MOCK_CLIENT=false
 
 | Component | Where it runs |
 |-----------|--------------|
-| Ollama (phi3, llava) | localhost:11434 |
+| Ollama (qwen3.5) | localhost:11434 |
 | wh listen (local-whisper) | Subprocess, fully local |
 | wh whisper (local-whisper) | Subprocess, fully local |
-| Google Gemini | Cloud, only when complexity score requires it |
 | Screenshots / webcam | In-memory only, never written to disk |
 
-No telemetry. No analytics. No network calls except Ollama (local) and Gemini (optional).
+No telemetry. No analytics. No network calls. Everything runs on your machine.
 
 ---
 
@@ -156,8 +152,7 @@ eyra/
 │   │   └── words.py             # Complexity indicator vocabulary
 │   ├── clients/
 │   │   ├── base_client.py       # BaseAIClient abstract
-│   │   ├── ollama_client.py     # Ollama async HTTP client
-│   │   └── google_client.py     # Google Gemini client
+│   │   └── ollama_client.py     # Ollama async HTTP client
 │   ├── modes/
 │   │   ├── base_mode.py
 │   │   ├── manual_mode.py
