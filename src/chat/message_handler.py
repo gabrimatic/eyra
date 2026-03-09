@@ -9,6 +9,7 @@ Now refactored to work with in-memory capture & encoding APIs:
 No disk I/O is used for images anymore.
 """
 
+import logging
 from typing import List, Dict, Optional, AsyncGenerator
 
 # Refactored in-memory capture utilities
@@ -18,11 +19,33 @@ from chat.capture import (
 )
 
 from chat.complexity_scorer import ComplexityScorer, ComplexityLevel
+from chat.session_state import QualityMode, InteractionStyle
 from clients.base_client import BaseAIClient
 from clients.ai_client import AIClient
 from utils.mock_client import MockAIClient
 from utils.settings import Settings
 from utils.image_history import manage_message_history
+
+logger = logging.getLogger(__name__)
+
+# Response shaping system prompts by interaction style
+_STYLE_PROMPTS = {
+    InteractionStyle.TEXT: (
+        "You are Eyra, a helpful live assistant. "
+        "Respond naturally and concisely to the user. "
+        "Do not describe screens or interfaces unless specifically asked."
+    ),
+    InteractionStyle.WATCH: (
+        "You are observing a screen for the user. Be brief and delta-focused. "
+        "Describe only what changed or what is notable. One to two sentences max. "
+        "Do not repeat information the user already knows."
+    ),
+    InteractionStyle.VOICE: (
+        "Your response will be spoken aloud. Keep it concise and natural. "
+        "No markdown, no bullet points, no code blocks. "
+        "Two to three sentences max. Speak as if talking to the user directly."
+    ),
+}
 
 # Single global cache of AI clients keyed by model name
 _AI_CLIENTS_CACHE: Dict[str, BaseAIClient] = {}
@@ -49,11 +72,21 @@ def select_model(
     complexity_level: ComplexityLevel,
     task_type: str,
     settings: Settings,
+    quality_mode: QualityMode = QualityMode.BALANCED,
 ) -> str:
     """
-    Select the appropriate model based on complexity and task type.
-    If there's no match, fallback to SIMPLE_TEXT_MODEL.
+    Select the appropriate model based on complexity, task type, and quality mode.
+    Quality mode overrides: fast forces Simple tier, best forces Complex tier.
     """
+    # Quality mode overrides
+    if quality_mode == QualityMode.FAST:
+        if task_type == "image":
+            return settings.SIMPLE_IMAGE_MODEL
+        return settings.SIMPLE_TEXT_MODEL
+    elif quality_mode == QualityMode.BEST:
+        return settings.COMPLEX_MODEL
+
+    # Normal routing
     if task_type == "image":
         model_mapping = {
             ComplexityLevel.SIMPLE: settings.SIMPLE_IMAGE_MODEL,
@@ -67,7 +100,8 @@ def select_model(
             ComplexityLevel.COMPLEX: settings.COMPLEX_MODEL,
         }
 
-    selected = model_mapping.get(complexity_level, settings.SIMPLE_TEXT_MODEL)
+    fallback = settings.SIMPLE_IMAGE_MODEL if task_type == "image" else settings.SIMPLE_TEXT_MODEL
+    selected = model_mapping.get(complexity_level, fallback)
     if not selected:
         raise ValueError(f"No model found for complexity level: {complexity_level}")
     return selected
@@ -110,6 +144,16 @@ def display_history(messages: List[Dict]) -> None:
     print()
 
 
+def _apply_style_prompt(
+    context: List[Dict], style: InteractionStyle
+) -> List[Dict]:
+    """Prepend a system prompt for the interaction style if needed."""
+    prompt = _STYLE_PROMPTS.get(style)
+    if not prompt:
+        return context
+    return [{"role": "system", "content": prompt}] + context
+
+
 async def prepare_image(use_selfie: bool = False) -> str:
     """
     Capture an image in memory (screenshot or selfie),
@@ -136,6 +180,8 @@ async def process_task(
     complexity_scorer: ComplexityScorer = None,
     settings: Settings = None,
     messages: Optional[List[Dict]] = None,
+    quality_mode: QualityMode = QualityMode.BALANCED,
+    interaction_style: InteractionStyle = InteractionStyle.TEXT,
 ) -> Dict:
     """
     Process a task with automatic model selection (based on complexity).
@@ -156,39 +202,26 @@ async def process_task(
         return {"content": "Error: Settings instance required."}
 
     try:
-        print("\n[Process] Starting task processing...")
-        print(f"[Process] Task type: {task_type}")
+        logger.debug("Starting task processing: %s", task_type)
 
         base64_image = ""
         if task_type == "image":
-            print("\n[Image] Capturing image in memory...")
             base64_image = await prepare_image(use_selfie=use_selfie)
 
-            # Format image message consistently
-            if messages and messages[-1].get("content") in ["#image", "#selfie"]:
-                messages[-1]["content"] = [
-                    {"type": "text", "text": "Describe this image"},
-                    {"type": "image_url", "image_url": {"url": base64_image}}
-                ]
-
-        print("\n[Complexity] Analyzing task complexity...")
         response = await complexity_scorer.score_complexity(
             text_content,
             task_type,
             image_base64=base64_image,
+            messages=messages,
         )
-        print(f"[Complexity] Determined complexity: {response.classification}")
-        print(f"[Complexity] Confidence score: {response.confidence:.2f}")
+        logger.debug("Complexity: %s (%.2f)", response.classification, response.confidence)
 
-        model_name = select_model(response.classification, task_type, settings)
-        print(f"[Model] Selected model: {model_name}")
+        model_name = select_model(response.classification, task_type, settings, quality_mode)
+        logger.debug("Model: %s", model_name)
 
         client = get_ai_client(model_name, settings)
-        print("[Client] AI client initialized")
 
-        context = manage_message_history(messages)
-
-        print("\n[Request] Sending request to AI model...")
+        context = _apply_style_prompt(manage_message_history(messages), interaction_style)
 
         if task_type == "text":
             if not text_content:
@@ -206,9 +239,9 @@ async def process_task(
             return {"content": f"Unknown task type: {task_type}"}
 
     except Exception as e:
-        print(f"\n[Error] Task processing failed: {e}")
+        logger.error("Task processing failed: %s", e, exc_info=True)
         return {
-            "content": "I apologize, but I encountered an error processing your request. Please try again."
+            "content": "Something went wrong. Please try again."
         }
 
 
@@ -233,7 +266,7 @@ async def _collect_response_from_text(
                 resp if isinstance(resp, str) else resp.get("content", str(resp))
             )
     except Exception as e:
-        print(f"[Error] _collect_response_from_text: {e}")
+        logger.error("Text response error: %s", e)
         final_str = "Error occurred while generating text response."
     return final_str
 
@@ -265,7 +298,7 @@ async def _collect_response_from_image(
             else:
                 final_str = str(resp)
     except Exception as e:
-        print(f"[Error] _collect_response_from_image: {e}")
+        logger.error("Image response error: %s", e)
         final_str = "Error occurred while generating image-based response."
     return final_str
 
@@ -277,6 +310,9 @@ async def process_task_stream(
     complexity_scorer: ComplexityScorer = None,
     settings: Settings = None,
     messages: Optional[List[Dict]] = None,
+    quality_mode: QualityMode = QualityMode.BALANCED,
+    interaction_style: InteractionStyle = InteractionStyle.TEXT,
+    base64_image: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Same as process_task, but yields a streaming response for real-time output.
@@ -295,39 +331,27 @@ async def process_task_stream(
         return
 
     try:
-        print("\n[Process] Starting task processing (stream mode)...")
-        print(f"[Process] Task type: {task_type}")
+        logger.debug("Starting stream task: %s", task_type)
 
-        base64_image = ""
-        if task_type == "image":
-            print("\n[Image] Capturing image in memory...")
+        if base64_image is None:
+            base64_image = ""
+        if task_type == "image" and not base64_image:
             base64_image = await prepare_image(use_selfie=use_selfie)
 
-            # Format image message consistently
-            if messages and messages[-1].get("content") in ["#image", "#selfie"]:
-                messages[-1]["content"] = [
-                    {"type": "text", "text": "Describe this image"},
-                    {"type": "image_url", "image_url": {"url": base64_image}}
-                ]
-
-        print("\n[Complexity] Analyzing task complexity...")
         response = await complexity_scorer.score_complexity(
             text_content,
             task_type,
             image_base64=base64_image,
+            messages=messages,
         )
-        print(f"[Complexity] Determined complexity: {response.classification}")
-        print(f"[Complexity] Confidence score: {response.confidence:.2f}")
+        logger.debug("Complexity: %s (%.2f)", response.classification, response.confidence)
 
-        model_name = select_model(response.classification, task_type, settings)
-        print(f"[Model] Selected model: {model_name}")
+        model_name = select_model(response.classification, task_type, settings, quality_mode)
+        logger.debug("Model: %s", model_name)
 
         client = get_ai_client(model_name, settings)
-        print("[Client] AI client initialized")
 
-        context = manage_message_history(messages)
-
-        print("\n[Request] Streaming response from AI model...")
+        context = _apply_style_prompt(manage_message_history(messages), interaction_style)
         if task_type == "text":
             if not text_content:
                 yield "Error: Text content required for text task."
@@ -367,8 +391,8 @@ async def process_task_stream(
             yield f"Unknown task type: {task_type}"
 
     except Exception as e:
-        print(f"\n[Error] Task processing failed: {str(e)}")
-        yield "I encountered an error processing your request. Please try again."
+        logger.error("Stream task failed: %s", e, exc_info=True)
+        yield "Something went wrong. Please try again."
 
 
 async def close_all_clients():

@@ -1,25 +1,38 @@
 """
 Message history management utilities.
 Handles message history cleanup and maintenance.
-For clients that support image processing, removes old image messages.
+Strips base64 image payloads from older messages so text-only
+requests don't accidentally resend large multipart content.
 """
 
 from typing import List, Dict
 
 
+def _strip_image_content(msg: Dict) -> Dict:
+    """Replace multipart image messages with their text-only portion."""
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return msg
+    text_parts = [
+        item.get("text", "") for item in content if item.get("type") == "text"
+    ]
+    text = " ".join(t for t in text_parts if t).strip()
+    return {**msg, "content": text or "[image]"}
+
+
 def manage_message_history(messages: List[Dict], max_messages: int = 10) -> List[Dict]:
     """
-    Manage message history by removing old messages and cleaning up image data.
-    
-    Args:
-        messages (List[Dict]): List of message dictionaries
-        max_messages (int): Maximum number of messages to keep
-        
-    Returns:
-        List[Dict]: Cleaned message history
-    """
-    if len(messages) <= max_messages:
-        return messages
+    Return a trimmed, cleaned copy of the message history.
 
-    # Keep only the most recent messages
-    return messages[-max_messages:]
+    - Keeps at most *max_messages* recent entries.
+    - Strips base64 image payloads from all but the last message
+      (the last message may intentionally carry an image for the
+      current request).
+    """
+    recent = messages[-max_messages:] if len(messages) > max_messages else list(messages)
+
+    # Strip image payloads from everything except the final message
+    cleaned = [_strip_image_content(m) for m in recent[:-1]] if recent else []
+    if recent:
+        cleaned.append(recent[-1])
+    return cleaned

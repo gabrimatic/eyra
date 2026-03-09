@@ -1,520 +1,346 @@
+"""
+Deterministic prompt router for Eyra.
+
+Routes user prompts to Simple, Moderate, or Complex models using
+pattern matching and weighted signal scoring. No ML dependencies.
+"""
+
 import logging
-import base64
-from io import BytesIO
-from typing import List, Dict, Any, Optional
-
-import spacy
-import numpy as np
-from dataclasses import dataclass
+import re
 from enum import Enum
-from PIL import Image
-from pydantic import BaseModel, Field
-from spacy.tokens import Doc, Token
+from typing import List, Dict, Optional
 
-# Your local keyword list for domain complexity detection
-from chat.words import complexity_indicators
+from pydantic import BaseModel, ConfigDict, Field
 
-# LOGGING SETUP
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
 logger = logging.getLogger(__name__)
 
-# Optional: If you have CLIP for advanced image complexity scoring:
-try:
-    import torch
-    import clip  # Official CLIP package
+# ---------------------------------------------------------------------------
+# Public types (unchanged interface)
+# ---------------------------------------------------------------------------
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info("Loading official CLIP model...")
-    model, preprocess = clip.load("ViT-B/32", device=device)
-    USE_CLIP = True
-    logger.info(f"CLIP model loaded successfully on {device}")
-except ImportError as e:
-    logger.warning(f"CLIP dependencies not available: {e}")
-    model = None
-    preprocess = None
-    USE_CLIP = False
-except Exception as e:
-    logger.error(f"Error loading CLIP model: {e}")
-    model = None
-    preprocess = None
-    USE_CLIP = False
-
-
-###############################################################################
-# SPACY SETUP
-###############################################################################
-for _model in ("en_core_web_trf", "en_core_web_md", "en_core_web_sm"):
-    try:
-        nlp = spacy.load(_model)
-        logger.info(f"Loaded spaCy model: {_model}.")
-        break
-    except OSError:
-        continue
-else:
-    raise RuntimeError(
-        "No spaCy model found. Run: uv run python -m spacy download en_core_web_md"
-    )
-
-###############################################################################
-# CREATE REFERENCE DOCS FOR SEMANTIC COMPARISON
-###############################################################################
-SIMPLE_REF_DOC = nlp(
-    "This is a basic, everyday text with simple vocabulary and no advanced topics."
-)
-COMPLEX_REF_DOC = nlp(
-    "A highly specialized and conceptually challenging text involving quantum mechanics or abstract mathematics."
-)
-
-
-###############################################################################
-# ENUMS & MODELS
-###############################################################################
 class ComplexityLevel(str, Enum):
-    """
-    Enumeration for complexity levels.
-    """
-
     SIMPLE = "Simple"
     MODERATE = "Moderate"
     COMPLEX = "Complex"
 
 
 class ComplexityResponse(BaseModel):
-    """
-    The final classification result from our local logic.
-    """
+    model_config = ConfigDict(use_enum_values=True)
 
     classification: ComplexityLevel = Field(..., description="Complexity level.")
     confidence: float = Field(..., ge=0, le=1, description="Confidence [0..1]")
 
-    class Config:
-        use_enum_values = True
+
+# ---------------------------------------------------------------------------
+# Hard-match patterns
+# ---------------------------------------------------------------------------
+
+_SIMPLE_PATTERNS: list[re.Pattern] = [
+    # Greetings
+    re.compile(r"^(hi|hello|hey|yo|sup|howdy|hola|morning|evening|afternoon)[\s!?.]*$", re.I),
+    # Acknowledgments and thanks
+    re.compile(r"^(thanks?|thank\s*you|thx|ty|cheers|appreciated|cool|nice|great|awesome|perfect|ok(ay)?|sure|got\s*it|noted|done|right|yep|yup|nope|nah)[\s!?.]*$", re.I),
+    # Yes / no
+    re.compile(r"^(yes|no|yeah|nah|yep|yup|nope|y|n)[\s!?.]*$", re.I),
+    # Farewells
+    re.compile(r"^(bye|goodbye|see\s*ya|later|ciao|goodnight|gn)[\s!?.]*$", re.I),
+    # Tiny social turns
+    re.compile(r"^(lol|haha|heh|wow|omg|bruh|nice one|fair enough|same|true)[\s!?.]*$", re.I),
+]
+
+_COMPLEX_CODE_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(implement|write|code|build|create)\b.{0,40}\b(function|class|module|script|program|api|endpoint|server|parser|compiler|handler|service|component|tree|queue|stack|graph|struct|iterator)\b", re.I),
+    re.compile(r"\b(debug|fix|patch|troubleshoot|diagnose)\b.{0,30}\b(bug|error|issue|crash|exception|failure|segfault)\b", re.I),
+    re.compile(r"\b(debug|fix|patch|rewrite|optimize)\b.{0,20}\b(this\s+)?(regex|query|sql|css|code|script|function|loop|algorithm)\b", re.I),
+    re.compile(r"\b(review|audit|inspect)\b.{0,30}\b(code|pull\s*request|pr|commit|diff|security)\b", re.I),
+    re.compile(r"\b(refactor|rewrite|optimize|redesign)\b.{0,30}\b(code|function|class|module|system|architecture)\b", re.I),
+]
+
+_COMPLEX_ANALYSIS_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(compare|contrast|evaluate|analyze|assess)\b.{0,80}\b(approach|methods?|algorithms?|architecture|frameworks?|strategy|strategies|trade.?offs?)\b", re.I),
+    re.compile(r"\b(design|architect|plan)\b.{0,30}\b(system|schema|database|pipeline|workflow|infrastructure)\b", re.I),
+    re.compile(r"\b(prove|derive|formalize)\b", re.I),
+    re.compile(r"\bmulti.?step\b|\bstep.?by.?step\b.{0,20}\b(plan|solution|approach)\b", re.I),
+    re.compile(r"\b(expert|in.?depth|thorough|comprehensive|detailed)\b.{0,20}\b(analysis|review|assessment|explanation)\b", re.I),
+]
+
+_COMPLEX_IMAGE_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(extract|ocr|read|transcribe)\b.{0,20}\b(text|code|content|data)\b", re.I),
+    re.compile(r"\b(find|spot|identify|locate)\b.{0,20}\b(bug|error|issue|problem|mistake)\b", re.I),
+    re.compile(r"\b(accessibility|a11y|wcag|ui\s*review|ux\s*audit)\b", re.I),
+    re.compile(r"\b(deep|thorough|detailed|comprehensive)\b.{0,20}\b(analy|review|inspect|assess)", re.I),
+    re.compile(r"\bcode\s*screenshot\b", re.I),
+]
+
+# ---------------------------------------------------------------------------
+# Scoring cues (weighted signal lists)
+# ---------------------------------------------------------------------------
+
+_REASONING_CUES = [
+    "why", "how does", "explain", "what causes", "reason", "because",
+    "trade-off", "tradeoff", "pros and cons", "implications", "consequence",
+    "assumption", "constraint", "caveat",
+    "difference between", "differences between", "distinguish",
+]
+
+_CODE_DEBUG_CUES = [
+    "function", "class", "method", "variable", "loop", "recursion",
+    "algorithm", "regex", "sql", "query", "api", "endpoint", "http",
+    "error", "bug", "stack trace", "exception", "crash", "lint",
+    "test", "unit test", "integration", "deploy", "docker", "ci/cd",
+    "git", "branch", "merge", "commit", "typescript", "python", "rust",
+    "javascript", "java", "kotlin", "swift", "go ", "golang", "c++",
+    "bash", "shell", "terminal", "command line",
+]
+
+_STRUCTURED_OUTPUT_CUES = [
+    "table", "json", "yaml", "xml", "csv", "markdown", "format as",
+    "schema", "template", "spec", "specification",
+]
+
+# Curated domain terms: ~80 high-signal exact phrases
+_DOMAIN_TERMS = frozenset([
+    # CS / programming
+    "algorithm", "data structure", "time complexity", "space complexity",
+    "dynamic programming", "recursion", "binary search", "hash map",
+    "linked list", "tree traversal", "graph algorithm", "sorting",
+    "concurrency", "mutex", "semaphore", "deadlock", "race condition",
+    "design pattern", "dependency injection", "microservice",
+    # ML / AI
+    "machine learning", "deep learning", "neural network", "transformer",
+    "gradient descent", "backpropagation", "loss function", "overfitting",
+    "reinforcement learning", "attention mechanism", "fine-tuning",
+    "embedding", "tokenizer", "inference", "training",
+    # Math
+    "linear algebra", "calculus", "differential equation", "probability",
+    "statistics", "eigenvalue", "matrix", "fourier transform",
+    "optimization", "convex", "stochastic",
+    # Infra / DevOps
+    "kubernetes", "docker", "ci/cd", "load balancer", "reverse proxy",
+    "database", "replication", "sharding", "cache invalidation",
+    "message queue", "event-driven", "serverless",
+    # Security
+    "encryption", "authentication", "authorization", "vulnerability",
+    "sql injection", "xss", "csrf", "zero-day", "penetration testing",
+    "cryptography", "certificate", "tls", "oauth",
+    # Systems
+    "operating system", "kernel", "memory management", "file system",
+    "process", "thread", "scheduler", "virtual memory",
+    "compiler", "interpreter", "garbage collection",
+    # Physics / quantum
+    "qubit", "quantum", "relativity", "superposition", "entanglement",
+])
+
+# Short referential follow-ups that should inherit prior context
+_FOLLOWUP_PATTERNS: list[re.Pattern] = [
+    re.compile(r"^(explain|elaborate|tell me)\s*(more|further|again)[\s?.!]*$", re.I),
+    re.compile(r"^(why|how|what)[\s?!.]*$", re.I),
+    re.compile(r"^(continue|go on|keep going|more)[\s?.!]*$", re.I),
+    re.compile(r"^(rewrite|redo|do)\s*(it|that|this)(.{0,20})$", re.I),
+    re.compile(r"^(now\s+)?(in|using|with)\s+\w+[\s?.!]*$", re.I),
+    re.compile(r"^(can you|could you|please)\s+(expand|clarify|rephrase)[\s?.!]*", re.I),
+]
 
 
-@dataclass
-class ComplexityMetrics:
-    """
-    Data structure holding the local heuristics for complexity.
-    """
+# ---------------------------------------------------------------------------
+# Scorer
+# ---------------------------------------------------------------------------
 
-    text_length: int
-    vocabulary_richness: float
-    syntactic_complexity: float
-    domain_keyword_density: float
-    pos_diversity: float
-    named_entity_density: float
-    embedding_norm: float
-    semantic_complexity: float  # 0..1 measure from doc similarity
-    local_complexity_score: float  # The combined 0..1 score from our heuristics
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "text_length": self.text_length,
-            "vocabulary_richness": self.vocabulary_richness,
-            "syntactic_complexity": self.syntactic_complexity,
-            "domain_keyword_density": self.domain_keyword_density,
-            "pos_diversity": self.pos_diversity,
-            "named_entity_density": self.named_entity_density,
-            "embedding_norm": self.embedding_norm,
-            "semantic_complexity": self.semantic_complexity,
-            "local_complexity_score": self.local_complexity_score,
-        }
-
-
-###############################################################################
-# MAIN CLASS
-###############################################################################
 class ComplexityScorer:
     """
-    COMPLEXITY SCORER (LOCAL-ONLY VERSION)
-
-    This class removes any remote AI calls. We rely entirely on local spaCy-based
-    heuristics and optional CLIP analysis for images. We combine them into a single
-    local complexity score and produce a classification:
-
-       1) Simple
-       2) Moderate
-       3) Complex
-
-    The classification is determined by thresholds on our 'local_complexity_score'.
-    This approach includes:
-
-    - Ratio-based linguistic metrics (vocabulary richness, syntactic depth, domain keywords, etc.).
-    - A "semantic complexity" measure that compares the doc to reference "simple" and "complex" texts.
-    - Handling for short texts to prevent inflated scores (dampening).
-    - Optional local CLIP scoring for images (if you provide a base64 image).
-
-    NOTE: If you want to refine the classification further, you can add a local ML
-    model or expand the doc-similarity approach.
+    Deterministic prompt router. No ML models, no heavy dependencies.
     """
 
     def __init__(self):
-        logger.info("ComplexityScorer (local-only) initialized.")
+        logger.info("ComplexityScorer (deterministic router) initialized.")
 
     async def score_complexity(
         self,
         text_content: Optional[str],
         task_type: str,
         image_base64: Optional[str] = None,
+        messages: Optional[List[Dict]] = None,
     ) -> ComplexityResponse:
-        """
-        Main entry point for classifying complexity, entirely local.
-        Now properly async to work with the rest of the async pipeline.
-        """
-        logger.info(f"[LOCAL] Scoring complexity for task type: {task_type}.")
+        text = (text_content or "").strip()
 
-        # Prepare default metrics
-        metrics = ComplexityMetrics(
-            text_length=0,
-            vocabulary_richness=0.0,
-            syntactic_complexity=0.0,
-            domain_keyword_density=0.0,
-            pos_diversity=0.0,
-            named_entity_density=0.0,
-            embedding_norm=0.0,
-            semantic_complexity=0.0,
-            local_complexity_score=0.0,
-        )
+        # ----- Image routing -----
+        if task_type == "image":
+            result = self._route_image(text)
+            logger.info(f"[Router] image -> {result.classification} (conf={result.confidence:.2f})")
+            return result
 
-        if text_content:
-            # Build spaCy doc
-            doc = nlp(text_content)
-            # Compute local text metrics
-            metrics = self._build_text_metrics(doc, text_content)
+        # ----- Text routing -----
 
-        # If image, optionally extract local complexity signals
-        if task_type == "image" and image_base64:
-            img_meta = self._extract_image_metadata(image_base64)
-            if USE_CLIP and img_meta.get("valid"):
-                clip_score = await self._clip_score(
-                    img_meta["pil_image"], text_content or ""
+        # 1. Hard-match simple
+        if text and self._matches_any(text, _SIMPLE_PATTERNS):
+            result = ComplexityResponse(classification=ComplexityLevel.SIMPLE, confidence=0.90)
+            logger.info(f"[Router] hard-simple -> {result.classification}")
+            return result
+
+        # 2. Hard-match complex
+        if text and self._matches_any(text, _COMPLEX_CODE_PATTERNS + _COMPLEX_ANALYSIS_PATTERNS):
+            result = ComplexityResponse(classification=ComplexityLevel.COMPLEX, confidence=0.90)
+            logger.info(f"[Router] hard-complex -> {result.classification}")
+            return result
+
+        # 3. Score-based routing
+        score = self._compute_text_score(text, messages)
+        result = self._classify_from_score(score)
+        logger.info(f"[Router] score={score:.3f} -> {result.classification} (conf={result.confidence:.2f})")
+        return result
+
+    # ----- Image routing -----
+
+    def _route_image(self, text: str) -> ComplexityResponse:
+        """Image tasks never route to Simple."""
+        if not text or text in ("#image", "#selfie"):
+            return ComplexityResponse(classification=ComplexityLevel.MODERATE, confidence=0.90)
+
+        # Generic descriptions
+        generic = re.compile(r"^(describe|what is|what do you see|what's in|look at)\b", re.I)
+        if generic.match(text) and not self._matches_any(text, _COMPLEX_IMAGE_PATTERNS):
+            return ComplexityResponse(classification=ComplexityLevel.MODERATE, confidence=0.75)
+
+        # Complex image analysis
+        if self._matches_any(text, _COMPLEX_IMAGE_PATTERNS):
+            return ComplexityResponse(classification=ComplexityLevel.COMPLEX, confidence=0.90)
+
+        # Default for image: Moderate
+        return ComplexityResponse(classification=ComplexityLevel.MODERATE, confidence=0.75)
+
+    # ----- Text score computation -----
+
+    def _compute_text_score(self, text: str, messages: Optional[List[Dict]]) -> float:
+        if not text:
+            return 0.0
+
+        text_lower = text.lower()
+        words = text_lower.split()
+        score = 0.0
+
+        # Reasoning cues (weight: 0.15 each, max ~0.45)
+        reasoning_hits = sum(1 for cue in _REASONING_CUES if cue in text_lower)
+        score += min(0.45, reasoning_hits * 0.15)
+
+        # Code/debug cues (weight: 0.10 each, max ~0.40)
+        code_hits = sum(1 for cue in _CODE_DEBUG_CUES if cue in text_lower)
+        score += min(0.40, code_hits * 0.10)
+
+        # Structured output cues (weight: 0.10 each, max ~0.20)
+        struct_hits = sum(1 for cue in _STRUCTURED_OUTPUT_CUES if cue in text_lower)
+        score += min(0.20, struct_hits * 0.10)
+
+        # Domain terms (weight: 0.12 each, max ~0.36)
+        domain_hits = sum(1 for term in _DOMAIN_TERMS if term in text_lower)
+        score += min(0.36, domain_hits * 0.12)
+
+        # Constraint count: sentences with "must", "should", "require", "need to", "ensure"
+        constraint_words = ["must", "should", "require", "need to", "ensure", "make sure"]
+        constraint_hits = sum(1 for c in constraint_words if c in text_lower)
+        score += min(0.20, constraint_hits * 0.10)
+
+        # Prompt length bonus (longer prompts tend toward complexity)
+        if len(words) > 50:
+            score += 0.15
+        elif len(words) > 25:
+            score += 0.08
+
+        # Short prompt with code cues: ensure at least Moderate threshold
+        if len(words) <= 8 and code_hits > 0:
+            score = max(score, 0.30)
+
+        # Very short prompt (1-3 words) with domain terms: ensure at least Moderate
+        if len(words) <= 3 and domain_hits > 0:
+            score = max(score, 0.30)
+
+        # Question mark alone (short question) slight reduction,
+        # but only if no domain terms or code cues were found
+        if text.endswith("?") and len(words) <= 6 and score < 0.4 and domain_hits == 0 and code_hits == 0:
+            score *= 0.7
+
+        # Follow-up context inheritance
+        if messages and self._is_followup(text):
+            prior_level = self._get_prior_complexity(messages)
+            if prior_level is not None:
+                # Blend: use at least the prior level
+                prior_score = {
+                    ComplexityLevel.SIMPLE: 0.15,
+                    ComplexityLevel.MODERATE: 0.45,
+                    ComplexityLevel.COMPLEX: 0.75,
+                }.get(prior_level, 0.0)
+                score = max(score, prior_score)
+
+        return min(1.0, score)
+
+    def _is_followup(self, text: str) -> bool:
+        """Check if text is a short referential follow-up."""
+        if len(text.split()) > 8:
+            return False
+        return self._matches_any(text, _FOLLOWUP_PATTERNS)
+
+    def _get_prior_complexity(self, messages: List[Dict]) -> Optional[ComplexityLevel]:
+        """Look at the last 3 user messages for context."""
+        user_msgs = [m for m in messages if m.get("role") == "user"]
+        recent = user_msgs[-3:] if len(user_msgs) >= 3 else user_msgs
+
+        if not recent:
+            return None
+
+        # Score the most recent substantial user message
+        for msg in reversed(recent):
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(
+                    item.get("text", "") for item in content if item.get("type") == "text"
                 )
-                logger.info(f"[LOCAL] CLIP-based complexity measure ~ {clip_score:.3f}")
-                metrics.local_complexity_score = np.clip(
-                    metrics.local_complexity_score + 0.1 * clip_score, 0.0, 1.0
-                )
+            content = content.strip()
+            if not content or self._is_followup(content):
+                continue
+            return self._classify_text_standalone(content)
 
-        # Convert the final local complexity score => classification
-        classification_result = self._local_classify(metrics.local_complexity_score)
-        logger.info(
-            f"[LOCAL] Final classification based on local_score={metrics.local_complexity_score:.3f}"
-            f" => {classification_result.classification}, conf={classification_result.confidence:.2f}"
-        )
-        return classification_result
+        return None
 
-    ############################################################################
-    # INTERNAL LOGIC
-    ############################################################################
-    def _build_text_metrics(self, doc: Doc, text: str) -> ComplexityMetrics:
+    def _classify_text_standalone(self, text: str) -> ComplexityLevel:
+        """Classify a text prompt using full routing logic (no follow-up recursion)."""
+        if self._matches_any(text, _SIMPLE_PATTERNS):
+            return ComplexityLevel.SIMPLE
+        if self._matches_any(text, _COMPLEX_CODE_PATTERNS + _COMPLEX_ANALYSIS_PATTERNS):
+            return ComplexityLevel.COMPLEX
+        score = self._compute_text_score(text, messages=None)
+        return self._classify_from_score(score).classification
+
+    # ----- Classification from score -----
+
+    def _classify_from_score(self, score: float) -> ComplexityResponse:
         """
-        Construct ComplexityMetrics from spaCy-based heuristics + semantic checks.
+        Thresholds:
+          < 0.30 -> Simple
+          < 0.60 -> Moderate
+          >= 0.60 -> Complex
+
+        Confidence:
+          0.90 for hard-rule (handled upstream)
+          0.75 for clear margin from thresholds
+          0.60 for borderline
         """
-        tokens = [t for t in doc if not t.is_space]
-        text_length = len(text.strip())
-
-        # Basic metrics
-        vocab_richness = self._calculate_vocab_richness(tokens)
-        syntactic_complexity = self._calculate_syntactic_depth(doc)
-        domain_keyword_density = self._calculate_domain_keywords(tokens)
-        pos_diversity = self._calculate_pos_diversity(tokens)
-        named_entity_density = self._calculate_named_entity_density(doc, tokens)
-        embedding_norm = float(np.linalg.norm(doc.vector)) if doc.vector_norm else 0.0
-
-        # Debug: raw doc similarity
-        sim_to_simple = doc.similarity(SIMPLE_REF_DOC)
-        sim_to_complex = doc.similarity(COMPLEX_REF_DOC)
-        logger.info(
-            f"[DEBUG] doc.similarity => simple={sim_to_simple:.3f}, complex={sim_to_complex:.3f}"
-        )
-
-        # Semantic measure (meaning-based)
-        semantic_complexity = self._calculate_semantic_complexity(
-            token_count=len(tokens),
-            sim_simple=sim_to_simple,
-            sim_complex=sim_to_complex,
-        )
-
-        # Combine everything => local complexity score
-        local_score = self._compute_local_complexity_score(
-            vocab_richness,
-            syntactic_complexity,
-            domain_keyword_density,
-            pos_diversity,
-            named_entity_density,
-            embedding_norm,
-            semantic_complexity,
-            token_count=len(tokens),
-        )
-
-        logger.info(
-            f"[DEBUG] Metrics => text_len={text_length}, vocab_r={vocab_richness:.3f}, syn={syntactic_complexity:.3f}, "
-            f"domain={domain_keyword_density:.3f}, pos_div={pos_diversity:.3f}, NE={named_entity_density:.3f}, "
-            f"embed_norm={embedding_norm:.3f}, sem_cmplx={semantic_complexity:.3f} => local_score={local_score:.3f}"
-        )
-
-        return ComplexityMetrics(
-            text_length=text_length,
-            vocabulary_richness=vocab_richness,
-            syntactic_complexity=syntactic_complexity,
-            domain_keyword_density=domain_keyword_density,
-            pos_diversity=pos_diversity,
-            named_entity_density=named_entity_density,
-            embedding_norm=embedding_norm,
-            semantic_complexity=semantic_complexity,
-            local_complexity_score=local_score,
-        )
-
-    def _calculate_vocab_richness(self, tokens: List[Token]) -> float:
-        """
-        Ratio (#unique lemmas) / (#meaningful tokens),
-        clipped to [0..1].
-        """
-        meaningful = [t for t in tokens if t.is_alpha and not t.is_stop]
-        if not meaningful:
-            return 0.0
-        unique_lemmas = set(t.lemma_.lower() for t in meaningful)
-        ratio = len(unique_lemmas) / float(len(meaningful))
-        return min(1.0, ratio)
-
-    def _calculate_syntactic_depth(self, doc: Doc) -> float:
-        """
-        Average dependency depth scaled to [0..1].
-        """
-        depths = []
-        for sent in doc.sents:
-            for token in sent:
-                depths.append(self._get_dep_depth(token))
-        if not depths:
-            return 0.0
-        avg_depth = sum(depths) / len(depths)
-        return min(1.0, avg_depth / 10.0)  # 10 = "max depth"
-
-    def _get_dep_depth(self, token: Token) -> int:
-        depth = 0
-        current = token
-        while current.head != current:
-            depth += 1
-            current = current.head
-        return depth
-
-    def _calculate_domain_keywords(self, tokens: List[Token]) -> float:
-        """
-        # of domain keywords / total tokens, clipped to [0..1].
-        """
-        if not tokens:
-            return 0.0
-        lower_lemmas = [t.lemma_.lower() for t in tokens]
-        hits = sum(
-            1 for lem in lower_lemmas if any(kw in lem for kw in complexity_indicators)
-        )
-        ratio = hits / float(len(tokens))
-        return min(1.0, ratio)
-
-    def _calculate_pos_diversity(self, tokens: List[Token]) -> float:
-        """
-        Distinct POS tags / total tokens, clipped to [0..1].
-        """
-        if not tokens:
-            return 0.0
-        pos_tags = {t.pos_ for t in tokens}
-        ratio = len(pos_tags) / len(tokens)
-        return min(1.0, ratio)
-
-    def _calculate_named_entity_density(self, doc: Doc, tokens: List[Token]) -> float:
-        """
-        # of NE tokens / total tokens, clipped to [0..1].
-        """
-        if not tokens:
-            return 0.0
-        total_ne_tokens = sum(len(ent) for ent in doc.ents)
-        ratio = total_ne_tokens / float(len(tokens))
-        return min(1.0, ratio)
-
-    def _calculate_semantic_complexity(
-        self, token_count: int, sim_simple: float, sim_complex: float
-    ) -> float:
-        """
-        Return a 0..1 measure of 'meaning-based' complexity by comparing the doc
-        to reference 'simple' and 'complex' texts. We do:
-
-           raw_diff = sim_complex - sim_simple
-
-        Then scale that difference to [0..1]. Also reduce if text is < 5 tokens.
-        """
-        # For short text, we reduce the effect to avoid random spikes
-        short_factor = 0.2 if token_count < 5 else 1.0
-
-        raw_diff = sim_complex - sim_simple  # can be negative or positive
-        # Let's assume -0.3..+0.3 typical range => map to 0..1
-        min_diff, max_diff = -0.3, 0.3
-        normalized = (raw_diff - min_diff) / (
-            max_diff - min_diff
-        )  # in [0..1] if raw is in that range
-        clipped = max(0.0, min(1.0, normalized))
-
-        return clipped * short_factor
-
-    def _compute_local_complexity_score(
-        self,
-        vocab_richness: float,
-        syntactic_complexity: float,
-        domain_keyword_density: float,
-        pos_diversity: float,
-        named_entity_density: float,
-        embedding_norm: float,
-        semantic_complexity: float,
-        token_count: int,
-    ) -> float:
-        """
-        Combine all local signals into one 0..1 complexity score.
-        """
-        # Check inputs in [0..1], except embedding_norm
-        for x in [
-            vocab_richness,
-            syntactic_complexity,
-            domain_keyword_density,
-            pos_diversity,
-            named_entity_density,
-            semantic_complexity,
-        ]:
-            if not (0 <= x <= 1):
-                raise ValueError(
-                    "All inputs except embedding_norm must be between 0 and 1"
-                )
-
-        # embedding_norm can be up to ~300 => scale
-        norm_embed = min(1.0, embedding_norm / 300.0)
-
-        # If fewer than 5 tokens, we dampen the ratio-based scores to avoid over-inflation
-        if token_count < 5:
-            vocab_richness *= 0.5
-            syntactic_complexity *= 0.5
-            domain_keyword_density *= 0.5
-            pos_diversity *= 0.5
-            named_entity_density *= 0.5
-            # semantic_complexity was already scaled by short_factor
-
-        # Weight scheme
-        weights = {
-            "vocab_richness": 0.15,
-            "syntactic_complexity": 0.15,
-            "domain_keyword_density": 0.15,
-            "pos_diversity": 0.10,
-            "named_entity_density": 0.10,
-            "embedding_norm": 0.05,
-            "semantic_complexity": 0.30,
-        }
-
-        raw_score = (
-            weights["vocab_richness"] * vocab_richness
-            + weights["syntactic_complexity"] * syntactic_complexity
-            + weights["domain_keyword_density"] * domain_keyword_density
-            + weights["pos_diversity"] * pos_diversity
-            + weights["named_entity_density"] * named_entity_density
-            + weights["embedding_norm"] * norm_embed
-            + weights["semantic_complexity"] * semantic_complexity
-        )
-
-        return max(0.0, min(1.0, raw_score))
-
-    ############################################################################
-    # LOCAL CLASSIFICATION
-    ############################################################################
-    def _local_classify(self, local_score: float) -> ComplexityResponse:
-        """
-        Map local_score in [0..1] to a final classification (SIMPLE, MODERATE, COMPLEX).
-        We also produce a confidence measure (somewhat arbitrary).
-
-        e.g.:
-         - 0..0.33 => SIMPLE
-         - 0.33..0.66 => MODERATE
-         - 0.66..1.0 => COMPLEX
-
-        Confidence can be the distance from the threshold boundary, for instance.
-        """
-        if local_score < 0.33:
-            # Distance from boundary => confidence
-            confidence = 0.5 + (0.33 - local_score) / 0.33 * 0.5
-            return ComplexityResponse(
-                classification=ComplexityLevel.SIMPLE, confidence=min(1.0, confidence)
-            )
-        elif local_score < 0.66:
-            # Mid-range
-            confidence = 0.5 + (0.66 - abs(0.5 - local_score)) / 0.16 * 0.3
-            return ComplexityResponse(
-                classification=ComplexityLevel.MODERATE, confidence=min(1.0, confidence)
-            )
+        if score < 0.30:
+            margin = (0.30 - score) / 0.30
+            confidence = 0.60 + 0.15 * margin  # 0.60..0.75
+            return ComplexityResponse(classification=ComplexityLevel.SIMPLE, confidence=round(confidence, 2))
+        elif score < 0.60:
+            # Distance from nearest boundary
+            dist_low = score - 0.30
+            dist_high = 0.60 - score
+            margin = min(dist_low, dist_high) / 0.15
+            confidence = 0.60 + 0.15 * margin
+            return ComplexityResponse(classification=ComplexityLevel.MODERATE, confidence=round(confidence, 2))
         else:
-            # 0.66..1 => complex
-            confidence = 0.5 + (local_score - 0.66) / 0.34 * 0.5
-            return ComplexityResponse(
-                classification=ComplexityLevel.COMPLEX, confidence=min(1.0, confidence)
-            )
+            margin = min(1.0, (score - 0.60) / 0.40)
+            confidence = 0.60 + 0.15 * margin
+            return ComplexityResponse(classification=ComplexityLevel.COMPLEX, confidence=round(confidence, 2))
 
-    ############################################################################
-    # IMAGE HANDLING (OPTIONAL)
-    ############################################################################
-    def _extract_image_metadata(self, image_base64: str) -> Dict[str, Any]:
-        """
-        Decode base64-encoded image data and return metadata.
-        """
-        try:
-            img_data = base64.b64decode(image_base64)
-            pil_image = Image.open(BytesIO(img_data))
-            pil_image.load()
-            w, h = pil_image.size
-            size_bytes = len(img_data)
+    # ----- Helpers -----
 
-            return {
-                "valid": True,
-                "dimensions": (w, h),
-                "file_size_bytes": size_bytes,
-                "mode": pil_image.mode,
-                "format": pil_image.format,
-                "pil_image": pil_image,
-                "estimated_complexity": (
-                    "high"
-                    if size_bytes > 500000
-                    else "medium" if size_bytes > 100000 else "low"
-                ),
-            }
-        except Exception as e:
-            logger.warning(f"Failed to extract image metadata: {e}")
-            return {"valid": False}
-
-    async def _clip_score(self, pil_image: Image.Image, text_excerpt: str) -> float:
-        """
-        Async version of CLIP scoring
-        """
-        if not (model and preprocess and pil_image):
-            return 0.5
-
-        try:
-            import torch
-
-            image_input = preprocess(pil_image).unsqueeze(0).to(device)
-            text_input = clip.tokenize([text_excerpt or "a photograph"]).to(device)
-
-            with torch.no_grad():
-                image_features = model.encode_image(image_input)
-                text_features = model.encode_text(text_input)
-
-                image_features /= image_features.norm(dim=-1, keepdim=True)
-                text_features /= text_features.norm(dim=-1, keepdim=True)
-
-                similarity = (100.0 * image_features @ text_features.T).softmax(dim=-1)
-                feature_diversity = image_features.std(dim=-1).mean().item()
-                feature_magnitude = image_features.norm(dim=-1).mean().item()
-
-                raw_score = (
-                    0.4 * feature_magnitude
-                    + 0.4 * feature_diversity
-                    + 0.2 * float(similarity[0, 0].cpu())
-                )
-                return torch.sigmoid(torch.tensor(raw_score)).item()
-
-        except Exception as e:
-            logger.error(f"Error in CLIP scoring: {str(e)}")
-            return 0.5
+    @staticmethod
+    def _matches_any(text: str, patterns: list[re.Pattern]) -> bool:
+        return any(p.search(text) for p in patterns)

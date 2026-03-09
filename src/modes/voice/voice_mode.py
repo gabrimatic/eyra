@@ -1,69 +1,87 @@
+"""
+Voice mode — speech input/output via local-whisper.
+
+Listens via `wh listen`, sends transcript to LLM, speaks response
+via `wh whisper`. Returns to text mode on exit.
+"""
+
 import asyncio
 import logging
 import shutil
+from typing import Optional
 
 from chat.message_handler import process_task_stream
+from chat.session_state import SessionState, InteractionStyle, LastTaskMeta
 
 
 class VoiceMode:
-    """
-    Voice interaction mode.
-
-    Listens via `wh listen` (local-whisper STT), sends transcript to the LLM,
-    and speaks the response via `wh whisper` (local-whisper Kokoro TTS).
-
-    Requires local-whisper to be installed and running (`wh status`).
-    """
-
-    def __init__(self, settings, messages=None, complexity_scorer=None):
+    def __init__(self, settings, session: SessionState, complexity_scorer=None):
         self.settings = settings
-        self.messages = messages if messages else []
+        self.session = session
         self.complexity_scorer = complexity_scorer
-        self.switch_requested = False
         self.logger = logging.getLogger(self.__class__.__name__)
 
-    async def run(self):
+    async def run(self) -> Optional[str]:
+        """
+        Voice loop. Returns 'text' to go back to manual mode,
+        None to exit the app.
+        """
         if not shutil.which("wh"):
             print(
                 "Voice mode requires local-whisper. "
                 "Install it and ensure 'wh' is on your PATH."
             )
-            return
+            return "text"
 
-        print("\n=== Voice Mode ===")
-        print("Speak when ready. Say '/quit' to exit.\n")
+        self.session.interaction_style = InteractionStyle.VOICE
 
-        while True:
-            try:
+        print("\nVoice Mode")
+        print("Speak when ready. Say 'quit' or press Ctrl+C to return to text.\n")
+
+        consecutive_errors = 0
+        max_consecutive_errors = 5
+
+        try:
+            while True:
                 print("Listening...")
                 user_text = await self._listen()
                 if not user_text:
+                    consecutive_errors += 1
+                    if consecutive_errors >= max_consecutive_errors:
+                        self.logger.error(
+                            "Too many consecutive listen failures. Returning to text mode."
+                        )
+                        print("Listening failed repeatedly. Returning to text mode.")
+                        break
                     continue
+                consecutive_errors = 0
 
                 print(f"You: {user_text}")
 
-                if user_text.strip().lower() in ["/quit", "/exit"]:
-                    print("Exiting voice mode.")
+                lower = user_text.strip().lower()
+                if lower in ("/quit", "/exit", "quit", "exit", "stop"):
                     break
 
-                self.messages.append({"role": "user", "content": user_text})
+                self.session.messages.append({"role": "user", "content": user_text})
+                self.session.last_task = LastTaskMeta("text", user_text, False)
 
                 print("Thinking...")
                 response = await self._get_response(user_text)
 
-                self.messages.append({"role": "assistant", "content": response})
-                print(f"Assistant: {response}\n")
+                if response:
+                    self.session.messages.append(
+                        {"role": "assistant", "content": response}
+                    )
+                    print(f"Eyra: {response}\n")
+                    await self._speak(response)
 
-                await self._speak(response)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            pass
 
-            except KeyboardInterrupt:
-                print("\nExiting voice mode.")
-                break
-            except Exception as e:
-                self.logger.error(f"Voice mode error: {e}")
+        print("\nReturning to text mode.")
+        return "text"
 
     async def _listen(self) -> str:
-        """Record via wh listen and return the transcription."""
         try:
             proc = await asyncio.create_subprocess_exec(
                 "wh", "listen", "--raw",
@@ -77,20 +95,20 @@ class VoiceMode:
             return ""
 
     async def _get_response(self, user_text: str) -> str:
-        """Stream LLM response and return the full text."""
         chunks = []
         async for chunk in process_task_stream(
             task_type="text",
             text_content=user_text,
             complexity_scorer=self.complexity_scorer,
             settings=self.settings,
-            messages=self.messages,
+            messages=self.session.messages,
+            quality_mode=self.session.quality_mode,
+            interaction_style=self.session.interaction_style,
         ):
             chunks.append(chunk)
         return "".join(chunks).strip()
 
     async def _speak(self, text: str) -> None:
-        """Speak via wh whisper (local-whisper Kokoro TTS)."""
         if not text.strip():
             return
         try:

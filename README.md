@@ -4,9 +4,9 @@
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)]()
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)]()
 
-**Real-time AI screen analysis from the terminal.**
+**Live AI screen assistant for the terminal.**
 
-Eyra captures screenshots or webcam frames, routes them through a vision model, and responds in text or voice. Works with any OpenAI-compatible provider — local or cloud.
+Eyra starts immediately as a live screen-aware assistant. It observes your screen, listens for voice input, and responds in text or speech. No mode switching, no commands required to become useful. Works with any OpenAI-compatible provider.
 
 <p align="center"><img src="screenshot.png" width="800" alt="Eyra terminal screenshot"></p>
 
@@ -22,89 +22,101 @@ cd eyra
 chmod +x setup.sh && ./setup.sh
 ```
 
-Setup creates `.env` from `.env.example`. Open it, set your models, then run.
-
-> **First run:** the CLIP model (~340 MB) is downloaded to `~/.cache/clip/` on startup. This is a one-time download.
+Setup creates `.env`, installs dependencies, and verifies your backend and models. Then run:
 
 ```bash
 uv run python src/main.py
 ```
 
-| Input | What happens |
-|-------|--------------|
-| `1` | Manual mode |
-| `2` | Live mode |
-| `3` | Voice mode |
+Eyra runs preflight checks, then enters a live session:
+
+```
+Eyra Live
+
+  Observation: on  Listening: on  Speech: on
+  Backend: local  Routing: automatic
+
+  Type anything or speak. /pause /mute /goal /status /quit
+```
+
+From this point, Eyra is already observing your screen. Type or speak at any time.
 
 ---
 
 ## What It Does
 
-- Captures screenshots in memory via `mss`, no disk I/O
-- Captures webcam frames via OpenCV with AVFoundation backend
-- Scores task complexity using spaCy NLP and optionally CLIP
-- Routes to the appropriate model via any OpenAI-compatible provider based on score
-- Streams AI responses sentence by sentence
-- Speaks AI responses via local-whisper (`wh whisper`), using Kokoro TTS
+- Launches directly into a live, always-on assistant session
+- Continuously observes your screen with cheap fingerprinting, only captures when something changes
+- Accepts typed or spoken input at any time without leaving the live session
+- Routes to the appropriate model tier based on deterministic prompt analysis
+- Speaks responses via local-whisper when available
+- Works with any OpenAI-compatible provider (Ollama, LM Studio, vLLM, OpenRouter, etc.)
+- Captures screenshots in memory, no disk I/O
 
 ---
 
-## Modes
+## How It Works
 
-| Mode | Trigger | What it does |
-|------|---------|--------------|
-| Manual | Type a prompt | Interactive chat. Append `#image` for a screenshot or `#selfie` for webcam. |
-| Live | Select at startup | Captures a screenshot every second, sends to AI, streams response. Runs until interrupted. |
-| Voice | `wh listen` | Records audio, transcribes via local-whisper, sends to LLM, speaks response via `wh whisper`. |
+Eyra runs as one live session with concurrent subsystems:
 
-### Manual Mode
+- **Screen observation** continuously fingerprints the screen. When a material change is detected (debounced), it captures a full screenshot and analyzes it with the smallest adequate model.
+- **Typed input** is always available inline. Trivial messages (greetings, thanks) skip the screenshot. Anything substantive gets current screen context automatically.
+- **Voice input** listens continuously via local-whisper when available. Speak naturally; Eyra interrupts its own speech to hear you.
+- **Speech output** speaks responses and proactive observations via local-whisper TTS.
 
-Type any prompt at the `>` input. Attach visual context with keywords:
+### Preflight
 
-- `#image` — captures the current screen
-- `#selfie` — captures a webcam frame
+On startup, Eyra validates:
 
-Both are encoded as base64 JPEG in memory and sent with the message.
+- Backend reachability (tries `/v1/models`, falls back to Ollama `/api/tags`)
+- Every configured model exists (auto-pulls via Ollama if needed)
+- Screen capture, microphone, and speech capabilities
 
-### Live Mode
+The session does not start until the backend and models are confirmed ready.
 
-Runs a continuous loop. Each iteration:
+---
 
-1. Screenshot captured via `mss`
-2. Complexity scored
-3. Routed to appropriate model
-4. Response streamed to terminal
+## Commands
 
-Interrupt with `Ctrl+C`.
+| Command | What it does |
+|---------|-------------|
+| `/pause` | Pause screen observation |
+| `/resume` | Resume observation |
+| `/mute` | Mute speech output |
+| `/unmute` | Unmute speech |
+| `/goal <text>` | Set a watch goal ("tell me when an error appears") |
+| `/inspect` | Force a screen capture and analysis now |
+| `/mode fast\|balanced\|best` | Set quality mode |
+| `/status` | Show current runtime state |
+| `/clear` | Reset conversation history |
+| `/quit` | Exit |
 
-### Voice Mode
+Unknown commands are caught locally and never sent to the model.
 
-<details><summary><strong>Setup</strong></summary>
+---
 
-Voice mode requires [local-whisper](https://github.com/gabrimatic/local-whisper) installed and running.
+## Quality Modes
 
-Once set up, `wh` handles recording, transcription, and speech. No additional configuration needed.
+Control the speed/quality trade-off with `/mode`:
 
-</details>
-
-Full pipeline per utterance:
-
-1. `wh listen` captures audio and returns the transcription
-2. Transcript sent to LLM
-3. Response spoken via `wh whisper`
+| Mode | Behavior |
+|------|----------|
+| `fast` | Always use the smallest model |
+| `balanced` | Let the router decide (default) |
+| `best` | Always use the strongest model |
 
 ---
 
 ## Complexity Routing
 
-Every request is scored by `ComplexityScorer` before dispatch.
+In `balanced` mode, every request is scored by `ComplexityScorer` before dispatch.
 
 Scoring factors:
 
-- Vocabulary richness (spaCy)
-- Syntactic depth (dependency parse)
-- Named entity density
-- CLIP image embedding distance (image tasks)
+- Pattern matching for common prompt types
+- Weighted signal scoring (reasoning cues, code/debug cues, domain terms)
+- Prompt length and constraint analysis
+- Follow-up context from recent messages
 
 | Score | Text model | Image model |
 |-------|-----------|-------------|
@@ -127,7 +139,7 @@ API_KEY=ollama        # leave as-is for local; set your key for cloud providers
 
 USE_MOCK_CLIENT=false
 
-SCREENSHOT_INTERVAL=1   # seconds between captures in Live mode
+SCREENSHOT_INTERVAL=1   # seconds between captures in watch mode
 
 # Model names — set to any model your provider supports
 SIMPLE_TEXT_MODEL=...
@@ -135,11 +147,18 @@ MODERATE_TEXT_MODEL=...
 SIMPLE_IMAGE_MODEL=...
 MODERATE_IMAGE_MODEL=...
 COMPLEX_MODEL=...
+
+# Live runtime settings
+AUTO_PULL_MODELS=true
+LIVE_LISTENING_ENABLED=true
+LIVE_SPEECH_ENABLED=true
+LIVE_OBSERVATION_ENABLED=true
+OBSERVATION_DEBOUNCE_MS=1500
+OBSERVATION_COOLDOWN_MS=5000
+SPEECH_COOLDOWN_MS=3000
 ```
 
-`.env.example` ships with working defaults. Copy, fill in your models, done.
-
-`API_BASE_URL` accepts any OpenAI-compatible endpoint. Point it at Ollama (default), LM Studio, vLLM, OpenRouter, Groq, or OpenAI itself. `API_KEY` is ignored by local providers but required for cloud ones. `USE_MOCK_CLIENT=true` runs a local stub with no backend at all, useful for development.
+`API_BASE_URL` accepts any OpenAI-compatible endpoint. Point it at Ollama (default), LM Studio, vLLM, OpenRouter, Groq, or OpenAI itself. `API_KEY` is ignored by local providers but required for cloud ones.
 
 </details>
 
@@ -164,23 +183,23 @@ No telemetry. No analytics. By default everything runs on your machine. If you p
 eyra/
 ├── pyproject.toml
 ├── setup.sh
-├── requirements.txt
 ├── src/
-│   ├── main.py
+│   ├── main.py                     # Entry point, preflight, live session launch
+│   ├── runtime/
+│   │   ├── live_session.py         # Unified orchestrator
+│   │   ├── models.py              # Runtime state and event dataclasses
+│   │   ├── preflight.py           # Backend, model, and capability validation
+│   │   ├── screen_observer.py     # Cheap fingerprinting + triggered capture
+│   │   ├── speech_controller.py   # TTS output and STT input via local-whisper
+│   │   └── status_presenter.py    # User-facing status header and updates
 │   ├── chat/
-│   │   ├── capture.py           # In-memory screenshot and webcam capture
-│   │   ├── complexity_scorer.py # NLP + CLIP task complexity routing
-│   │   ├── message_handler.py   # Message history and AI client routing
-│   │   └── words.py             # Complexity indicator vocabulary
+│   │   ├── capture.py             # In-memory screenshot and webcam capture
+│   │   ├── complexity_scorer.py   # Deterministic prompt routing
+│   │   ├── message_handler.py     # Model selection, response shaping, streaming
+│   │   └── session_state.py       # Shared session types
 │   ├── clients/
-│   │   ├── base_client.py       # BaseAIClient abstract
-│   │   └── ai_client.py         # OpenAI-compatible async client
-│   ├── modes/
-│   │   ├── base_mode.py
-│   │   ├── manual_mode.py
-│   │   ├── live_mode.py
-│   │   └── voice/
-│   │       └── voice_mode.py    # Voice pipeline (STT + LLM + TTS)
+│   │   ├── base_client.py         # BaseAIClient abstract
+│   │   └── ai_client.py           # OpenAI-compatible async client
 │   └── utils/
 │       ├── settings.py
 │       ├── image_history.py
@@ -194,20 +213,22 @@ eyra/
 
 <details><summary><strong>AI backend not responding</strong></summary>
 
-Check that your backend is running and reachable at the URL in `API_BASE_URL`. For Ollama (default):
+Check that your backend is running and reachable at the URL in `API_BASE_URL`. Eyra probes `/v1/models` on startup and reports the result.
+
+For Ollama (default):
 
 ```bash
 ollama list
-curl http://localhost:11434/api/tags
+curl http://localhost:11434/v1/models
 ```
 
 If using a different provider, verify `API_BASE_URL` and `API_KEY` in `.env` are correct.
 
 </details>
 
-<details><summary><strong>Voice mode not working</strong></summary>
+<details><summary><strong>Voice not working</strong></summary>
 
-Voice mode requires local-whisper to be installed and running. Check with:
+Voice requires local-whisper to be installed and running. Check with:
 
 ```bash
 wh status
@@ -219,7 +240,7 @@ If the service is not running: `wh start`. See [local-whisper](https://github.co
 
 <details><summary><strong>Webcam not opening</strong></summary>
 
-Eyra uses OpenCV with the AVFoundation backend. Grant camera access to your terminal in System Settings → Privacy & Security → Camera.
+Eyra uses OpenCV with the AVFoundation backend. Grant camera access to your terminal in System Settings > Privacy & Security > Camera.
 
 </details>
 
@@ -231,18 +252,15 @@ Eyra uses OpenCV with the AVFoundation backend. Grant camera access to your term
 git clone https://github.com/gabrimatic/eyra.git
 cd eyra
 ./setup.sh
+uv run pytest -q
 USE_MOCK_CLIENT=true uv run python src/main.py
 ```
-
-**Adding a new AI backend:** subclass `BaseAIClient` from `src/clients/base_client.py`, implement `generate_completion_stream` and `generate_completion_with_image_stream`, then register it in `message_handler.py`. See `CONTRIBUTING.md` for the full steps.
-
-**Adding a new mode:** subclass `BaseMode` in `src/modes/base_mode.py`, implement `run`, then add a menu entry in `src/main.py`.
 
 ---
 
 ## Credits
 
-[Ollama](https://ollama.com) · [local-whisper](https://github.com/gabrimatic/local-whisper) (STT + TTS via Kokoro) · [spaCy](https://spacy.io) · [CLIP](https://github.com/openai/CLIP) by OpenAI · [mss](https://github.com/BoboTiG/python-mss) · [OpenCV](https://opencv.org)
+[Ollama](https://ollama.com) · [local-whisper](https://github.com/gabrimatic/local-whisper) (STT + TTS via Kokoro) · [mss](https://github.com/BoboTiG/python-mss) · [OpenCV](https://opencv.org)
 
 <details>
 <summary><strong>Legal notices</strong></summary>

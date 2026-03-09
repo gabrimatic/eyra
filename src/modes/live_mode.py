@@ -1,186 +1,148 @@
-# live_mode.py
-
 """
-Live mode implementation for continuous screen analysis with voice feedback.
+Watch mode — continuous screenshot analysis with a goal.
+
+Captures screenshots at intervals, sends to AI with the watch goal,
+streams responses. Returns to text mode on stop or Ctrl+C.
 """
 
 import asyncio
+import hashlib
 import logging
 import shutil
-from datetime import datetime
-from typing import Optional, Any
+from typing import Optional
 
 from .base_mode import BaseMode
-from chat.message_handler import process_task_stream
+from chat.message_handler import process_task_stream, prepare_image
+from chat.session_state import SessionState, InteractionStyle, LastTaskMeta
 
 
 class LiveMode(BaseMode):
-    """
-    Continuously captures screenshots at intervals, analyzing them via the complexity_scorer.
-    Optionally provides TTS feedback.
-    """
-
     def __init__(
         self,
-        settings: Any,
-        messages: Optional[list] = None,
-        complexity_scorer: Optional[Any] = None,
+        settings,
+        session: SessionState,
+        complexity_scorer=None,
     ):
         super().__init__(settings)
-        self.messages = messages if messages is not None else []
+        self.session = session
         self.complexity_scorer = complexity_scorer
-        self.switch_requested = False
-        self.description_prompt: Optional[str] = None
-        self.muted: bool = False
-        self.error_count = 0
-        self.max_consecutive_errors = 3
-        self.running = True
-
         self.logger = logging.getLogger(self.__class__.__name__)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(
-            "[%(asctime)s] %(levelname)s - %(message)s", "%Y-%m-%d %H:%M:%S"
-        )
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        self.logger.setLevel(logging.INFO)
 
         self.wh_available = shutil.which("wh") is not None
-        if not self.wh_available:
-            self.logger.warning("local-whisper (wh) not found. Voice feedback will be disabled.")
-            self.muted = True
+        if not self.wh_available and not self.session.watch_voice_muted:
+            self.logger.warning("local-whisper (wh) not found. Voice feedback disabled.")
+            self.session.watch_voice_muted = True
 
-    async def run(self) -> None:
+    async def run(self) -> Optional[str]:
         """
-        Main entry for Live Mode:
-          1) Ask for description prompt
-          2) Ask if user wants TTS muted
-          3) Start main loop, capturing screenshots at intervals
+        Watch loop. Returns 'text' to go back to manual mode.
         """
-        self.logger.info("Running Live Mode...")
-        await self._prompt_for_description()
-        await self._prompt_for_mute()
+        self.session.interaction_style = InteractionStyle.WATCH
+        self.session.watch_active = True
 
-        while True:
-            self.running = True
-            self.switch_requested = False
+        goal = self.session.watch_goal
+        if not goal:
+            goal = await self._prompt_for_goal()
+            self.session.watch_goal = goal
 
-            # Show some instructions
-            help_text = """
-Live Mode Started
-- Press Ctrl+C to exit
-            """
-            print(help_text)
+        if not self.session.watch_voice_muted and self.wh_available:
+            mute = await asyncio.to_thread(
+                input, "Mute voice feedback? (y/n): "
+            )
+            self.session.watch_voice_muted = mute.strip().lower().startswith("y")
 
-            await self._main_loop()
+        self.session.last_task = LastTaskMeta("image", goal, False)
 
-            if self.switch_requested:
-                from .manual_mode import ManualMode
+        print(f"\nWatching: {goal}")
+        print("Press Ctrl+C to stop watching.\n")
 
-                manual_mode = ManualMode(
-                    self.settings,
-                    self.messages,
-                    self.complexity_scorer,
-                )
-                await manual_mode.run()
+        try:
+            await self._watch_loop(goal)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            pass
 
-                if manual_mode.switch_requested:
-                    # If manual mode wants to come back to Live mode
-                    self.logger.info("Restarting Live Mode after manual mode switch.")
-                    continue
-                else:
-                    # Done
-                    self.logger.info("Exiting Live Mode after manual mode.")
-                    break
-            else:
-                self.logger.info("Exiting Live Mode by user choice.")
-                break
+        self.session.watch_active = False
+        print("\nWatch stopped. Returning to text mode.")
+        return "text"
 
-    async def _main_loop(self) -> None:
-        """
-        Continuously capture screenshots, analyze them, speak results if not muted.
-        """
-        while self.running:
+    async def _watch_loop(self, goal: str):
+        error_count = 0
+        max_errors = 3
+        self._last_image_hash: Optional[str] = None
+        self._last_response_hash: Optional[str] = None
+
+        while self.session.watch_active:
             try:
-                if self.switch_requested:
-                    self.logger.info("Switch requested. Exiting main loop.")
-                    break
+                # Pre-capture screenshot and hash it to skip unchanged screens
+                base64_image = await prepare_image(use_selfie=False)
+                image_hash = hashlib.md5(base64_image.encode()).hexdigest()
 
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                self.logger.info(f"{timestamp} - Capturing screenshot...")
+                if image_hash == self._last_image_hash:
+                    # Screen unchanged — skip the model call entirely
+                    error_count = 0
+                    await asyncio.sleep(self.settings.SCREENSHOT_INTERVAL)
+                    continue
+                self._last_image_hash = image_hash
 
-                print("\nEyra:", end="", flush=True)
+                # Build context: shared history + current watch goal as user turn
+                watch_messages = list(self.session.messages)
+                watch_messages.append({"role": "user", "content": goal})
+
                 full_response = ""
                 async for chunk in process_task_stream(
                     task_type="image",
+                    text_content=goal,
                     complexity_scorer=self.complexity_scorer,
                     settings=self.settings,
-                    messages=[{"role": "user", "content": self.description_prompt}],
+                    messages=watch_messages,
+                    quality_mode=self.session.quality_mode,
+                    interaction_style=self.session.interaction_style,
+                    base64_image=base64_image,
                 ):
-                    print(chunk, end="", flush=True)
                     full_response += chunk
-                print()
 
-                self.messages.append({"role": "assistant", "content": full_response})
-                if not self.muted and full_response.strip():
-                    self.logger.info("Playing voice feedback...")
-                    proc = await asyncio.create_subprocess_exec(
-                        "wh", "whisper", full_response,
-                        stdout=asyncio.subprocess.DEVNULL,
-                        stderr=asyncio.subprocess.DEVNULL,
+                # Response-level dedupe: suppress identical model output
+                response_hash = hashlib.md5(full_response.encode()).hexdigest()
+                is_new_response = response_hash != self._last_response_hash
+                self._last_response_hash = response_hash
+
+                if full_response.strip() and is_new_response:
+                    print(f"\nEyra: {full_response}")
+                    self.session.messages.append(
+                        {"role": "user", "content": goal}
                     )
-                    await proc.wait()
-                    self.logger.info("Voice feedback completed.")
+                    self.session.messages.append(
+                        {"role": "assistant", "content": full_response}
+                    )
 
-                # Sleep before next capture
+                    if not self.session.watch_voice_muted and self.wh_available:
+                        proc = await asyncio.create_subprocess_exec(
+                            "wh", "whisper", full_response,
+                            stdout=asyncio.subprocess.DEVNULL,
+                            stderr=asyncio.subprocess.DEVNULL,
+                        )
+                        await proc.wait()
+
+                error_count = 0
                 await asyncio.sleep(self.settings.SCREENSHOT_INTERVAL)
 
             except KeyboardInterrupt:
-                self.logger.info("Keyboard interrupt. Stopping live mode.")
-                self.running = False
-                break
+                raise
             except Exception as e:
-                if not await self._handle_error(e):
+                error_count += 1
+                self.logger.error(f"Watch error: {e}")
+                if error_count >= max_errors:
+                    self.logger.error("Too many errors. Stopping watch.")
                     break
+                await asyncio.sleep(1)
 
-    async def _prompt_for_description(self) -> None:
-        """
-        Prompt user for a description or use a default if empty.
-        """
-        self.logger.info("Enter the description prompt for analyzing screenshots:")
-        dp = await asyncio.to_thread(input, "> ")
-        dp = dp.strip()
-        if not dp:
-            dp = "Provide a general description of the photo in no more than 20 words."
-            self.logger.info("No description provided. Using default prompt.")
-        self.description_prompt = dp
-
-    async def _prompt_for_mute(self) -> None:
-        """
-        Ask user if they want voice feedback muted.
-        Skip if TTS is not available.
-        """
-        if not self.wh_available:
-            self.logger.info("local-whisper not found. Voice feedback is disabled.")
-            self.muted = True
-            return
-
-        self.logger.info("Do you want to mute voice feedback? (y/n):")
-        ans = await asyncio.to_thread(input, "> ")
-        self.muted = ans.lower().startswith("y")
-        self.logger.info(f"Muted TTS: {self.muted}")
-
-    async def _handle_error(self, error: Exception) -> bool:
-        """
-        If repeated errors exceed max_consecutive_errors, exit.
-        Otherwise, attempt to continue.
-        """
-        self.error_count += 1
-        self.logger.error(f"Live mode error: {error}")
-        if self.error_count >= self.max_consecutive_errors:
-            self.logger.error("Too many consecutive errors. Stopping live mode.")
-            return False
-
-        self.logger.info("Retrying after short pause...")
-        await asyncio.sleep(1)
-        return True
+    async def _prompt_for_goal(self) -> str:
+        default = "Describe what is on the screen in one sentence."
+        goal = await asyncio.to_thread(
+            input, f"Watch goal (enter for default): "
+        )
+        goal = goal.strip()
+        if not goal:
+            goal = default
+            print(f"Using default: {goal}")
+        return goal

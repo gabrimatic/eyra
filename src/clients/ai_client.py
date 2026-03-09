@@ -60,7 +60,7 @@ class AIClient(BaseAIClient):
         )
         async for chunk in stream:
             delta = chunk.choices[0].delta.content
-            if delta:
+            if delta is not None and delta != "":
                 yield delta
 
     async def generate_completion_with_image_stream(
@@ -98,5 +98,5 @@ class AIClient(BaseAIClient):
         )
         async for chunk in stream:
             delta = chunk.choices[0].delta.content
-            if delta:
+            if delta is not None and delta != "":
                 yield delta
