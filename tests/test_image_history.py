@@ -1,9 +1,11 @@
 """Tests for message history management and image payload stripping."""
 
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from utils.image_history import manage_message_history, _strip_image_content
+from utils.image_history import _strip_image_content, manage_message_history
 
 
 class TestStripImageContent:

@@ -1,31 +1,11 @@
-# capture.py
-"""
-High-level capture & encoding functions using Python libraries,
-avoiding disk I/O by capturing frames/screenshots directly to memory.
+"""In-memory screenshot capture and base64 encoding via mss + Pillow."""
 
-Improvements:
-1. Private helpers for DRY code and clarity.
-2. Optional parameters for camera usage.
-3. Unified logic for capturing+encoding.
-4. Consistent logging & docstrings.
-
-Functions:
-- _validate_pil_image(img: Image.Image) -> bool
-- _encode_pil_image_in_memory(...)
-- capture_screenshot_in_memory() -> Image.Image
-- capture_selfie_in_memory(...) -> Image.Image
-- capture_screenshot_and_encode(...)
-- capture_selfie_and_encode(...)
-"""
-
-import logging
 import base64
-import time
+import logging
+from collections.abc import Awaitable, Callable
 from io import BytesIO
-from typing import Tuple, Callable, Awaitable
 
 import mss
-import cv2
 from PIL import Image
 
 from utils.sound_player import play_sound
@@ -57,7 +37,7 @@ def _validate_pil_image(img: Image.Image) -> bool:
 
 
 def _encode_pil_image_in_memory(
-    img: Image.Image, max_size: Tuple[int, int] = (1024, 728), quality: int = 85
+    img: Image.Image, max_size: tuple[int, int] = (1024, 728), quality: int = 85
 ) -> str:
     """
     1) Optionally resizes 'img' if it's larger than 'max_size'.
@@ -68,7 +48,7 @@ def _encode_pil_image_in_memory(
 
     Args:
         img (Image.Image): The PIL Image to encode.
-        max_size (Tuple[int, int]): (width, height) limit for in-memory resize.
+        max_size (tuple[int, int]): (width, height) limit for in-memory resize.
         quality (int): JPEG compression quality (1-100).
 
     Raises:
@@ -88,7 +68,7 @@ def _encode_pil_image_in_memory(
         img.thumbnail(max_size, Image.Resampling.LANCZOS)
 
     # Convert to RGB if needed
-    if img.mode in ("RGBA", "P", "CMYK", "P"):
+    if img.mode in ("RGBA", "P", "CMYK", "L"):
         img = img.convert("RGB")
 
     # Remove metadata
@@ -118,53 +98,6 @@ def _encode_pil_image_in_memory(
     return encoded
 
 
-def _initialize_camera(
-    camera_index: int = 0, backend: int = cv2.CAP_AVFOUNDATION
-) -> cv2.VideoCapture:
-    """
-    Attempt to initialize an OpenCV VideoCapture with the given backend.
-    If it fails, fallback to cv2.CAP_ANY.
-
-    Args:
-        camera_index (int): Which camera device index to open (default=0).
-        backend (int): OpenCV backend code, e.g., cv2.CAP_AVFOUNDATION on macOS.
-
-    Returns:
-        A valid cv2.VideoCapture object.
-
-    Raises:
-        RuntimeError: If no camera can be opened at all.
-    """
-    cap = cv2.VideoCapture(camera_index, backend)
-    if not cap.isOpened():
-        # Fallback to any backend if the given one fails
-        cap = cv2.VideoCapture(camera_index, cv2.CAP_ANY)
-
-    if not cap.isOpened():
-        raise RuntimeError("Could not open webcam (OpenCV).")
-    return cap
-
-
-def _warm_up_camera(
-    cap: cv2.VideoCapture, frames_to_discard: int = 6, sleep_time: float = 0.1
-) -> None:
-    """
-    Discard a few black frames if the camera is not ready yet.
-    Helps reduce 'dark image' captures.
-
-    Args:
-        cap (cv2.VideoCapture): The already-initialized capture.
-        frames_to_discard (int): How many frames to read/discard.
-        sleep_time (float): How many seconds to wait between each frame capture.
-    """
-    for _ in range(frames_to_discard):
-        ret, _ = cap.read()
-        if not ret:
-            time.sleep(sleep_time)
-        else:
-            time.sleep(sleep_time)
-
-
 async def capture_screenshot_in_memory() -> Image.Image:
     """
     Capture the primary monitor's screenshot directly into a PIL Image
@@ -188,48 +121,9 @@ async def capture_screenshot_in_memory() -> Image.Image:
     return img
 
 
-async def capture_selfie_in_memory(
-    camera_index: int = 0, camera_backend: int = cv2.CAP_AVFOUNDATION
-) -> Image.Image:
-    """
-    Capture a single frame from the default webcam into a PIL Image
-    (using 'OpenCV') without writing to disk.
-
-    Args:
-        camera_index (int): Which camera device to open (default=0).
-        camera_backend (int): Desired OpenCV capture backend (default=CAP_AVFOUNDATION).
-
-    Returns:
-        PIL.Image: The webcam image as an in-memory PIL Image.
-    """
-    await play_sound("camera")
-
-    cap = _initialize_camera(camera_index, camera_backend)
-
-    # Set some typical capture dimensions (optional, but often helps)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-
-    # Warm-up to avoid black frames
-    _warm_up_camera(cap, frames_to_discard=6, sleep_time=0.1)
-
-    # Now read the actual frame
-    ret, frame = cap.read()
-    cap.release()
-
-    if not ret or frame is None:
-        raise RuntimeError("Failed to capture webcam frame (returned None).")
-
-    # Convert from BGR to RGB
-    img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    img = Image.fromarray(img_rgb)
-    logger.info("Selfie captured in memory.")
-    return img
-
-
 async def _capture_and_encode(
     capture_func: Callable[[], Awaitable[Image.Image]],
-    max_size: Tuple[int, int],
+    max_size: tuple[int, int],
     quality: int,
 ) -> str:
     """
@@ -240,7 +134,7 @@ async def _capture_and_encode(
 
 
 async def capture_screenshot_and_encode(
-    max_size: Tuple[int, int] = (1024, 728), quality: int = 99
+    max_size: tuple[int, int] = (1024, 728), quality: int = 99
 ) -> str:
     """
     Capture a screenshot entirely in memory, then encode it as a base64 JPEG.
@@ -254,22 +148,4 @@ async def capture_screenshot_and_encode(
     """
     return await _capture_and_encode(
         capture_func=capture_screenshot_in_memory, max_size=max_size, quality=quality
-    )
-
-
-async def capture_selfie_and_encode(
-    max_size: Tuple[int, int] = (1024, 728), quality: int = 99
-) -> str:
-    """
-    Capture a webcam frame entirely in memory, then encode it as base64 JPEG.
-
-    Args:
-        max_size (Tuple[int,int]): Resize limit for final image if needed.
-        quality (int): JPEG compression quality.
-
-    Returns:
-        str: Base64-encoded JPEG data.
-    """
-    return await _capture_and_encode(
-        capture_func=capture_selfie_in_memory, max_size=max_size, quality=quality
     )

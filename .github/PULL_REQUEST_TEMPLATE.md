@@ -9,7 +9,7 @@
 - [ ] New feature
 - [ ] Refactor
 - [ ] Documentation
-- [ ] New backend or mode
+- [ ] New backend or tool
 
 ## Test Plan
 
@@ -23,7 +23,7 @@ _List any changes to behavior, config, or CLI. Write `None` if internal only._
 
 ## Checklist
 
-- [ ] Tested end-to-end (at least one mode: Manual, Live, or Voice)
+- [ ] Tested end-to-end (voice input and/or typed input)
 - [ ] README updated (if behavior changed)
 - [ ] No breaking `.env` changes (or migration notes below)
 - [ ] New backend follows `BaseAIClient` contract

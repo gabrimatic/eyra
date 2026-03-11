@@ -1,20 +1,19 @@
-"""Tests for the runtime layer: models, screen observer debounce, speech controller, live session commands."""
+"""Tests for the runtime layer: models, speech controller, live session commands."""
 
 import asyncio
-import sys
 import os
+import sys
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from runtime.models import PreflightResult, LiveRuntimeState, RuntimeStatus, ObservationEvent
-from runtime.screen_observer import ScreenObserver
+from runtime.models import LiveRuntimeState, PreflightResult, RuntimeStatus
 from runtime.speech_controller import SpeechController
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 # ---------------------------------------------------------------------------
@@ -76,117 +75,6 @@ class TestPreflightResult:
         state = LiveRuntimeState.from_preflight(r)
         assert state.listening_enabled is False
         assert state.speech_enabled is True
-
-
-# ---------------------------------------------------------------------------
-# ScreenObserver debounce
-# ---------------------------------------------------------------------------
-
-class TestScreenObserverDebounce:
-    def _make_observer(self, debounce_ms=500):
-        state = LiveRuntimeState()
-        state.paused = False
-        state.observing = True
-        return ScreenObserver(state, debounce_ms=debounce_ms)
-
-    def test_first_fingerprint_change_returns_none(self):
-        observer = self._make_observer(debounce_ms=500)
-        fp_sequence = iter(["fp1", "fp2", "fp2"])
-
-        with patch("runtime.screen_observer._get_active_app", return_value=None), \
-             patch("runtime.screen_observer._get_active_window", return_value=None), \
-             patch("runtime.screen_observer._cheap_screen_fingerprint", side_effect=fp_sequence):
-            # First call sets fingerprint baseline
-            result = _run(observer.check())
-            assert result is None
-
-    def test_debounce_prevents_premature_event(self):
-        observer = self._make_observer(debounce_ms=60_000)  # very long debounce
-        fp_sequence = iter(["fp1", "fp2", "fp3"])
-
-        with patch("runtime.screen_observer._get_active_app", return_value=None), \
-             patch("runtime.screen_observer._get_active_window", return_value=None), \
-             patch("runtime.screen_observer._cheap_screen_fingerprint", side_effect=fp_sequence):
-            _run(observer.check())   # sets baseline
-            result = _run(observer.check())  # change detected, debouncing
-            assert result is None
-
-    def test_material_change_emitted_after_debounce(self):
-        # With debounce_ms=0: call 1 sets baseline (fp1), call 2 detects change (fp2),
-        # since _pending_change_at was set on call 1 and elapsed >= 0, it fires immediately.
-        observer = self._make_observer(debounce_ms=0)
-        fingerprints = ["fp1", "fp2", "fp2"]
-        idx = 0
-
-        def fp_factory():
-            nonlocal idx
-            val = fingerprints[min(idx, len(fingerprints) - 1)]
-            idx += 1
-            return val
-
-        with patch("runtime.screen_observer._get_active_app", return_value=None), \
-             patch("runtime.screen_observer._get_active_window", return_value=None), \
-             patch("runtime.screen_observer._cheap_screen_fingerprint", side_effect=fp_factory):
-            _run(observer.check())    # sets "fp1" baseline, starts _pending_change_at
-            event = _run(observer.check())  # detects "fp2", debounce elapsed -> material change
-
-        assert event is not None
-        assert event.material_change is True
-
-    def test_paused_state_returns_none(self):
-        state = LiveRuntimeState()
-        state.paused = True
-        observer = ScreenObserver(state, debounce_ms=0)
-
-        with patch("runtime.screen_observer._cheap_screen_fingerprint", return_value="fp1"):
-            result = _run(observer.check())
-        assert result is None
-
-    def test_app_change_updates_state(self):
-        # App changes are tracked in state immediately even without a material event.
-        state = LiveRuntimeState()
-        state.paused = False
-        state.observing = True
-        state.active_app = "Terminal"
-        state.last_screen_fingerprint = "fp1"
-        observer = ScreenObserver(state, debounce_ms=60_000)
-
-        with patch("runtime.screen_observer._get_active_app", return_value="Safari"), \
-             patch("runtime.screen_observer._get_active_window", return_value=None), \
-             patch("runtime.screen_observer._cheap_screen_fingerprint", return_value="fp1"):
-            _run(observer.check())
-
-        # State is updated even if no event is emitted yet
-        assert state.active_app == "Safari"
-
-    def test_app_change_with_fingerprint_emits_event(self):
-        # App change combined with a fingerprint change (post-debounce) emits a material event.
-        state = LiveRuntimeState()
-        state.paused = False
-        state.observing = True
-        state.active_app = "Terminal"
-        # Pre-seed the fingerprint so call 1 is stable and call 2 brings the change.
-        state.last_screen_fingerprint = "fp1"
-        observer = ScreenObserver(state, debounce_ms=0)
-        # On call 1: app changes Terminal->Safari, fp stays fp1 (stable).
-        # _pending_change_at is None, so the stable branch just returns None.
-        # On call 2: app is still "Safari" (already updated), fp changes fp1->fp2.
-        # _pending_change_at set on call 1's stable path? No. Need a different setup.
-        #
-        # Simplest: set _pending_change_at directly to simulate a prior change, then
-        # trigger a fingerprint change with an active app change.
-        observer._pending_change_at = asyncio.get_event_loop().time() - 1.0
-
-        fingerprints = ["fp2"]
-
-        with patch("runtime.screen_observer._get_active_app", side_effect=["Safari"]), \
-             patch("runtime.screen_observer._get_active_window", return_value=None), \
-             patch("runtime.screen_observer._cheap_screen_fingerprint", side_effect=fingerprints):
-            event = _run(observer.check())
-
-        assert event is not None
-        assert event.active_app_changed is True
-        assert event.material_change is True
 
 
 # ---------------------------------------------------------------------------
@@ -281,15 +169,9 @@ class TestSpeechController:
         mock_speech_proc.wait = AsyncMock(return_value=0)
         ctrl._speaking_proc = mock_speech_proc
 
-        # Mock the listen subprocess
-        mock_listen_proc = MagicMock()
-        mock_listen_proc.returncode = 0
-        mock_listen_proc.communicate = AsyncMock(return_value=(b"hello world", b""))
-
-        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_listen_proc):
+        with patch.object(ctrl._voice_input, "listen", new_callable=AsyncMock, return_value="hello world"):
             result = _run(ctrl.listen())
             assert result == "hello world"
-            # Speech process should have been waited on
             mock_speech_proc.wait.assert_called_once()
 
     def test_interrupt_terminates_process(self):
@@ -312,36 +194,31 @@ class TestSpeechController:
         result = _run(ctrl.listen())
         assert result is None
 
-    def test_listen_raises_on_service_busy(self):
-        from runtime.speech_controller import ServiceBusyError
+    def test_listen_delegates_to_voice_input(self):
+        """listen() delegates to VoiceInput and returns its result."""
         ctrl, state = self._make_controller()
         state.listening_enabled = True
 
-        mock_proc = MagicMock()
-        mock_proc.returncode = 1
-        mock_proc.communicate = AsyncMock(return_value=(b"Service is busy", b""))
+        with patch.object(ctrl._voice_input, "listen", new_callable=AsyncMock, return_value="test speech"):
+            result = _run(ctrl.listen())
+            assert result == "test speech"
+            ctrl._voice_input.listen.assert_called_once()
 
-        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
-            try:
-                _run(ctrl.listen())
-                assert False, "Should have raised ServiceBusyError"
-            except ServiceBusyError:
-                pass
-
-    def test_listen_raises_on_other_errors(self):
+    def test_listen_returns_none_on_silence(self):
+        """listen() returns None when VoiceInput detects no speech."""
         ctrl, state = self._make_controller()
         state.listening_enabled = True
 
-        mock_proc = MagicMock()
-        mock_proc.returncode = 1
-        mock_proc.communicate = AsyncMock(return_value=(b"", b"Unknown error"))
+        with patch.object(ctrl._voice_input, "listen", new_callable=AsyncMock, return_value=None):
+            result = _run(ctrl.listen())
+            assert result is None
 
-        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
-            try:
-                _run(ctrl.listen())
-                assert False, "Should have raised RuntimeError"
-            except RuntimeError:
-                pass
+    def test_cancel_listen_cancels_voice_input(self):
+        """cancel_listen() forwards to VoiceInput.cancel()."""
+        ctrl, _ = self._make_controller()
+        with patch.object(ctrl._voice_input, "cancel") as mock_cancel:
+            ctrl.cancel_listen()
+            mock_cancel.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -350,14 +227,12 @@ class TestSpeechController:
 
 class TestLiveSessionCommands:
     def _make_session(self):
+        from chat.complexity_scorer import ComplexityScorer
         from runtime.live_session import LiveSession
         from runtime.models import LiveRuntimeState, PreflightResult
-        from chat.complexity_scorer import ComplexityScorer
         from utils.settings import Settings
 
         settings = MagicMock(spec=Settings)
-        settings.LIVE_OBSERVATION_ENABLED = False
-        settings.OBSERVATION_DEBOUNCE_MS = 1500
         settings.SPEECH_COOLDOWN_MS = 3000
 
         preflight = PreflightResult(backend_reachable=True, models_ready=["m"])
@@ -371,19 +246,6 @@ class TestLiveSessionCommands:
             complexity_scorer=scorer,
         )
         return session
-
-    def test_pause_command(self):
-        session = self._make_session()
-        _run(session._handle_command("/pause"))
-        assert session.state.paused is True
-        assert session.state.current_status == RuntimeStatus.PAUSED
-
-    def test_resume_command(self):
-        session = self._make_session()
-        session.state.paused = True
-        _run(session._handle_command("/resume"))
-        assert session.state.paused is False
-        assert session.state.current_status == RuntimeStatus.OBSERVING
 
     def test_mute_command(self):
         session = self._make_session()
@@ -416,10 +278,8 @@ class TestLiveSessionCommands:
     def test_clear_command_resets_history(self):
         session = self._make_session()
         session.state.conversation_messages.append({"role": "user", "content": "hello"})
-        session.state.last_screen_summary = "something"
         _run(session._handle_command("/clear"))
         assert session.state.conversation_messages == []
-        assert session.state.last_screen_summary is None
 
     def test_unknown_command_returns_true(self):
         session = self._make_session()
@@ -443,12 +303,10 @@ class TestConfigFlagsApplied:
             screen_capture_available=True,
         )
         settings = MagicMock(spec=Settings)
-        settings.LIVE_OBSERVATION_ENABLED = False
         settings.LIVE_LISTENING_ENABLED = False
         settings.LIVE_SPEECH_ENABLED = False
 
         state = LiveRuntimeState.from_preflight(r, settings=settings)
-        assert state.observing is False
         assert state.listening_enabled is False
         assert state.speech_enabled is False
 
@@ -462,12 +320,10 @@ class TestConfigFlagsApplied:
             microphone_available=False,
         )
         settings = MagicMock(spec=Settings)
-        settings.LIVE_OBSERVATION_ENABLED = True
         settings.LIVE_LISTENING_ENABLED = True
         settings.LIVE_SPEECH_ENABLED = True
 
         state = LiveRuntimeState.from_preflight(r, settings=settings)
-        assert state.observing is True
         # wh not available, so these stay False regardless of config
         assert state.listening_enabled is False
         assert state.speech_enabled is False
@@ -491,13 +347,11 @@ class TestConfigFlagsApplied:
 
 class TestScreenContextDetection:
     def _make_session(self):
-        from runtime.live_session import LiveSession
         from chat.complexity_scorer import ComplexityScorer
+        from runtime.live_session import LiveSession
         from utils.settings import Settings
 
         settings = MagicMock(spec=Settings)
-        settings.LIVE_OBSERVATION_ENABLED = False
-        settings.OBSERVATION_DEBOUNCE_MS = 1500
         settings.SPEECH_COOLDOWN_MS = 3000
 
         preflight = PreflightResult(backend_reachable=True, models_ready=["m"])
@@ -564,32 +418,20 @@ class TestScreenContextDetection:
         assert session._needs_screen_context("read the text on the screen") is True
         assert session._needs_screen_context("show me that window") is True
 
-    def test_followup_after_observation_needs_screen(self):
-        session = self._make_session()
-        session.state.last_screen_summary = "There is an error dialog visible."
-        session.state.conversation_messages = [
-            {"role": "user", "content": "some prompt"},
-            {"role": "assistant", "content": "There is an error dialog visible."},
-            {"role": "user", "content": "why is it failing?"},
-        ]
-        assert session._needs_screen_context("why is it failing?") is True
-
 
 # ---------------------------------------------------------------------------
 # Fix verification: initial status and header text
 # ---------------------------------------------------------------------------
 
 class TestInitialStatusAndHeader:
-    def _make_session(self, observation=True, listening=False, speech=False):
-        from runtime.live_session import LiveSession
+    def _make_session(self, listening=False, speech=False):
         from chat.complexity_scorer import ComplexityScorer
+        from runtime.live_session import LiveSession
         from utils.settings import Settings
 
         settings = MagicMock(spec=Settings)
-        settings.LIVE_OBSERVATION_ENABLED = observation
         settings.LIVE_LISTENING_ENABLED = listening
         settings.LIVE_SPEECH_ENABLED = speech
-        settings.OBSERVATION_DEBOUNCE_MS = 1500
         settings.SPEECH_COOLDOWN_MS = 3000
 
         preflight = PreflightResult(
@@ -602,32 +444,21 @@ class TestInitialStatusAndHeader:
         session = LiveSession(settings=settings, preflight=preflight, state=state, complexity_scorer=scorer)
         return session, state
 
-    def test_default_status_observing_when_enabled(self):
-        session, state = self._make_session(observation=True)
-        assert session._default_status() == RuntimeStatus.OBSERVING
-
-    def test_default_status_idle_when_observation_disabled(self):
-        session, state = self._make_session(observation=False)
-        assert session._default_status() == RuntimeStatus.IDLE
-
-    def test_status_stays_idle_after_response_when_observation_off(self):
-        """Post-response status should not regress to OBSERVING when observation is off."""
-        session, state = self._make_session(observation=False, listening=False, speech=False)
-        # Simulate the end of _stream_response
-        state.current_status = session._default_status()
-        assert state.current_status == RuntimeStatus.IDLE
+    def test_initial_status_is_idle(self):
+        session, state = self._make_session()
+        # LiveSession starts STARTING before run() is called
+        assert state.current_status == RuntimeStatus.STARTING
 
     def test_header_says_type_only_when_listening_off(self, capsys):
         from runtime.status_presenter import render_header
-        _, state = self._make_session(observation=True, listening=False)
+        _, state = self._make_session(listening=False)
         render_header(state)
         out = capsys.readouterr().out
         assert "Type anything." in out
-        assert "or speak" not in out
 
     def test_header_says_type_or_speak_when_listening_on(self, capsys):
         from runtime.status_presenter import render_header
-        _, state = self._make_session(observation=True, listening=True)
+        _, state = self._make_session(listening=True)
         render_header(state)
         out = capsys.readouterr().out
         assert "Type anything or speak." in out

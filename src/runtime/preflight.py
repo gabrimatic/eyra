@@ -9,16 +9,9 @@ import httpx
 
 from runtime.models import PreflightResult
 from utils.settings import Settings
+from utils.theme import CYAN, DIM, GREEN, NC, RED, YELLOW
 
 logger = logging.getLogger(__name__)
-
-CYAN = "\033[0;36m"
-GREEN = "\033[0;32m"
-YELLOW = "\033[0;33m"
-RED = "\033[0;31m"
-DIM = "\033[2m"
-BOLD = "\033[1m"
-NC = "\033[0m"
 
 
 def _ok(msg: str):
@@ -139,6 +132,18 @@ class PreflightManager:
             return proc.returncode == 0
         except Exception:
             return False
+
+    @staticmethod
+    async def unload_models(settings: Settings, model_names: list[str]):
+        """Release models from memory (keep_alive=0). Fails silently for backends that don't support it."""
+        base = settings.API_BASE_URL.rstrip("/v1").rstrip("/")
+        async with httpx.AsyncClient(timeout=5) as client:
+            for model in model_names:
+                try:
+                    await client.post(f"{base}/api/generate", json={"model": model, "keep_alive": 0})
+                    logger.info("Unloaded model: %s", model)
+                except Exception as e:
+                    logger.debug("Could not unload %s: %s", model, e)
 
     def _check_wh(self) -> bool:
         """Check that Local Whisper is installed and the service is running."""
