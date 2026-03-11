@@ -8,7 +8,6 @@ pattern matching and weighted signal scoring. No ML dependencies.
 import logging
 import re
 from enum import Enum
-from typing import List, Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -62,14 +61,6 @@ _COMPLEX_ANALYSIS_PATTERNS: list[re.Pattern] = [
     re.compile(r"\b(prove|derive|formalize)\b", re.I),
     re.compile(r"\bmulti.?step\b|\bstep.?by.?step\b.{0,20}\b(plan|solution|approach)\b", re.I),
     re.compile(r"\b(expert|in.?depth|thorough|comprehensive|detailed)\b.{0,20}\b(analysis|review|assessment|explanation)\b", re.I),
-]
-
-_COMPLEX_IMAGE_PATTERNS: list[re.Pattern] = [
-    re.compile(r"\b(extract|ocr|read|transcribe)\b.{0,20}\b(text|code|content|data)\b", re.I),
-    re.compile(r"\b(find|spot|identify|locate)\b.{0,20}\b(bug|error|issue|problem|mistake)\b", re.I),
-    re.compile(r"\b(accessibility|a11y|wcag|ui\s*review|ux\s*audit)\b", re.I),
-    re.compile(r"\b(deep|thorough|detailed|comprehensive)\b.{0,20}\b(analy|review|inspect|assess)", re.I),
-    re.compile(r"\bcode\s*screenshot\b", re.I),
 ]
 
 # ---------------------------------------------------------------------------
@@ -156,20 +147,10 @@ class ComplexityScorer:
 
     async def score_complexity(
         self,
-        text_content: Optional[str],
-        task_type: str,
-        image_base64: Optional[str] = None,
-        messages: Optional[List[Dict]] = None,
+        text_content: str | None,
+        messages: list[dict] | None = None,
     ) -> ComplexityResponse:
         text = (text_content or "").strip()
-
-        # ----- Image routing -----
-        if task_type == "image":
-            result = self._route_image(text)
-            logger.info(f"[Router] image -> {result.classification} (conf={result.confidence:.2f})")
-            return result
-
-        # ----- Text routing -----
 
         # 1. Hard-match simple
         if text and self._matches_any(text, _SIMPLE_PATTERNS):
@@ -189,28 +170,9 @@ class ComplexityScorer:
         logger.info(f"[Router] score={score:.3f} -> {result.classification} (conf={result.confidence:.2f})")
         return result
 
-    # ----- Image routing -----
-
-    def _route_image(self, text: str) -> ComplexityResponse:
-        """Image tasks never route to Simple."""
-        if not text or text in ("#image", "#selfie"):
-            return ComplexityResponse(classification=ComplexityLevel.MODERATE, confidence=0.90)
-
-        # Generic descriptions
-        generic = re.compile(r"^(describe|what is|what do you see|what's in|look at)\b", re.I)
-        if generic.match(text) and not self._matches_any(text, _COMPLEX_IMAGE_PATTERNS):
-            return ComplexityResponse(classification=ComplexityLevel.MODERATE, confidence=0.75)
-
-        # Complex image analysis
-        if self._matches_any(text, _COMPLEX_IMAGE_PATTERNS):
-            return ComplexityResponse(classification=ComplexityLevel.COMPLEX, confidence=0.90)
-
-        # Default for image: Moderate
-        return ComplexityResponse(classification=ComplexityLevel.MODERATE, confidence=0.75)
-
     # ----- Text score computation -----
 
-    def _compute_text_score(self, text: str, messages: Optional[List[Dict]]) -> float:
+    def _compute_text_score(self, text: str, messages: list[dict] | None) -> float:
         if not text:
             return 0.0
 
@@ -278,7 +240,7 @@ class ComplexityScorer:
             return False
         return self._matches_any(text, _FOLLOWUP_PATTERNS)
 
-    def _get_prior_complexity(self, messages: List[Dict]) -> Optional[ComplexityLevel]:
+    def _get_prior_complexity(self, messages: list[dict]) -> ComplexityLevel | None:
         """Look at the last 3 user messages for context."""
         user_msgs = [m for m in messages if m.get("role") == "user"]
         recent = user_msgs[-3:] if len(user_msgs) >= 3 else user_msgs

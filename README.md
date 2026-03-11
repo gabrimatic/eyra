@@ -4,9 +4,9 @@
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)]()
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)]()
 
-**Live AI screen assistant for the terminal.**
+**Voice-first AI assistant for the terminal.**
 
-Eyra starts immediately as a live screen-aware assistant. It observes your screen, listens for voice input, and responds in text or speech. No mode switching, no commands required to become useful. Works with any OpenAI-compatible provider.
+Eyra listens, thinks, and acts. It takes voice or typed input, routes to the right model tier, and calls tools (like screenshot) only when needed. No constant screen capture, no polling. Works with any OpenAI-compatible provider.
 
 <p align="center"><img src="screenshot.png" width="800" alt="Eyra terminal screenshot"></p>
 
@@ -33,25 +33,25 @@ Eyra runs preflight checks, then enters a live session:
 ```
 Eyra Live
 
-  Observation: on  Listening: on  Speech: on
+  Listening: on  Speech: on
   Backend: local  Routing: automatic
 
-  Type anything or speak. /pause /mute /goal /status /quit
+  Type anything or speak. /mute /goal /status /quit
 ```
 
-From this point, Eyra is already observing your screen. Type or speak at any time.
+From this point, Eyra is listening. Type or speak at any time.
 
 ---
 
 ## What It Does
 
 - Launches directly into a live, always-on assistant session
-- Continuously observes your screen with cheap fingerprinting, only captures when something changes
-- Accepts typed or spoken input at any time without leaving the live session
-- Routes to the appropriate model tier based on deterministic prompt analysis
+- Accepts typed or spoken input without leaving the session
+- Routes requests to the appropriate model (complexity routing available as an experimental option)
+- Uses tools (screenshot, time, weather, clipboard, system info) on demand via function calling
 - Speaks responses via local-whisper when available
 - Works with any OpenAI-compatible provider (Ollama, LM Studio, vLLM, OpenRouter, etc.)
-- Captures screenshots in memory, no disk I/O
+- All image data stays in memory, no disk I/O
 
 ---
 
@@ -59,10 +59,11 @@ From this point, Eyra is already observing your screen. Type or speak at any tim
 
 Eyra runs as one live session with concurrent subsystems:
 
-- **Screen observation** continuously fingerprints the screen. When a material change is detected (debounced), it captures a full screenshot and analyzes it with the smallest adequate model.
-- **Typed input** is always available inline. Trivial messages (greetings, thanks) skip the screenshot. Anything substantive gets current screen context automatically.
-- **Voice input** listens continuously via local-whisper when available. Speak naturally; Eyra interrupts its own speech to hear you.
-- **Speech output** speaks responses and proactive observations via local-whisper TTS.
+- **Voice input** records from the microphone via sounddevice and classifies each 32ms frame with Silero VAD (a neural speech detector running as an ONNX model). When the speaker pauses, the audio is transcribed by local-whisper. No energy thresholds, no calibration. Speak naturally; Eyra interrupts its own speech to hear you.
+- **Typed input** is always available inline. Both input channels feed the same conversation.
+- **Complexity routing** (experimental, off by default) scores requests deterministically and dispatches to Simple, Moderate, or Complex tier. When disabled, all requests use a single configurable model.
+- **Tool use** gives the model access to screenshot, time, weather, clipboard, and system info. Tools are defined as OpenAI function-calling schemas and executed locally. When complexity routing is enabled, Simple/Moderate tiers get lightweight tools and Complex gets all tools including screenshot.
+- **Speech output** speaks responses via local-whisper TTS.
 
 ### Preflight
 
@@ -80,12 +81,9 @@ The session does not start until the backend and models are confirmed ready.
 
 | Command | What it does |
 |---------|-------------|
-| `/pause` | Pause screen observation |
-| `/resume` | Resume observation |
 | `/mute` | Mute speech output |
 | `/unmute` | Unmute speech |
-| `/goal <text>` | Set a watch goal ("tell me when an error appears") |
-| `/inspect` | Force a screen capture and analysis now |
+| `/goal <text>` | Set a conversational goal ("tell me when an error appears") |
 | `/mode fast\|balanced\|best` | Set quality mode |
 | `/status` | Show current runtime state |
 | `/clear` | Reset conversation history |
@@ -109,7 +107,9 @@ Control the speed/quality trade-off with `/mode`:
 
 ## Complexity Routing
 
-In `balanced` mode, every request is scored by `ComplexityScorer` before dispatch.
+Complexity routing is **experimental and off by default**. When disabled (`COMPLEXITY_ROUTING_ENABLED=false`), all requests use the single `MODEL` setting with all tools available.
+
+When enabled (`COMPLEXITY_ROUTING_ENABLED=true`), every request in `balanced` mode is scored by `ComplexityScorer` before dispatch.
 
 Scoring factors:
 
@@ -118,11 +118,11 @@ Scoring factors:
 - Prompt length and constraint analysis
 - Follow-up context from recent messages
 
-| Score | Text model | Image model |
-|-------|-----------|-------------|
-| Simple | `SIMPLE_TEXT_MODEL` | `SIMPLE_IMAGE_MODEL` |
-| Moderate | `MODERATE_TEXT_MODEL` | `MODERATE_IMAGE_MODEL` |
-| Complex | `COMPLEX_MODEL` | `COMPLEX_MODEL` |
+| Score | Model |
+|-------|-------|
+| Simple | `SIMPLE_MODEL` |
+| Moderate | `MODERATE_MODEL` |
+| Complex | `MODEL` |
 
 All model names are set in `.env`. Any model supported by your provider works.
 
@@ -139,23 +139,23 @@ API_KEY=ollama        # leave as-is for local; set your key for cloud providers
 
 USE_MOCK_CLIENT=false
 
-SCREENSHOT_INTERVAL=1   # seconds between captures in watch mode
+# Default model for all requests (used when complexity routing is off)
+MODEL=qwen3.5:4b
 
-# Model names — set to any model your provider supports
-SIMPLE_TEXT_MODEL=...
-MODERATE_TEXT_MODEL=...
-SIMPLE_IMAGE_MODEL=...
-MODERATE_IMAGE_MODEL=...
-COMPLEX_MODEL=...
+# Tier models — only used when COMPLEXITY_ROUTING_ENABLED=true
+SIMPLE_MODEL=qwen3.5:2b
+MODERATE_MODEL=qwen3.5:4b
 
 # Live runtime settings
 AUTO_PULL_MODELS=true
 LIVE_LISTENING_ENABLED=true
 LIVE_SPEECH_ENABLED=true
-LIVE_OBSERVATION_ENABLED=true
-OBSERVATION_DEBOUNCE_MS=1500
-OBSERVATION_COOLDOWN_MS=5000
 SPEECH_COOLDOWN_MS=3000
+VOICE_SILENCE_MS=1500          # silence after speech before processing (ms)
+VOICE_VAD_THRESHOLD=0.6        # Silero VAD sensitivity (0.0-1.0, higher = stricter)
+
+# Experimental: complexity-based routing. When disabled, all requests use MODEL.
+COMPLEXITY_ROUTING_ENABLED=false
 ```
 
 `API_BASE_URL` accepts any OpenAI-compatible endpoint. Point it at Ollama (default), LM Studio, vLLM, OpenRouter, Groq, or OpenAI itself. `API_KEY` is ignored by local providers but required for cloud ones.
@@ -169,9 +169,11 @@ SPEECH_COOLDOWN_MS=3000
 | Component | Where it runs |
 |-----------|--------------|
 | AI backend | `API_BASE_URL` (default: localhost:11434) |
-| wh listen (local-whisper) | Subprocess, fully local |
+| Silero VAD | Neural ONNX model, runs in-process, fully local |
+| Voice recording | sounddevice (PortAudio), in-process, fully local |
+| wh transcribe (local-whisper) | Subprocess, fully local |
 | wh whisper (local-whisper) | Subprocess, fully local |
-| Screenshots / webcam | In-memory only, never written to disk |
+| Screenshots | In-memory only, never written to disk |
 
 No telemetry. No analytics. By default everything runs on your machine. If you point `API_BASE_URL` at a remote provider, prompts and images will leave your machine to that provider.
 
@@ -189,11 +191,19 @@ eyra/
 │   │   ├── live_session.py         # Unified orchestrator
 │   │   ├── models.py              # Runtime state and event dataclasses
 │   │   ├── preflight.py           # Backend, model, and capability validation
-│   │   ├── screen_observer.py     # Cheap fingerprinting + triggered capture
-│   │   ├── speech_controller.py   # TTS output and STT input via local-whisper
+│   │   ├── speech_controller.py   # TTS output and STT input coordination
+│   │   ├── voice_input.py         # Silero VAD recording + local-whisper transcription
 │   │   └── status_presenter.py    # User-facing status header and updates
+│   ├── tools/
+│   │   ├── base.py                # BaseTool abstract + ToolResult
+│   │   ├── registry.py            # Tool registry and dispatch
+│   │   ├── screenshot.py          # In-memory screenshot via mss
+│   │   ├── time_tool.py           # Current time tool
+│   │   ├── weather.py             # Weather info tool
+│   │   ├── clipboard.py           # Clipboard reader tool
+│   │   └── system_info.py         # System info tool
 │   ├── chat/
-│   │   ├── capture.py             # In-memory screenshot and webcam capture
+│   │   ├── capture.py             # In-memory screenshot capture
 │   │   ├── complexity_scorer.py   # Deterministic prompt routing
 │   │   ├── message_handler.py     # Model selection, response shaping, streaming
 │   │   └── session_state.py       # Shared session types
@@ -238,12 +248,6 @@ If the service is not running: `wh start`. See [local-whisper](https://github.co
 
 </details>
 
-<details><summary><strong>Webcam not opening</strong></summary>
-
-Eyra uses OpenCV with the AVFoundation backend. Grant camera access to your terminal in System Settings > Privacy & Security > Camera.
-
-</details>
-
 ---
 
 ## Development
@@ -260,7 +264,7 @@ USE_MOCK_CLIENT=true uv run python src/main.py
 
 ## Credits
 
-[Ollama](https://ollama.com) · [local-whisper](https://github.com/gabrimatic/local-whisper) (STT + TTS via Kokoro) · [mss](https://github.com/BoboTiG/python-mss) · [OpenCV](https://opencv.org)
+[Ollama](https://ollama.com) · [local-whisper](https://github.com/gabrimatic/local-whisper) (STT + TTS via Kokoro) · [Silero VAD](https://github.com/snakers4/silero-vad) (voice activity detection) · [mss](https://github.com/BoboTiG/python-mss)
 
 <details>
 <summary><strong>Legal notices</strong></summary>

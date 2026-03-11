@@ -1,8 +1,8 @@
 """
-Eyra — live AI screen assistant.
+Eyra — voice-first AI assistant.
 
-Starts immediately as an always-on live session with screen observation,
-typed input, and optional voice I/O. No mode switching required.
+Starts as an always-on live session with typed input, optional voice I/O,
+and on-demand tool use. The model decides when to capture the screen.
 """
 
 import asyncio
@@ -10,15 +10,15 @@ import logging
 import os
 import warnings
 
-from utils.settings import Settings
 from chat.complexity_scorer import ComplexityScorer
-from chat.message_handler import close_all_clients
-from runtime.preflight import PreflightManager
-from runtime.models import LiveRuntimeState
+from chat.message_handler import close_all_clients, get_used_model_names
 from runtime.live_session import LiveSession
+from runtime.models import LiveRuntimeState
+from runtime.preflight import PreflightManager
+from utils.settings import Settings
+from utils.theme import NC, RED, YELLOW
 
 warnings.filterwarnings("ignore", category=FutureWarning, message=".*weights_only.*")
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 async def main() -> None:
@@ -51,11 +51,12 @@ async def main() -> None:
     preflight = await PreflightManager(settings).run()
 
     if not preflight.backend_reachable:
-        print("\n  Backend is not reachable. Start your backend and try again.\n")
+        print(f"\n  {RED}Backend is not reachable.{NC} Start your backend and try again.\n")
         return
 
     if preflight.models_missing:
-        print(f"\n  Missing models: {', '.join(preflight.models_missing)}")
+        missing = ", ".join(preflight.models_missing)
+        print(f"\n  {YELLOW}Missing models:{NC} {missing}")
         print("  Run setup.sh or pull them manually.\n")
         return
 
@@ -73,6 +74,7 @@ async def main() -> None:
     try:
         await session.run()
     finally:
+        await PreflightManager.unload_models(settings, get_used_model_names())
         await close_all_clients()
         logger.info("Session ended.")
 

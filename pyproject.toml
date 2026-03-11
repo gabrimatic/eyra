@@ -5,14 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "eyra"
 version = "1.0.0"
-description = "Real-time AI screen analysis from the terminal."
+description = "Voice-first AI assistant for macOS terminals."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [
     { name = "Soroush Yousefpour" }
 ]
-keywords = ["ai", "screen", "vision", "macos", "local", "privacy", "ollama", "openai-compatible"]
+keywords = ["ai", "voice", "assistant", "macos", "local", "privacy", "ollama", "openai-compatible"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -28,11 +28,15 @@ classifiers = [
 dependencies = [
     "openai>=1.0.0",
     "mss>=10.1.0",
-    "opencv-python>=4.11.0",
+    "numpy>=1.26.0",
     "pillow>=11.0.0",
     "prompt-toolkit>=3.0.0",
     "pydantic>=2.11.0",
     "python-dotenv>=1.1.0",
+    "silero-vad>=5.1",
+    "sounddevice>=0.5.0",
+    "onnxruntime>=1.17.0",
+    "playwright>=1.58.0",
 ]
 
 [project.urls]
@@ -45,6 +49,7 @@ Changelog = "https://github.com/gabrimatic/eyra/blob/master/CHANGELOG.md"
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "ruff>=0.11.0",
 ]
 
 [tool.ruff]
@@ -56,7 +61,7 @@ select = ["E", "F", "I", "W"]
 ignore = ["E501"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/chat", "src/clients", "src/modes", "src/utils", "src/runtime"]
+packages = ["src/chat", "src/clients", "src/tools", "src/utils", "src/runtime"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

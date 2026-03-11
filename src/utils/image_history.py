@@ -5,10 +5,7 @@ Strips base64 image payloads from older messages so text-only
 requests don't accidentally resend large multipart content.
 """
 
-from typing import List, Dict
-
-
-def _strip_image_content(msg: Dict) -> Dict:
+def _strip_image_content(msg: dict) -> dict:
     """Replace multipart image messages with their text-only portion."""
     content = msg.get("content")
     if not isinstance(content, list):
@@ -20,7 +17,7 @@ def _strip_image_content(msg: Dict) -> Dict:
     return {**msg, "content": text or "[image]"}
 
 
-def manage_message_history(messages: List[Dict], max_messages: int = 10) -> List[Dict]:
+def manage_message_history(messages: list[dict], max_messages: int = 10) -> list[dict]:
     """
     Return a trimmed, cleaned copy of the message history.
 

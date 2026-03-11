@@ -1,25 +1,23 @@
-"""Speech output and input via local-whisper (wh)."""
+"""Speech output (TTS) and voice input (VAD + ASR) via Local Whisper."""
+
+from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from typing import Optional
 
 from runtime.models import LiveRuntimeState
+from runtime.voice_input import VoiceInput
 
 logger = logging.getLogger(__name__)
 
 
-class ServiceBusyError(Exception):
-    """Raised when the Local Whisper service is temporarily busy."""
-    pass
-
-
 class SpeechController:
-    def __init__(self, state: LiveRuntimeState, cooldown_ms: int = 3000):
+    def __init__(self, state: LiveRuntimeState, cooldown_ms: int = 3000, silence_duration_ms: int = 1500, vad_threshold: float = 0.6):
         self.state = state
         self.cooldown_s = cooldown_ms / 1000.0
-        self._speaking_proc: Optional[asyncio.subprocess.Process] = None
+        self._speaking_proc: asyncio.subprocess.Process | None = None
+        self._voice_input = VoiceInput(silence_duration_ms=silence_duration_ms, threshold=vad_threshold)
 
     @property
     def is_speaking(self) -> bool:
@@ -74,46 +72,17 @@ class SpeechController:
                     pass
         self._speaking_proc = None
 
-    async def listen(self, timeout_seconds: int = 10) -> Optional[str]:
-        """Listen via wh listen. Returns transcribed text, None on silence,
-        raises ServiceBusyError or RuntimeError on real failures."""
+    async def listen(self) -> str | None:
+        """Listen via smart VAD recording + Local Whisper transcription.
+        Returns transcribed text, or None on silence/cancel."""
         if not self.state.listening_enabled:
             return None
 
         # Wait for any ongoing speech to finish first
         await self.wait_for_speech()
 
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "wh", "listen", str(timeout_seconds), "--raw",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout_seconds + 5
-            )
+        return await self._voice_input.listen()
 
-            out = stdout.decode().strip() if stdout else ""
-            err = stderr.decode().strip() if stderr else ""
-
-            # "No speech detected" is normal silence, regardless of exit code
-            if "no speech" in out.lower() or "no speech" in err.lower():
-                return None
-
-            if proc.returncode != 0:
-                msg = err or out or f"wh listen exited {proc.returncode}"
-                if "busy" in msg.lower():
-                    raise ServiceBusyError(msg)
-                raise RuntimeError(msg)
-
-            # With --raw, strip any "Recording..." prefix lines
-            lines = out.splitlines()
-            text_lines = [
-                l for l in lines
-                if not l.startswith("Recording") and l.strip()
-            ]
-            text = " ".join(text_lines).strip()
-            return text if text else None
-
-        except asyncio.TimeoutError:
-            return None
+    def cancel_listen(self):
+        """Cancel an in-progress listen from another coroutine."""
+        self._voice_input.cancel()

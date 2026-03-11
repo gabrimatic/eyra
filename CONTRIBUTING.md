@@ -1,6 +1,6 @@
 # Contributing
 
-Bug fixes, new modes and backends, better docs. Here's how to get involved.
+Bug fixes, new tools, backend improvements, better docs. Here's how to get involved.
 
 ## Dev Setup
 
@@ -12,36 +12,45 @@ cd eyra
 
 Set `USE_MOCK_CLIENT=true` in `.env` to run without any AI backend during development.
 
-Voice mode requires local-whisper running locally. Check with `wh status`.
+Voice input requires local-whisper running locally. Check with `wh status`.
 
 ## Architecture
 
 ```
 eyra/
 ├── src/
-│   ├── main.py                  # Entry point, unified session loop
+│   ├── main.py                  # Entry point, preflight checks, session launch
 │   ├── chat/
-│   │   ├── capture.py           # In-memory screenshot and webcam capture
+│   │   ├── capture.py           # In-memory screenshot capture
 │   │   ├── complexity_scorer.py # Deterministic prompt routing
 │   │   ├── message_handler.py   # Model selection, response shaping, streaming
-│   │   └── session_state.py     # Shared in-memory session state
+│   │   └── session_state.py     # Quality mode and interaction style enums
 │   ├── clients/
 │   │   ├── base_client.py       # BaseAIClient abstract class
 │   │   └── ai_client.py         # OpenAI-compatible async client
-│   ├── modes/
-│   │   ├── base_mode.py         # BaseMode abstract class
-│   │   ├── manual_mode.py       # Text interaction + command handling
-│   │   ├── live_mode.py         # Watch mode (continuous screen analysis)
-│   │   └── voice/
-│   │       └── voice_mode.py    # Voice pipeline (STT + LLM + TTS)
+│   ├── runtime/
+│   │   ├── live_session.py      # Central orchestrator (voice + typed input)
+│   │   ├── models.py            # Runtime data models
+│   │   ├── preflight.py         # Backend and model validation
+│   │   ├── speech_controller.py # TTS/STT coordination
+│   │   ├── voice_input.py      # Silero VAD recording + local-whisper transcription
+│   │   └── status_presenter.py  # Session status display
+│   ├── tools/
+│   │   ├── base.py              # Base tool interface
+│   │   ├── registry.py          # Tool registration and lookup
+│   │   ├── screenshot.py        # On-demand screenshot tool
+│   │   ├── time_tool.py         # Current time tool
+│   │   ├── weather.py           # Weather info tool
+│   │   ├── clipboard.py         # Clipboard reader tool
+│   │   └── system_info.py       # System info tool
 │   └── utils/
-│       ├── settings.py
-│       ├── image_history.py
-│       ├── sound_player.py
-│       └── mock_client.py
+│       ├── settings.py          # .env config loader
+│       ├── image_history.py     # Image context management
+│       ├── sound_player.py      # Audio feedback
+│       └── mock_client.py       # Mock client for development
 ```
 
-The routing path for every request: `message_handler.py` → `complexity_scorer.py` → quality mode override → response shaping → client selection → streaming.
+The app starts a single `LiveSession` with concurrent input loops for voice and typed input. The model can call tools (like screenshot) on demand. Routing path: `message_handler.py` → `complexity_scorer.py` → quality mode override → response shaping → client selection → streaming.
 
 ## New AI Backend
 
@@ -53,34 +62,35 @@ The routing path for every request: `message_handler.py` → `complexity_scorer.
 
 Keep streaming behavior consistent with existing clients. Responses should yield string chunks, not complete strings.
 
-## New Interaction Style
+## New Tool
 
-1. Create a file in `src/modes/`, e.g. `src/modes/my_mode.py`
-2. Subclass `BaseMode` from `src/modes/base_mode.py`
-3. Implement `run()` — return the next style string ('text', 'watch', 'voice') or None to exit
-4. Accept `session: SessionState` and use it for shared state
-5. Add the style to the session loop in `src/main.py`
+1. Create a file in `src/tools/`, e.g. `src/tools/my_tool.py`
+2. Implement the tool interface from `src/tools/base.py`
+3. Register it in `src/runtime/live_session.py` inside `_build_tool_registry()`
+
+Tools are invoked by the model on demand. Keep tool implementations stateless where possible.
 
 ## Testing
 
-There is no automated test suite at this time. Manual verification flow:
+```bash
+uv run pytest -q                           # Run all tests
+uv run pytest tests/test_runtime.py -q     # Run a single test file
+uv run pytest tests/test_runtime.py -k "test_name" -q  # Run a single test
+ruff check src/                            # Lint
+```
 
-1. `USE_MOCK_CLIENT=true uv run python src/main.py` — confirm app starts in text mode
-2. Text mode: send a text prompt, confirm streamed response
-3. Text mode: send `test #image`, confirm screenshot is captured and sent
-4. Text mode: `/watch` to start watch mode, confirm loop output, `Ctrl+C` to return to text
-5. Text mode: `/voice` to enter voice mode, speak when prompted, confirm response via local-whisper
-6. `/mode best` then a prompt — confirm strongest model is used
-7. `/status` — confirm current state is displayed
-8. `/clear` — confirm session is reset
-9. `/retry` — confirm last request is re-sent
+Manual verification flow:
 
-For new clients, test with both text and image inputs at each complexity level.
+1. `USE_MOCK_CLIENT=true uv run python src/main.py` — confirm app starts as a live session
+2. Type a prompt, confirm streamed response
+3. Speak a prompt (requires local-whisper), confirm voice response
+4. `/status` — confirm current state is displayed
+5. `/clear` — confirm session is reset
 
 ## PR Checklist
 
 - Code follows the style of the surrounding file (indentation, naming, structure)
-- No new dependencies added without updating `pyproject.toml` and `requirements.txt`
+- No new dependencies added without updating `pyproject.toml`
 - Mock client still works (`USE_MOCK_CLIENT=true`)
 - No credentials, API keys, or personal data in any file
 - Manual verification flow passes

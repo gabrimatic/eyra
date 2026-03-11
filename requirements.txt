@@ -7,4 +7,3 @@ pydantic>=2.0.0
 
 # Image capture
 mss>=10.1.0
-opencv-python>=4.11.0

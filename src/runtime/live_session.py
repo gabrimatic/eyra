@@ -1,42 +1,49 @@
 """Unified live session orchestrator."""
 
 import asyncio
-import hashlib
 import logging
 import re
 import time
-from typing import Optional
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI
 
 from chat.complexity_scorer import ComplexityScorer
 from chat.message_handler import process_task_stream
-from chat.session_state import QualityMode, InteractionStyle
-from runtime.models import (
-    LiveRuntimeState,
-    PreflightResult,
-    RuntimeStatus,
-    ObservationEvent,
+from chat.session_state import InteractionStyle, QualityMode
+from runtime.models import LiveRuntimeState, PreflightResult, RuntimeStatus
+from runtime.speech_controller import SpeechController
+from runtime.status_presenter import (
+    print_status_change,
+    render_header,
+    render_help_card,
+    render_status_card,
 )
-from runtime.screen_observer import ScreenObserver
-from runtime.speech_controller import SpeechController, ServiceBusyError
-from runtime.status_presenter import render_header, print_status_change, status_line
-from utils.image_history import manage_message_history
+from tools.browser import BrowserSession, ClickElementTool, OpenUrlTool, PageScreenshotTool, WebSearchTool
+from tools.clipboard import ClipboardTool
+from tools.filesystem import (
+    CreateDirectoryTool,
+    EditFileTool,
+    ListDirectoryTool,
+    ReadFileTool,
+    WriteFileTool,
+    parse_allowed_roots,
+)
+from tools.registry import ToolRegistry
+from tools.screenshot import ScreenshotTool
+from tools.system_info import SystemInfoTool
+from tools.time_tool import TimeTool
+from tools.weather import WeatherTool
 from utils.settings import Settings
+from utils.sound_player import play_sound
+from utils.theme import CYAN, DIM, NC
 
 logger = logging.getLogger(__name__)
 
-CYAN = "\033[0;36m"
-GREEN = "\033[0;32m"
-DIM = "\033[2m"
-BOLD = "\033[1m"
-NC = "\033[0m"
-
 _COMMANDS = {
-    "/pause", "/resume", "/mute", "/unmute",
+    "/mute", "/unmute",
     "/goal", "/status", "/quit", "/clear",
-    "/mode", "/inspect",
+    "/mode", "/help",
 }
 
 _QUIT_WORDS = {"quit", "exit", "bye", "goodbye", "q"}
@@ -70,31 +77,49 @@ class LiveSession:
         self.preflight = preflight
         self.state = state
         self.scorer = complexity_scorer
-        self.observer = ScreenObserver(state, debounce_ms=settings.OBSERVATION_DEBOUNCE_MS)
-        self.speech = SpeechController(state, cooldown_ms=settings.SPEECH_COOLDOWN_MS)
+        self.speech = SpeechController(
+            state,
+            cooldown_ms=settings.SPEECH_COOLDOWN_MS,
+            silence_duration_ms=settings.VOICE_SILENCE_MS,
+            vad_threshold=settings.VOICE_VAD_THRESHOLD,
+        )
         self.quality_mode = QualityMode.BALANCED
         self._prompt = PromptSession()
         self._shutdown = asyncio.Event()
         # Coordination: set when the session is actively processing
         # (streaming a response, speaking, handling user input).
-        # Observation and voice loops yield when this is set.
+        # Voice loop yields when this is set.
         self._busy = asyncio.Event()
+        self._browser_session = BrowserSession()
+        self._tool_registry = self._build_tool_registry()
 
-    def _default_status(self) -> RuntimeStatus:
-        if self.state.observing and not self.state.paused:
-            return RuntimeStatus.OBSERVING
-        return RuntimeStatus.IDLE
+    def _build_tool_registry(self) -> ToolRegistry:
+        registry = ToolRegistry()
+        registry.register(TimeTool())
+        registry.register(WeatherTool())
+        registry.register(ClipboardTool())
+        registry.register(SystemInfoTool())
+        registry.register(ScreenshotTool())
+        registry.register(WebSearchTool(session=self._browser_session))
+        registry.register(OpenUrlTool(session=self._browser_session))
+        registry.register(ClickElementTool(session=self._browser_session))
+        registry.register(PageScreenshotTool(session=self._browser_session))
+        fs_roots = parse_allowed_roots(self.settings.FILESYSTEM_ALLOWED_PATHS)
+        registry.register(ReadFileTool(allowed_roots=fs_roots))
+        registry.register(WriteFileTool(allowed_roots=fs_roots))
+        registry.register(EditFileTool(allowed_roots=fs_roots))
+        registry.register(ListDirectoryTool(allowed_roots=fs_roots))
+        registry.register(CreateDirectoryTool(allowed_roots=fs_roots))
+        return registry
 
     async def run(self):
         """Main entry point. Runs until quit."""
-        self.state.current_status = self._default_status()
-        render_header(self.state)
+        self.state.current_status = RuntimeStatus.IDLE
+        render_header(self.state, self.settings)
 
         tasks = [
             asyncio.create_task(self._input_loop(), name="input"),
         ]
-        if self.settings.LIVE_OBSERVATION_ENABLED and self.state.observing:
-            tasks.append(asyncio.create_task(self._observation_loop(), name="observe"))
         if self.state.listening_enabled:
             tasks.append(asyncio.create_task(self._voice_input_loop(), name="voice"))
 
@@ -107,7 +132,8 @@ class LiveSession:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             await self.speech.interrupt()
-            print(f"\n{DIM}Session ended.{NC}\n")
+            await self._browser_session.close()
+            print("\n  Goodbye.\n")
 
     # ── Input loop ────────────────────────────────────────────────────────
 
@@ -116,7 +142,7 @@ class LiveSession:
             while not self._shutdown.is_set():
                 try:
                     user_input = await self._prompt.prompt_async(
-                        ANSI(f"{DIM}You:{NC} "),
+                        ANSI(f"{CYAN}›{NC} "),
                     )
                 except EOFError:
                     self._shutdown.set()
@@ -134,7 +160,6 @@ class LiveSession:
                         continue
 
                 if user_input.lower() in _QUIT_WORDS:
-                    print("Goodbye!")
                     self._shutdown.set()
                     return
 
@@ -146,6 +171,13 @@ class LiveSession:
     # ── Voice input loop ──────────────────────────────────────────────────
 
     async def _voice_input_loop(self):
+        """Continuously listen for voice input using WebRTC VAD.
+
+        The mic stays open. Each 30ms frame is classified as speech or
+        non-speech by the VAD. When speech is detected, it records until
+        the speaker pauses, then transcribes via Local Whisper and
+        processes the result. No fixed recording window, no hard timeout.
+        """
         consecutive_errors = 0
         max_errors = 5
 
@@ -154,23 +186,16 @@ class LiveSession:
                 if not self.state.listening_enabled:
                     break
 
-                # Yield while the session is busy (streaming, speaking, etc.)
-                if self._busy.is_set():
-                    await asyncio.sleep(0.5)
-                    continue
-
-                # Don't listen while speech is playing
-                if self.speech.is_speaking:
-                    await asyncio.sleep(0.5)
+                # Wait while the session is busy or speaking before opening the mic
+                if self._busy.is_set() or self.speech.is_speaking:
+                    await asyncio.sleep(0.2)
                     continue
 
                 self.state.current_status = RuntimeStatus.LISTENING
                 try:
+                    # This blocks until speech is detected and transcribed,
+                    # or until cancelled (by _stream_response or shutdown).
                     text = await self.speech.listen()
-                except ServiceBusyError:
-                    logger.debug("Service busy, backing off")
-                    await asyncio.sleep(2)
-                    continue
                 except Exception as e:
                     consecutive_errors += 1
                     logger.debug("Voice listen error (%d/%d): %s", consecutive_errors, max_errors, e)
@@ -179,11 +204,12 @@ class LiveSession:
                         self.state.listening_enabled = False
                         print_status_change("Voice input disabled after repeated errors")
                         break
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(1)
                     continue
 
                 consecutive_errors = 0
 
+                # None means silence, cancellation, or no speech detected
                 if not text:
                     continue
 
@@ -195,14 +221,15 @@ class LiveSession:
                     continue
 
                 if text.lower() in _QUIT_WORDS:
-                    print("Goodbye!")
                     self._shutdown.set()
                     return
 
-                print(f"  {DIM}You (voice):{NC} {text}")
+                await play_sound("listen")
+                print(f"\r\033[2K  {DIM}(voice){NC} {text}")
                 await self._handle_user_input(text, interaction_style=InteractionStyle.VOICE)
 
         except asyncio.CancelledError:
+            self.speech.cancel_listen()
             return
 
     # ── Command handling ──────────────────────────────────────────────────
@@ -213,20 +240,7 @@ class LiveSession:
         command = parts[0]
 
         if command == "/quit":
-            print("Goodbye!")
             self._shutdown.set()
-            return True
-
-        if command == "/pause":
-            self.state.paused = True
-            self.state.current_status = RuntimeStatus.PAUSED
-            print_status_change("Observation paused")
-            return True
-
-        if command == "/resume":
-            self.state.paused = False
-            self.state.current_status = self._default_status()
-            print_status_change("Observation resumed")
             return True
 
         if command == "/mute":
@@ -257,8 +271,6 @@ class LiveSession:
 
         if command == "/clear":
             self.state.conversation_messages.clear()
-            self.state.last_screen_summary = None
-            self.state.last_response_hash = None
             print_status_change("Session cleared")
             return True
 
@@ -268,218 +280,53 @@ class LiveSession:
                 self.quality_mode = QualityMode(mode_str)
                 print_status_change(f"Quality: {self.quality_mode.value}")
             except ValueError:
-                print(f"  Usage: /mode fast|balanced|best")
+                print("  Usage: /mode fast|balanced|best")
             return True
 
-        if command == "/inspect":
-            await self._inspect_screen()
+        if command == "/help":
+            render_help_card()
             return True
 
         print(f"  Unknown command: {command}")
         return True
 
     def _print_status(self):
-        status = status_line(self.state)
-        obs = "on" if self.state.observing and not self.state.paused else "paused" if self.state.paused else "off"
-        listen = "on" if self.state.listening_enabled else "off"
-        speech = "muted" if self.state.speech_muted else "on" if self.state.speech_enabled else "off"
-        goal = self.state.current_goal or "none"
-        msgs = len(self.state.conversation_messages)
-        print(f"\n  Status: {status}  Observation: {obs}  Listening: {listen}  Speech: {speech}")
-        print(f"  Goal: {goal}  Quality: {self.quality_mode.value}  History: {msgs} messages\n")
+        model_name = getattr(self.settings, "MODEL", "")
+        render_status_card(
+            state=self.state,
+            quality_mode_value=self.quality_mode.value,
+            tool_count=len(self._tool_registry.to_openai_tools()),
+            msg_count=len(self.state.conversation_messages),
+            model_name=model_name or "",
+        )
 
     # ── Screen context detection ──────────────────────────────────────────
 
     def _needs_screen_context(self, text: str) -> bool:
-        if _SCREEN_CUES.search(text):
-            return True
-
-        msgs = self.state.conversation_messages
-        if len(msgs) >= 2:
-            last_assistant = None
-            for m in reversed(msgs[:-1]):
-                if m.get("role") == "assistant":
-                    last_assistant = m.get("content", "")
-                    break
-            if last_assistant and self.state.last_screen_summary:
-                if last_assistant.strip() == self.state.last_screen_summary.strip():
-                    return True
-
-        return False
+        return bool(_SCREEN_CUES.search(text))
 
     # ── User input handling ───────────────────────────────────────────────
 
     async def _handle_user_input(self, text: str, interaction_style: InteractionStyle = InteractionStyle.TEXT):
         self.state.conversation_messages.append({"role": "user", "content": text})
-
-        needs_screen = self._needs_screen_context(text)
-
-        if needs_screen:
-            base64_image = await self.observer.capture_full()
-            await self._stream_response(
-                task_type="image",
-                text_content=text,
-                base64_image=base64_image,
-                interaction_style=interaction_style,
-            )
-        else:
-            await self._stream_response(
-                task_type="text",
-                text_content=text,
-                interaction_style=interaction_style,
-            )
-
-    async def _inspect_screen(self):
-        print_status_change("Capturing screen...")
-        base64_image = await self.observer.capture_full()
-        if not base64_image:
-            print("  Could not capture screen.")
-            return
-
-        prompt = "Describe what is on this screen."
-        if self.state.current_goal:
-            prompt = f"{prompt} Focus on: {self.state.current_goal}"
-
-        self.state.conversation_messages.append({"role": "user", "content": prompt})
-
-        await self._stream_response(
-            task_type="image",
-            text_content=prompt,
-            base64_image=base64_image,
-        )
-
-    # ── Observation loop ──────────────────────────────────────────────────
-
-    async def _observation_loop(self):
-        cooldown_s = self.settings.OBSERVATION_COOLDOWN_MS / 1000.0
-        startup_time = time.time()
-
-        # Grace period: ignore screen changes from the app's own startup output.
-        # Let the fingerprint baseline stabilize before reacting to changes.
-        grace_s = max(cooldown_s, 5.0)
-        await asyncio.sleep(grace_s)
-
-        # Take a fresh baseline fingerprint after grace period
-        try:
-            await self.observer.check()
-        except Exception:
-            pass
-
-        try:
-            while not self._shutdown.is_set():
-                if self.state.paused:
-                    await asyncio.sleep(0.5)
-                    continue
-
-                # Don't observe while the session is actively responding or speaking
-                if self._busy.is_set() or self.speech.is_speaking:
-                    await asyncio.sleep(1)
-                    continue
-
-                # Don't observe too soon after user input (they're likely still reading)
-                if self.state.last_user_input_at:
-                    since_input = time.time() - self.state.last_user_input_at
-                    if since_input < cooldown_s:
-                        await asyncio.sleep(0.5)
-                        continue
-
-                event = await self.observer.check()
-
-                if event and event.material_change:
-                    if self.state.last_observation_at:
-                        elapsed = time.time() - self.state.last_observation_at
-                        if elapsed < cooldown_s:
-                            await asyncio.sleep(0.5)
-                            continue
-
-                    # Double-check not busy (could have changed during check)
-                    if self._busy.is_set():
-                        continue
-
-                    self.state.current_status = RuntimeStatus.CHANGE_DETECTED
-                    logger.debug("Change: %s", event.reason)
-
-                    base64_image = await self.observer.capture_full()
-                    if base64_image:
-                        await self._handle_observation(base64_image, event)
-
-                    self.state.last_observation_at = time.time()
-                    self.state.current_status = self._default_status()
-
-                await asyncio.sleep(0.5)
-
-        except asyncio.CancelledError:
-            return
-
-    async def _handle_observation(self, base64_image: str, event: ObservationEvent):
-        self._busy.set()
-        try:
-            self.state.current_status = RuntimeStatus.ANALYZING
-
-            prompt = "Briefly describe what changed on this screen."
-            if self.state.current_goal:
-                prompt = (
-                    f"You are watching the screen. Goal: {self.state.current_goal}. "
-                    f"Briefly describe what you see that is relevant. "
-                    f"If nothing relevant, respond with just 'nothing relevant'."
-                )
-
-            messages = []
-            if self.state.last_screen_summary:
-                messages.append({"role": "assistant", "content": f"Previous screen: {self.state.last_screen_summary}"})
-            messages.append({"role": "user", "content": prompt})
-
-            full_response = ""
-            async for chunk in process_task_stream(
-                task_type="image",
-                text_content=prompt,
-                complexity_scorer=self.scorer,
-                settings=self.settings,
-                messages=messages,
-                quality_mode=QualityMode.FAST,
-                interaction_style=InteractionStyle.WATCH,
-                base64_image=base64_image,
-            ):
-                full_response += chunk
-
-            if not full_response.strip():
-                return
-
-            response_hash = hashlib.md5(full_response.encode()).hexdigest()
-            if response_hash == self.state.last_response_hash:
-                return
-            self.state.last_response_hash = response_hash
-
-            lower = full_response.strip().lower()
-            if lower in ("nothing relevant", "nothing relevant.", "no changes", "no changes."):
-                return
-
-            self.state.last_screen_summary = full_response.strip()
-            print(f"\n  {CYAN}Eyra:{NC} {full_response.strip()}\n", flush=True)
-
-            self.state.conversation_messages.append({"role": "user", "content": prompt})
-            self.state.conversation_messages.append({"role": "assistant", "content": full_response.strip()})
-
-            self.state.current_status = RuntimeStatus.SPEAKING
-            await self.speech.speak(full_response.strip())
-            # Don't block on speech here — let it play in background
-            # The voice loop will wait via is_speaking check
-            self.state.current_status = self._default_status()
-        finally:
-            self._busy.clear()
+        quality = self.quality_mode
+        if self._needs_screen_context(text):
+            quality = QualityMode.BEST  # force Complex tier so tools are available
+        await self._stream_response(text_content=text, quality_mode=quality, interaction_style=interaction_style)
 
     # ── Shared streaming ──────────────────────────────────────────────────
 
     async def _stream_response(
         self,
-        task_type: str,
         text_content: str,
-        base64_image: Optional[str] = None,
+        quality_mode: QualityMode = QualityMode.BALANCED,
         interaction_style: InteractionStyle = InteractionStyle.TEXT,
     ):
         self._busy.set()
+        self.speech.cancel_listen()
         try:
             self.state.current_status = RuntimeStatus.THINKING
+            await play_sound("process")
 
             frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
             full_response = ""
@@ -488,7 +335,7 @@ class LiveSession:
             async def spin():
                 i = 0
                 while True:
-                    print(f"\r  {DIM}Eyra: {frames[i % len(frames)]}{NC}", end="", flush=True)
+                    print(f"\r  {DIM}Eyra {frames[i % len(frames)]}{NC}", end="", flush=True)
                     i += 1
                     await asyncio.sleep(0.08)
 
@@ -496,19 +343,19 @@ class LiveSession:
 
             try:
                 async for chunk in process_task_stream(
-                    task_type=task_type,
                     text_content=text_content,
                     complexity_scorer=self.scorer,
                     settings=self.settings,
                     messages=list(self.state.conversation_messages),
-                    quality_mode=self.quality_mode,
+                    quality_mode=quality_mode,
                     interaction_style=interaction_style,
-                    base64_image=base64_image,
+                    tool_registry=self._tool_registry,
                 ):
                     if not first_token:
                         first_token = True
                         spinner.cancel()
-                        print(f"\r\033[2K\n  {CYAN}Eyra:{NC} ", end="", flush=True)
+                        await play_sound("respond")
+                        print(f"\r\033[2K\n  {CYAN}Eyra{NC} ", end="", flush=True)
                     print(chunk, end="", flush=True)
                     full_response += chunk
             finally:
@@ -516,7 +363,7 @@ class LiveSession:
                     spinner.cancel()
 
             if not first_token:
-                print(f"\r\033[2K", end="")
+                print("\r\033[2K", end="")
 
             print("\n")
 
@@ -524,9 +371,7 @@ class LiveSession:
                 self.state.conversation_messages.append({"role": "assistant", "content": full_response})
                 self.state.current_status = RuntimeStatus.SPEAKING
                 await self.speech.speak(full_response.strip()[:200])
-                # Don't block on speech — let it play while user reads
-                # Voice loop will wait via is_speaking check
 
-            self.state.current_status = self._default_status()
+            self.state.current_status = RuntimeStatus.IDLE
         finally:
             self._busy.clear()
