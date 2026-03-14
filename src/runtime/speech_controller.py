@@ -17,7 +17,11 @@ class SpeechController:
         self.state = state
         self.cooldown_s = cooldown_ms / 1000.0
         self._speaking_proc: asyncio.subprocess.Process | None = None
-        self._voice_input = VoiceInput(silence_duration_ms=silence_duration_ms, threshold=vad_threshold)
+        self._voice_input = VoiceInput(
+            silence_duration_ms=silence_duration_ms,
+            threshold=vad_threshold,
+            wh_bin=state.wh_bin,
+        )
 
     @property
     def is_speaking(self) -> bool:
@@ -39,9 +43,10 @@ class SpeechController:
 
         await self.interrupt()
 
+        wh = self.state.wh_bin or "wh"
         try:
             self._speaking_proc = await asyncio.create_subprocess_exec(
-                "wh", "whisper", text,
+                wh, "whisper", text,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )

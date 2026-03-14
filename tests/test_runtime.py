@@ -27,8 +27,8 @@ class TestPreflightResult:
         assert r.models_ready == []
         assert r.models_missing == []
         assert r.wh_available is False
+        assert r.wh_bin is None
         assert r.screen_capture_available is False
-        assert r.microphone_available is False
 
     def test_from_preflight_backend_and_models_ready(self):
         r = PreflightResult(
@@ -36,12 +36,13 @@ class TestPreflightResult:
             models_ready=["model-a"],
             models_missing=[],
             wh_available=True,
-            microphone_available=True,
+            wh_bin="/usr/local/bin/wh",
         )
         state = LiveRuntimeState.from_preflight(r)
         assert state.backend_ready is True
         assert state.listening_enabled is True
         assert state.speech_enabled is True
+        assert state.wh_bin == "/usr/local/bin/wh"
 
     def test_from_preflight_missing_models_disables_backend(self):
         r = PreflightResult(
@@ -49,7 +50,7 @@ class TestPreflightResult:
             models_ready=["model-a"],
             models_missing=["model-b"],
             wh_available=True,
-            microphone_available=True,
+            wh_bin="/usr/local/bin/wh",
         )
         state = LiveRuntimeState.from_preflight(r)
         assert state.backend_ready is False
@@ -59,22 +60,23 @@ class TestPreflightResult:
             backend_reachable=True,
             models_ready=["model-a"],
             wh_available=False,
-            microphone_available=False,
         )
         state = LiveRuntimeState.from_preflight(r)
         assert state.listening_enabled is False
         assert state.speech_enabled is False
+        assert state.wh_bin is None
 
-    def test_from_preflight_wh_available_no_mic_disables_listening(self):
+    def test_from_preflight_wh_available_enables_both(self):
         r = PreflightResult(
             backend_reachable=True,
             models_ready=["model-a"],
             wh_available=True,
-            microphone_available=False,
+            wh_bin="/opt/wh",
         )
         state = LiveRuntimeState.from_preflight(r)
-        assert state.listening_enabled is False
+        assert state.listening_enabled is True
         assert state.speech_enabled is True
+        assert state.wh_bin == "/opt/wh"
 
 
 # ---------------------------------------------------------------------------
@@ -82,10 +84,11 @@ class TestPreflightResult:
 # ---------------------------------------------------------------------------
 
 class TestSpeechController:
-    def _make_controller(self, cooldown_ms=3000):
+    def _make_controller(self, cooldown_ms=3000, wh_bin="/opt/test/wh"):
         state = LiveRuntimeState()
         state.speech_enabled = True
         state.speech_muted = False
+        state.wh_bin = wh_bin
         return SpeechController(state, cooldown_ms=cooldown_ms), state
 
     def test_speak_does_nothing_when_muted(self):
@@ -126,11 +129,14 @@ class TestSpeechController:
         mock_proc = MagicMock()
         mock_proc.returncode = None
 
-        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc) as mock_exec:
             _run(ctrl.speak("now it works"))
             assert state.last_spoken_output_at is not None
             # speak() is non-blocking: launches process and returns
             assert ctrl._speaking_proc is mock_proc
+            # Verify the resolved wh_bin path is used, not bare "wh"
+            mock_exec.assert_called_once()
+            assert mock_exec.call_args[0][0] == "/opt/test/wh"
 
     def test_speak_is_non_blocking(self):
         """speak() launches wh whisper and returns without waiting."""
@@ -234,6 +240,9 @@ class TestLiveSessionCommands:
 
         settings = MagicMock(spec=Settings)
         settings.SPEECH_COOLDOWN_MS = 3000
+        settings.VOICE_SILENCE_MS = 1500
+        settings.VOICE_VAD_THRESHOLD = 0.6
+        settings.FILESYSTEM_ALLOWED_PATHS = "~,/tmp"
 
         preflight = PreflightResult(backend_reachable=True, models_ready=["m"])
         state = LiveRuntimeState.from_preflight(preflight)
@@ -299,7 +308,7 @@ class TestConfigFlagsApplied:
             backend_reachable=True,
             models_ready=["m"],
             wh_available=True,
-            microphone_available=True,
+            wh_bin="/opt/wh",
             screen_capture_available=True,
         )
         settings = MagicMock(spec=Settings)
@@ -309,6 +318,8 @@ class TestConfigFlagsApplied:
         state = LiveRuntimeState.from_preflight(r, settings=settings)
         assert state.listening_enabled is False
         assert state.speech_enabled is False
+        # wh_bin is still set even when user disables voice via config
+        assert state.wh_bin == "/opt/wh"
 
     def test_flags_enabled_respects_preflight(self):
         """LIVE_*_ENABLED=true should still respect hardware availability."""
@@ -317,7 +328,6 @@ class TestConfigFlagsApplied:
             backend_reachable=True,
             models_ready=["m"],
             wh_available=False,
-            microphone_available=False,
         )
         settings = MagicMock(spec=Settings)
         settings.LIVE_LISTENING_ENABLED = True
@@ -327,6 +337,7 @@ class TestConfigFlagsApplied:
         # wh not available, so these stay False regardless of config
         assert state.listening_enabled is False
         assert state.speech_enabled is False
+        assert state.wh_bin is None
 
     def test_no_settings_backward_compatible(self):
         """Omitting settings should work the same as before."""
@@ -334,11 +345,12 @@ class TestConfigFlagsApplied:
             backend_reachable=True,
             models_ready=["m"],
             wh_available=True,
-            microphone_available=True,
+            wh_bin="/opt/wh",
         )
         state = LiveRuntimeState.from_preflight(r)
         assert state.listening_enabled is True
         assert state.speech_enabled is True
+        assert state.wh_bin == "/opt/wh"
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +365,9 @@ class TestScreenContextDetection:
 
         settings = MagicMock(spec=Settings)
         settings.SPEECH_COOLDOWN_MS = 3000
+        settings.VOICE_SILENCE_MS = 1500
+        settings.VOICE_VAD_THRESHOLD = 0.6
+        settings.FILESYSTEM_ALLOWED_PATHS = "~,/tmp"
 
         preflight = PreflightResult(backend_reachable=True, models_ready=["m"])
         state = LiveRuntimeState.from_preflight(preflight)
@@ -433,11 +448,14 @@ class TestInitialStatusAndHeader:
         settings.LIVE_LISTENING_ENABLED = listening
         settings.LIVE_SPEECH_ENABLED = speech
         settings.SPEECH_COOLDOWN_MS = 3000
+        settings.VOICE_SILENCE_MS = 1500
+        settings.VOICE_VAD_THRESHOLD = 0.6
+        settings.FILESYSTEM_ALLOWED_PATHS = "~,/tmp"
 
         preflight = PreflightResult(
             backend_reachable=True, models_ready=["m"],
             wh_available=listening or speech,
-            microphone_available=listening,
+            wh_bin="/opt/wh" if (listening or speech) else None,
         )
         state = LiveRuntimeState.from_preflight(preflight, settings=settings)
         scorer = MagicMock(spec=ComplexityScorer)
@@ -462,3 +480,63 @@ class TestInitialStatusAndHeader:
         render_header(state)
         out = capsys.readouterr().out
         assert "Type anything or speak." in out
+
+
+# ---------------------------------------------------------------------------
+# /voice command
+# ---------------------------------------------------------------------------
+
+class TestVoiceCommand:
+    def _make_session(self, wh_available=True, listening=True, speech=True):
+        from chat.complexity_scorer import ComplexityScorer
+        from runtime.live_session import LiveSession
+        from utils.settings import Settings
+
+        settings = MagicMock(spec=Settings)
+        settings.LIVE_LISTENING_ENABLED = listening
+        settings.LIVE_SPEECH_ENABLED = speech
+        settings.SPEECH_COOLDOWN_MS = 3000
+        settings.VOICE_SILENCE_MS = 1500
+        settings.VOICE_VAD_THRESHOLD = 0.6
+        settings.FILESYSTEM_ALLOWED_PATHS = "~,/tmp"
+
+        preflight = PreflightResult(
+            backend_reachable=True, models_ready=["m"],
+            wh_available=wh_available,
+            wh_bin="/opt/wh" if wh_available else None,
+        )
+        state = LiveRuntimeState.from_preflight(preflight, settings=settings)
+        scorer = MagicMock(spec=ComplexityScorer)
+        session = LiveSession(settings=settings, preflight=preflight, state=state, complexity_scorer=scorer)
+        return session, state
+
+    def test_voice_off_disables_both(self):
+        session, state = self._make_session()
+        assert state.listening_enabled is True
+        assert state.speech_enabled is True
+        _run(session._handle_command("/voice off"))
+        assert state.listening_enabled is False
+        assert state.speech_enabled is False
+
+    def test_voice_on_enables_both(self):
+        session, state = self._make_session()
+        _run(session._handle_command("/voice off"))
+        _run(session._handle_command("/voice on"))
+        assert state.listening_enabled is True
+        assert state.speech_enabled is True
+
+    def test_voice_on_blocked_without_wh(self, capsys):
+        session, state = self._make_session(wh_available=False, listening=False, speech=False)
+        assert state.listening_enabled is False
+        _run(session._handle_command("/voice on"))
+        assert state.listening_enabled is False
+        assert state.speech_enabled is False
+        out = capsys.readouterr().out
+        assert "not available" in out.lower()
+
+    def test_voice_no_arg_shows_status(self, capsys):
+        session, state = self._make_session()
+        _run(session._handle_command("/voice"))
+        out = capsys.readouterr().out
+        assert "on" in out
+        assert "/voice on|off" in out

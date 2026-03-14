@@ -4,6 +4,9 @@ import asyncio
 import base64
 import logging
 import re
+import subprocess
+import sys
+
 from urllib.parse import quote_plus, urlparse
 
 from tools.base import BaseTool, ToolResult
@@ -19,7 +22,29 @@ def _get_playwright():
         from playwright.async_api import async_playwright
         return async_playwright
     except ImportError:
-        raise RuntimeError("Playwright is not installed. Run: uv add playwright && uv run playwright install chromium")
+        raise RuntimeError(
+            "Playwright is not installed. Run: uv add playwright && uv run playwright install chromium"
+        )
+
+
+async def _install_chromium() -> None:
+    """Install Playwright's Chromium binary. Raises RuntimeError on failure."""
+    logger.info("Playwright Chromium not found, installing automatically...")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "playwright", "install", "chromium",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, "playwright install", stderr=stderr)
+        logger.info("Playwright Chromium installed successfully.")
+    except (subprocess.CalledProcessError, asyncio.TimeoutError, OSError) as e:
+        raise RuntimeError(
+            f"Failed to install Playwright Chromium: {e}\n"
+            "Run manually: uv run playwright install chromium"
+        ) from e
 
 
 class BrowserSession:
@@ -31,13 +56,29 @@ class BrowserSession:
         self._page = None
         self._lock = asyncio.Lock()
 
+    async def _launch_browser(self):
+        """Launch Chromium, auto-installing the binary on first run if needed."""
+        self._cm = _get_playwright()()
+        pw = await self._cm.start()
+        try:
+            return await pw.chromium.launch(headless=True)
+        except Exception as e:
+            err_msg = str(e)
+            if "Executable doesn't exist" not in err_msg and "playwright install" not in err_msg:
+                raise
+        # Binary missing — install and retry once.
+        await self._cm.__aexit__(None, None, None)
+        self._cm = None
+        await _install_chromium()
+        self._cm = _get_playwright()()
+        pw = await self._cm.start()
+        return await pw.chromium.launch(headless=True)
+
     async def page(self):
         async with self._lock:
             if self._page and not self._page.is_closed():
                 return self._page
-            self._cm = _get_playwright()()
-            pw = await self._cm.start()
-            self._browser = await pw.chromium.launch(headless=True)
+            self._browser = await self._launch_browser()
             ctx = await self._browser.new_context(
                 viewport={"width": 1280, "height": 720},
                 user_agent=(

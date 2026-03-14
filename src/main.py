@@ -1,5 +1,5 @@
 """
-Eyra — voice-first AI assistant.
+Eyra — personal on-device AI agent.
 
 Starts as an always-on live session with typed input, optional voice I/O,
 and on-demand tool use. The model decides when to capture the screen.
@@ -80,6 +80,8 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    from runtime.startup import maybe_run_startup_selector
+    maybe_run_startup_selector()
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

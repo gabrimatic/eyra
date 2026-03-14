@@ -2,8 +2,13 @@
 
 import asyncio
 import logging
+import os
+import pathlib
 import shutil
 import subprocess
+import tempfile
+import time
+import wave
 
 import httpx
 
@@ -12,6 +17,8 @@ from utils.settings import Settings
 from utils.theme import CYAN, DIM, GREEN, NC, RED, YELLOW
 
 logger = logging.getLogger(__name__)
+
+WH_INSTALL_HINT = "brew tap gabrimatic/local-whisper && brew install local-whisper"
 
 
 def _ok(msg: str):
@@ -42,11 +49,9 @@ class PreflightManager:
         if result.backend_reachable:
             await self._check_models(result)
 
-        # Capabilities
-        result.wh_available = self._check_wh()
+        # Capabilities (sync/blocking — run off the event loop)
+        result.wh_available = await asyncio.to_thread(self._check_wh, result)
         result.screen_capture_available = self._check_screen_capture()
-        if result.wh_available:
-            result.microphone_available = self._check_microphone()
 
         print()
         return result
@@ -145,21 +150,123 @@ class PreflightManager:
                 except Exception as e:
                     logger.debug("Could not unload %s: %s", model, e)
 
-    def _check_wh(self) -> bool:
-        """Check that Local Whisper is installed and the service is running."""
-        if shutil.which("wh") is None:
-            _warn("Voice: wh not found (install local-whisper for voice)")
+    def _check_wh(self, result: PreflightResult) -> bool:
+        """Check that Local Whisper is installed, running, and ASR is ready.
+
+        Local Whisper powers both voice input (ASR) and speech output (TTS).
+        Installed via Homebrew, resolved from PATH. After confirming the process
+        is alive, probes ASR readiness (the model can take seconds to load).
+        """
+        wh_bin = self._resolve_wh()
+        if wh_bin is None:
+            _fail("Local Whisper: not installed (voice input + speech disabled)")
+            print(f"    {DIM}Install: {WH_INSTALL_HINT}{NC}")
             return False
-        try:
-            proc = subprocess.run(["wh", "status"], capture_output=True, timeout=3)
-            if proc.returncode == 0:
-                _ok("Voice: Local Whisper running")
-                return True
-            else:
-                _warn("Voice: Local Whisper not running (start with: wh start)")
+
+        result.wh_bin = wh_bin
+
+        running = self._wh_is_running(wh_bin)
+        if not running:
+            if not self._start_wh_service(wh_bin):
+                _warn("Local Whisper: installed but not running (voice input + speech disabled)")
+                print(f"    {DIM}Start: wh start{NC}")
+                result.wh_bin = None
                 return False
+
+        # Process is alive — now wait for ASR to be ready
+        print(f"  {DIM}› Waiting for Local Whisper ASR...{NC}", end="", flush=True)
+        if self._wait_for_asr_ready(wh_bin, max_wait=15):
+            print(f"\r  {GREEN}✓{NC} Local Whisper: ready (voice input + speech)   ")
+            return True
+
+        print(f"\r  {YELLOW}⚠{NC} Local Whisper: running but ASR not ready (voice disabled)   ")
+        print(f"    {DIM}ASR model may still be loading. Restart: wh restart{NC}")
+        result.wh_bin = None
+        return False
+
+    @staticmethod
+    def _wait_for_asr_ready(wh_bin: str, max_wait: int = 15) -> bool:
+        """Probe Local Whisper until ASR responds, up to max_wait seconds.
+
+        Uses a silent WAV file to test transcription end-to-end. A successful
+        call (even with empty output) means the model is loaded and ready.
+        """
+        # Create a tiny silent WAV (100ms of silence at 16kHz)
+        fd, probe_path = tempfile.mkstemp(suffix=".wav")
+        try:
+            os.close(fd)
+            with wave.open(probe_path, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(b"\x00\x00" * 1600)  # 100ms silence
+
+            deadline = time.time() + max_wait
+            while time.time() < deadline:
+                try:
+                    proc = subprocess.run(
+                        [wh_bin, "transcribe", probe_path],
+                        capture_output=True, timeout=10, text=True,
+                    )
+                    output = (proc.stdout or "") + (proc.stderr or "")
+                    if "not ready" in output.lower():
+                        time.sleep(1)
+                        continue
+                    # Any other result (including empty transcription) means ready
+                    return True
+                except subprocess.TimeoutExpired:
+                    time.sleep(1)
+                except Exception:
+                    time.sleep(1)
+            return False
+        finally:
+            try:
+                pathlib.Path(probe_path).unlink()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _resolve_wh() -> str | None:
+        """Find the wh binary on PATH (installed via Homebrew)."""
+        return shutil.which("wh")
+
+    @staticmethod
+    def _wh_is_running(wh_bin: str) -> bool:
+        """Check whether the Local Whisper service reports itself as running."""
+        try:
+            proc = subprocess.run(
+                [wh_bin, "status"], capture_output=True, timeout=3, text=True,
+            )
+            output = (proc.stdout or "") + (proc.stderr or "")
+            return "running" in output.lower()
         except Exception:
-            _warn("Voice: could not check Local Whisper status")
+            return False
+
+    @staticmethod
+    def _start_wh_service(wh_bin: str) -> bool:
+        """Start Local Whisper via brew services, falling back to wh start."""
+        if shutil.which("brew"):
+            try:
+                subprocess.run(
+                    ["brew", "services", "start", "local-whisper"],
+                    capture_output=True, timeout=10,
+                )
+                time.sleep(1)
+                check = subprocess.run(
+                    [wh_bin, "status"], capture_output=True, timeout=3, text=True,
+                )
+                output = (check.stdout or "") + (check.stderr or "")
+                if "running" in output.lower():
+                    return True
+            except Exception:
+                pass
+
+        try:
+            proc = subprocess.run(
+                [wh_bin, "start"], capture_output=True, timeout=10,
+            )
+            return proc.returncode == 0
+        except Exception:
             return False
 
     def _check_screen_capture(self) -> bool:
@@ -170,10 +277,3 @@ class PreflightManager:
             _warn("Screen capture: not available")
         return available
 
-    def _check_microphone(self) -> bool:
-        """Mic permission belongs to Local Whisper, not the terminal.
-        If wh is installed and running, mic is available through it."""
-        # This is called only when wh_available is True (service confirmed running).
-        # The service handles its own mic permission via macOS.
-        _ok("Microphone: available (via Local Whisper)")
-        return True
