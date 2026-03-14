@@ -11,7 +11,9 @@ from prompt_toolkit.formatted_text import ANSI
 from chat.complexity_scorer import ComplexityScorer
 from chat.message_handler import process_task_stream
 from chat.session_state import InteractionStyle, QualityMode
+from clients.ai_client import THINK_END, THINK_START
 from runtime.models import LiveRuntimeState, PreflightResult, RuntimeStatus
+from runtime.preflight import WH_INSTALL_HINT
 from runtime.speech_controller import SpeechController
 from runtime.status_presenter import (
     print_status_change,
@@ -36,17 +38,20 @@ from tools.time_tool import TimeTool
 from tools.weather import WeatherTool
 from utils.settings import Settings
 from utils.sound_player import play_sound
-from utils.theme import CYAN, DIM, NC
+from utils.theme import CYAN, DIM, DIM_ITALIC, NC
 
 logger = logging.getLogger(__name__)
 
 _COMMANDS = {
-    "/mute", "/unmute",
+    "/voice", "/mute", "/unmute",
     "/goal", "/status", "/quit", "/clear",
     "/mode", "/help",
 }
 
 _QUIT_WORDS = {"quit", "exit", "bye", "goodbye", "q"}
+
+# Split streamed chunks on think-block sentinels so the renderer can style them.
+_THINK_SPLIT = re.compile(f"({re.escape(THINK_START)}|{re.escape(THINK_END)})")
 
 # Screen-intent detection: only match UI-specific nouns or
 # action verbs with a visual direct object.
@@ -171,12 +176,13 @@ class LiveSession:
     # ── Voice input loop ──────────────────────────────────────────────────
 
     async def _voice_input_loop(self):
-        """Continuously listen for voice input using WebRTC VAD.
+        """Continuously listen for voice input using Silero VAD.
 
-        The mic stays open. Each 30ms frame is classified as speech or
-        non-speech by the VAD. When speech is detected, it records until
-        the speaker pauses, then transcribes via Local Whisper and
-        processes the result. No fixed recording window, no hard timeout.
+        The mic stays open. Each 32ms frame (512 samples at 16 kHz) is
+        classified as speech or non-speech by the VAD. When speech is
+        detected, it records until the speaker pauses, then transcribes
+        via Local Whisper and processes the result. No fixed recording
+        window, no hard timeout.
         """
         consecutive_errors = 0
         max_errors = 5
@@ -241,6 +247,31 @@ class LiveSession:
 
         if command == "/quit":
             self._shutdown.set()
+            return True
+
+        if command == "/voice":
+            arg = parts[1] if len(parts) > 1 else ""
+            if arg == "on":
+                if not self.preflight.wh_available:
+                    print("  Local Whisper is not available.")
+                    print(f"  {DIM}Install: {WH_INSTALL_HINT}{NC}")
+                    return True
+                self.state.listening_enabled = True
+                self.state.speech_enabled = True
+                # Spawn voice loop if not already running
+                voice_task = next((t for t in asyncio.all_tasks() if t.get_name() == "voice"), None)
+                if voice_task is None or voice_task.done():
+                    asyncio.create_task(self._voice_input_loop(), name="voice")
+                print_status_change("Voice on (input + speech)")
+            elif arg == "off":
+                self.state.listening_enabled = False
+                self.state.speech_enabled = False
+                await self.speech.interrupt()
+                self.speech.cancel_listen()
+                print_status_change("Voice off")
+            else:
+                voice_status = "on" if self.state.listening_enabled else "off"
+                print(f"  Voice is {voice_status}. Usage: /voice on|off")
             return True
 
         if command == "/mute":
@@ -331,6 +362,8 @@ class LiveSession:
             frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
             full_response = ""
             first_token = False
+            in_think = False
+            think_had_content = False
 
             async def spin():
                 i = 0
@@ -356,8 +389,23 @@ class LiveSession:
                         spinner.cancel()
                         await play_sound("respond")
                         print(f"\r\033[2K\n  {CYAN}Eyra{NC} ", end="", flush=True)
-                    print(chunk, end="", flush=True)
-                    full_response += chunk
+
+                    for segment in _THINK_SPLIT.split(chunk):
+                        if segment == THINK_START:
+                            in_think = True
+                            think_had_content = False
+                            print(DIM_ITALIC, end="", flush=True)
+                        elif segment == THINK_END:
+                            in_think = False
+                            print(NC, end="", flush=True)
+                            if think_had_content:
+                                print("\n\n", end="", flush=True)
+                        elif segment:
+                            print(segment, end="", flush=True)
+                            if in_think:
+                                think_had_content = True
+                            else:
+                                full_response += segment
             finally:
                 if not spinner.done():
                     spinner.cancel()

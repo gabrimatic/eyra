@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.2.0] - 2026-03-12
+
+### Fixed
+
+- Voice input and speech output now use the resolved `wh` binary path instead of relying on PATH. Fixes voice failing silently when `wh` is installed via LaunchAgent or at the well-known path but not on shell PATH.
+- Socket transcription guard: checks socket existence before connecting, falls cleanly to CLI fallback.
+
+### Changed
+
+- `PreflightResult` and `LiveRuntimeState` now carry `wh_bin: str | None` so the resolved binary path flows from preflight through to `SpeechController` and `VoiceInput`.
+- `/voice on|off` command toggles both voice input and speech output as a single unit.
+- Unified "Voice" status in header and status card (was separate Voice/Speech lines).
+- Preflight messaging clarified: Local Whisper powers both voice input (ASR) and speech output (TTS).
+
+### Removed
+
+- Fake microphone check (always returned True when wh was available).
+
+---
+
 ## [3.1.0] - 2026-03-11
 
 ### Added
@@ -38,7 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- Redesigned as a voice-first, tool-using assistant
+- Redesigned as a voice-first on-device agent with tool use
 - Screenshot capture is now on-demand (model-driven tool call) rather than a constant polling loop
 - Runtime reduced from three concurrent tasks to two (input loop + voice loop)
 - Settings renamed: `COMPLEX_MODEL` to `MODEL`, `SIMPLE_TEXT_MODEL` to `SIMPLE_MODEL`, `MODERATE_TEXT_MODEL` to `MODERATE_MODEL`
@@ -60,7 +80,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Unified assistant experience: text, watch, and voice as interaction styles within one session
+- Unified agent experience: text, watch, and voice as interaction styles within one session
 - Quality modes: `/mode fast|balanced|best` for direct control over model selection
 - Watch mode: continuous screen analysis with a goal, change gating, and delta-style responses
 - Task shortcuts: `#explain`, `#extract`, `#summarize`, `#review`, `#bug`, `#compare`

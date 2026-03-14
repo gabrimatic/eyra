@@ -38,6 +38,7 @@ FRAME_MS = 32  # 512 / 16000 * 1000
 # Frames of audio to keep before speech onset (captures the attack)
 _LOOKBACK_FRAMES = 5
 
+
 SOCKET_PATH = Path.home() / ".whisper" / "cmd.sock"
 
 # Limit torch to one thread — we do real-time inference on the audio thread
@@ -64,6 +65,7 @@ class VoiceInput:
         min_speech_ms: int = 250,
         max_duration_s: float = 300,
         threshold: float = 0.6,
+        wh_bin: str | None = None,
     ):
         """Initialize voice input.
 
@@ -74,12 +76,14 @@ class VoiceInput:
             threshold: Silero VAD speech probability threshold (0.0-1.0).
                 Higher = stricter. End-of-speech uses threshold - 0.15
                 (hysteresis built into Silero).
+            wh_bin: Resolved path to the wh binary. Falls back to "wh" on PATH.
         """
         self.min_speech_frames = int(min_speech_ms / FRAME_MS)
         self.max_frames = int(max_duration_s * 1000 / FRAME_MS)
         self._model = load_silero_vad(onnx=True)
         self._threshold = threshold
         self._silence_duration_ms = silence_duration_ms
+        self._wh_bin = wh_bin or "wh"
         self._cancel = threading.Event()
 
         # Warm up ONNX model to avoid first-inference latency
@@ -219,6 +223,8 @@ class VoiceInput:
 
     async def _transcribe_socket(self, wav_path: str) -> str | None:
         """Send audio to Local Whisper via its Unix command socket."""
+        if not SOCKET_PATH.exists():
+            raise FileNotFoundError(f"Socket not found: {SOCKET_PATH}")
         reader, writer = await asyncio.open_unix_connection(str(SOCKET_PATH))
         try:
             request = {"type": "transcribe", "path": wav_path, "raw": False}
@@ -244,7 +250,7 @@ class VoiceInput:
         """Fallback: transcribe via wh CLI subprocess."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "wh", "transcribe", wav_path,
+                self._wh_bin, "transcribe", wav_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

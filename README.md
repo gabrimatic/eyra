@@ -4,9 +4,9 @@
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)]()
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)]()
 
-**Voice-first AI assistant for the terminal.**
+**Personal on-device agent for the terminal.**
 
-Eyra listens, thinks, and acts. It takes voice or typed input, routes to the right model tier, and calls tools (like screenshot) only when needed. No constant screen capture, no polling. Works with any OpenAI-compatible provider.
+Eyra listens, thinks, and acts. It takes voice or typed input, routes to the right model, and calls tools when needed. Everything runs on your machine by default. No telemetry, no polling. Works with any OpenAI-compatible provider, local or remote.
 
 <p align="center"><img src="screenshot.png" width="800" alt="Eyra terminal screenshot"></p>
 
@@ -31,12 +31,11 @@ uv run python src/main.py
 Eyra runs preflight checks, then enters a live session:
 
 ```
-Eyra Live
+Eyra
 
-  Listening: on  Speech: on
-  Backend: local  Routing: automatic
+  Voice: on    Backend: ready
 
-  Type anything or speak. /mute /goal /status /quit
+  Type anything or speak. /help for commands.
 ```
 
 From this point, Eyra is listening. Type or speak at any time.
@@ -45,10 +44,10 @@ From this point, Eyra is listening. Type or speak at any time.
 
 ## What It Does
 
-- Launches directly into a live, always-on assistant session
+- Launches directly into a live, always-on agent session
 - Accepts typed or spoken input without leaving the session
 - Routes requests to the appropriate model (complexity routing available as an experimental option)
-- Uses tools (screenshot, time, weather, clipboard, system info) on demand via function calling
+- Uses tools (screenshot, time, weather, clipboard, system info, web browsing, filesystem) on demand via function calling
 - Speaks responses via local-whisper when available
 - Works with any OpenAI-compatible provider (Ollama, LM Studio, vLLM, OpenRouter, etc.)
 - All image data stays in memory, no disk I/O
@@ -59,11 +58,10 @@ From this point, Eyra is listening. Type or speak at any time.
 
 Eyra runs as one live session with concurrent subsystems:
 
-- **Voice input** records from the microphone via sounddevice and classifies each 32ms frame with Silero VAD (a neural speech detector running as an ONNX model). When the speaker pauses, the audio is transcribed by local-whisper. No energy thresholds, no calibration. Speak naturally; Eyra interrupts its own speech to hear you.
+- **Voice** is powered by [Local Whisper](https://github.com/gabrimatic/local-whisper), which handles both directions: input (ASR via Qwen3-ASR) and output (TTS via Kokoro). Eyra records from the microphone via sounddevice and classifies each 32ms frame with Silero VAD. When the speaker pauses, audio is transcribed through Local Whisper. Speak naturally; Eyra interrupts its own speech to hear you. Toggle with `/voice on|off`.
 - **Typed input** is always available inline. Both input channels feed the same conversation.
 - **Complexity routing** (experimental, off by default) scores requests deterministically and dispatches to Simple, Moderate, or Complex tier. When disabled, all requests use a single configurable model.
 - **Tool use** gives the model access to screenshot, time, weather, clipboard, and system info. Tools are defined as OpenAI function-calling schemas and executed locally. When complexity routing is enabled, Simple/Moderate tiers get lightweight tools and Complex gets all tools including screenshot.
-- **Speech output** speaks responses via local-whisper TTS.
 
 ### Preflight
 
@@ -71,7 +69,8 @@ On startup, Eyra validates:
 
 - Backend reachability (tries `/v1/models`, falls back to Ollama `/api/tags`)
 - Every configured model exists (auto-pulls via Ollama if needed)
-- Screen capture, microphone, and speech capabilities
+- [Local Whisper](https://github.com/gabrimatic/local-whisper) for voice input and speech output (`brew tap gabrimatic/local-whisper && brew install local-whisper`)
+- Screen capture (macOS built-in)
 
 The session does not start until the backend and models are confirmed ready.
 
@@ -81,7 +80,8 @@ The session does not start until the backend and models are confirmed ready.
 
 | Command | What it does |
 |---------|-------------|
-| `/mute` | Mute speech output |
+| `/voice on\|off` | Toggle voice input and speech output |
+| `/mute` | Mute speech output only |
 | `/unmute` | Unmute speech |
 | `/goal <text>` | Set a conversational goal ("tell me when an error appears") |
 | `/mode fast\|balanced\|best` | Set quality mode |
@@ -201,7 +201,9 @@ eyra/
 │   │   ├── time_tool.py           # Current time tool
 │   │   ├── weather.py             # Weather info tool
 │   │   ├── clipboard.py           # Clipboard reader tool
-│   │   └── system_info.py         # System info tool
+│   │   ├── system_info.py         # System info tool
+│   │   ├── browser.py             # Web search, URL navigation, page interaction
+│   │   └── filesystem.py          # Sandboxed file read/write/edit/list
 │   ├── chat/
 │   │   ├── capture.py             # In-memory screenshot capture
 │   │   ├── complexity_scorer.py   # Deterministic prompt routing
@@ -238,13 +240,15 @@ If using a different provider, verify `API_BASE_URL` and `API_KEY` in `.env` are
 
 <details><summary><strong>Voice not working</strong></summary>
 
-Voice requires local-whisper to be installed and running. Check with:
+Voice requires [Local Whisper](https://github.com/gabrimatic/local-whisper), which powers both input (ASR) and output (TTS). Install it:
 
 ```bash
-wh status
+brew tap gabrimatic/local-whisper && brew install local-whisper
 ```
 
-If the service is not running: `wh start`. See [local-whisper](https://github.com/gabrimatic/local-whisper) for setup instructions.
+Eyra's preflight automatically detects the installation (even if `wh` is not on PATH) and starts the service if needed. If preflight reports it's installed but not running, start manually with `wh start`.
+
+You can also toggle voice at runtime with `/voice on|off`.
 
 </details>
 

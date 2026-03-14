@@ -232,6 +232,19 @@ class TestVoiceInputTranscription:
             with patch("runtime.voice_input.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
                 assert _run(vi._transcribe("/tmp/test.wav")) == "hello from cli"
 
+    def test_cli_fallback_uses_resolved_wh_bin(self):
+        """CLI transcription must use the resolved wh binary path, not bare 'wh'."""
+        vi = _make_vi(wh_bin="/opt/custom/wh")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"resolved path works", b""))
+
+        with patch("runtime.voice_input.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc) as mock_exec:
+            assert _run(vi._transcribe_cli("/tmp/test.wav")) == "resolved path works"
+            mock_exec.assert_called_once()
+            assert mock_exec.call_args[0][0] == "/opt/custom/wh"
+
     def test_listen_returns_none_on_no_speech(self):
         vi = _make_vi()
         with patch.object(vi, "_record", return_value=None):

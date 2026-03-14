@@ -12,7 +12,7 @@ cd eyra
 
 Set `USE_MOCK_CLIENT=true` in `.env` to run without any AI backend during development.
 
-Voice input requires local-whisper running locally. Check with `wh status`.
+Voice input and speech output require [Local Whisper](https://github.com/gabrimatic/local-whisper). Install: `brew tap gabrimatic/local-whisper && brew install local-whisper`. Check with `wh status`.
 
 ## Architecture
 
@@ -42,7 +42,9 @@ eyra/
 │   │   ├── time_tool.py         # Current time tool
 │   │   ├── weather.py           # Weather info tool
 │   │   ├── clipboard.py         # Clipboard reader tool
-│   │   └── system_info.py       # System info tool
+│   │   ├── system_info.py       # System info tool
+│   │   ├── browser.py           # Web search, URL navigation, page interaction
+│   │   └── filesystem.py        # Sandboxed file read/write/edit/list
 │   └── utils/
 │       ├── settings.py          # .env config loader
 │       ├── image_history.py     # Image context management
@@ -50,15 +52,19 @@ eyra/
 │       └── mock_client.py       # Mock client for development
 ```
 
-The app starts a single `LiveSession` with concurrent input loops for voice and typed input. The model can call tools (like screenshot) on demand. Routing path: `message_handler.py` → `complexity_scorer.py` → quality mode override → response shaping → client selection → streaming.
+The agent starts a single `LiveSession` with concurrent input loops for voice and typed input. The model can call tools (like screenshot) on demand. Routing path: `message_handler.py` → `complexity_scorer.py` → quality mode override → response shaping → client selection → streaming.
 
 ## New AI Backend
+
+Eyra works with any OpenAI-compatible endpoint out of the box. Just set `API_BASE_URL` and `API_KEY` in `.env`. No code changes needed for standard providers (Ollama, LM Studio, vLLM, OpenRouter, Groq, OpenAI, etc.).
+
+For a provider that doesn't follow the `/v1/chat/completions` spec:
 
 1. Create a file in `src/clients/`, e.g. `src/clients/my_client.py`
 2. Subclass `BaseAIClient` from `src/clients/base_client.py`
 3. Implement `generate_completion_stream(messages, model_name) -> AsyncIterator[str]`
-4. Implement `generate_completion_with_image_stream(messages, image_base64, model_name) -> AsyncIterator[str]`
-5. Register it in `src/chat/message_handler.py` in `get_ai_client()`
+4. Implement `stream_with_tools(messages, tools, model_name) -> AsyncIterator[str]`
+5. Wire it into `src/chat/message_handler.py`
 
 Keep streaming behavior consistent with existing clients. Responses should yield string chunks, not complete strings.
 
@@ -81,9 +87,9 @@ ruff check src/                            # Lint
 
 Manual verification flow:
 
-1. `USE_MOCK_CLIENT=true uv run python src/main.py` — confirm app starts as a live session
+1. `USE_MOCK_CLIENT=true uv run python src/main.py` — confirm the agent starts as a live session
 2. Type a prompt, confirm streamed response
-3. Speak a prompt (requires local-whisper), confirm voice response
+3. Speak a prompt (requires Local Whisper), confirm voice response
 4. `/status` — confirm current state is displayed
 5. `/clear` — confirm session is reset
 

@@ -45,15 +45,14 @@ def render_header(state: LiveRuntimeState, settings=None):
     print(f"╰{'─' * _BOX_WIDTH}╯")
     print()
 
-    voice = f"{GREEN}on{NC}" if state.listening_enabled else f"{DIM}off{NC}"
-    speech = (
-        f"{YELLOW}muted{NC}" if state.speech_muted
-        else f"{GREEN}on{NC}" if state.speech_enabled
-        else f"{DIM}off{NC}"
+    voice = (
+        f"{DIM}off{NC}" if not (state.listening_enabled or state.speech_enabled)
+        else f"{YELLOW}muted{NC}" if state.speech_muted
+        else f"{GREEN}on{NC}"
     )
     backend = f"{GREEN}ready{NC}" if state.backend_ready else f"{RED}unavailable{NC}"
 
-    cap_line = f"  Voice: {voice}    Speech: {speech}    Backend: {backend}"
+    cap_line = f"  Voice: {voice}    Backend: {backend}"
     print(cap_line)
 
     if settings is not None:
@@ -88,13 +87,13 @@ def render_status_card(
     model_name: str = "",
 ):
     """Print a full status card."""
-    voice = "on" if state.listening_enabled else "off"
-    speech = "muted" if state.speech_muted else "on" if state.speech_enabled else "off"
+    voice = "off" if not (state.listening_enabled or state.speech_enabled) else "muted" if state.speech_muted else "on"
     goal = state.current_goal or "none"
 
     print()
     print(f"╭─ Status {'─' * (_BOX_WIDTH - 9)}╮")
-    print(f"│  Voice: {voice}    Speech: {speech}{' ' * (_BOX_WIDTH - 18 - len(voice) - len(speech))}│")
+    pad_v = _BOX_WIDTH - 10 - len(voice)
+    print(f"│  Voice: {voice}{' ' * max(pad_v, 0)}│")
     if model_name:
         pad = _BOX_WIDTH - 10 - len(model_name)
         print(f"│  Model: {model_name}{' ' * max(pad, 0)}│")
@@ -115,6 +114,7 @@ def render_status_card(
 def render_help_card():
     """Print the /help command card."""
     cmds = [
+        ("/voice     ", "on|off"),
         ("/mute      ", "Mute speech output"),
         ("/unmute    ", "Unmute speech"),
         ("/goal TEXT ", "Set a goal"),
