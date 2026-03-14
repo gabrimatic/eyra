@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -6,6 +7,7 @@ from typing import AsyncGenerator
 from openai import AsyncOpenAI
 
 from clients.base_client import BaseAIClient
+from tools.base import ToolResult
 from tools.registry import ToolRegistry
 from utils.settings import Settings
 
@@ -20,7 +22,7 @@ _SPECIAL_TOKENS = (
 
 _TEXT_TOOL_PATTERNS = [
     re.compile(r'<function=(\w+)>(.*?)</function>', re.DOTALL),
-    re.compile(r'<tool_call>\s*\{[^}]*"name"\s*:\s*"(\w+)"[^}]*"arguments"\s*:\s*(\{.*?\})[^}]*\}\s*</tool_call>', re.DOTALL),
+    re.compile(r'<tool_call>\s*\{.*?"name"\s*:\s*"(\w+)".*?"arguments"\s*:\s*(\{.*?\})\s*\}\s*</tool_call>', re.DOTALL),
 ]
 
 # Sentinels embedded in streamed text to mark think-block boundaries.
@@ -255,6 +257,7 @@ class AIClient(BaseAIClient):
         model_name: str | None = None,
         tools: ToolRegistry | None = None,
         include_costly: bool = True,
+        history: list[dict] | None = None,
     ) -> AsyncGenerator[str, None]:
         if not tools or not tools.to_openai_tools(include_costly=include_costly):
             # generate_completion_stream already cleans via _clean_stream
@@ -271,7 +274,7 @@ class AIClient(BaseAIClient):
             _content_buffer = ""
             _suppress_content = False
             _buffer_flushed = False
-            _BUFFER_THRESHOLD = 30
+            _BUFFER_THRESHOLD = 50
             _cleaner = StreamCleaner()
 
             stream = await self.client.chat.completions.create(
@@ -296,7 +299,7 @@ class AIClient(BaseAIClient):
                         _content_buffer += delta.content
                         if len(_content_buffer) >= _BUFFER_THRESHOLD:
                             _buffer_flushed = True
-                            if _content_buffer.lstrip().startswith(("<function=", "<tool_call>")):
+                            if "<function=" in _content_buffer or "<tool_call>" in _content_buffer:
                                 _suppress_content = True
                             else:
                                 cleaned = _cleaner.feed(_content_buffer)
@@ -322,7 +325,7 @@ class AIClient(BaseAIClient):
             # If we never hit the threshold, decide now
             if not _buffer_flushed and _content_buffer:
                 _buffer_flushed = True
-                if _content_buffer.lstrip().startswith(("<function=", "<tool_call>")):
+                if "<function=" in _content_buffer or "<tool_call>" in _content_buffer:
                     _suppress_content = True
                 else:
                     if not _suppress_content:
@@ -371,28 +374,44 @@ class AIClient(BaseAIClient):
                 for tc in tool_calls_raw.values()
             ]
             clean_content = _clean_for_history(accumulated_content) if accumulated_content else None
-            messages.append({
+            assistant_msg = {
                 "role": "assistant",
                 "content": clean_content,
                 "tool_calls": assistant_tool_calls,
-            })
+            }
+            messages.append(assistant_msg)
+            if history is not None:
+                history.append(assistant_msg)
 
-            # Execute each tool and append results
+            # Execute each tool and append results (tool messages first, then any images)
+            pending_images: list[dict] = []
             for tc in tool_calls_raw.values():
-                result = await tools.execute(tc["name"], tc["arguments"])
-                messages.append({
+                try:
+                    result = await asyncio.wait_for(tools.execute(tc["name"], tc["arguments"]), timeout=30)
+                except asyncio.TimeoutError:
+                    logger.error("Tool '%s' timed out after 30s", tc["name"])
+                    result = ToolResult(content=f"Tool '{tc['name']}' timed out after 30 seconds.")
+                tool_msg = {
                     "role": "tool",
                     "tool_call_id": tc["id"],
                     "content": result.content,
-                })
+                }
+                messages.append(tool_msg)
+                if history is not None:
+                    history.append(tool_msg)
                 if result.image_base64:
-                    messages.append({
+                    pending_images.append({
                         "role": "user",
                         "content": [
                             {"type": "text", "text": "Here is the captured screenshot:"},
                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{result.image_base64}"}},
                         ],
                     })
+            # Append image messages after all tool results
+            for img_msg in pending_images:
+                messages.append(img_msg)
+                if history is not None:
+                    history.append(img_msg)
 
         # Safety: if 5 rounds exhausted without a final text response, yield a fallback
         logger.warning("Tool-calling loop exhausted after 5 rounds")

@@ -25,10 +25,11 @@ async def play_sound(sound_type: str = "camera"):
             if sound_path is None:
                 return
             cmd = ["afplay", sound_path]
-            await asyncio.create_subprocess_exec(
+            proc = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
             )
-            # Intentionally not awaiting -- fire and forget
+            # Fire-and-forget but schedule cleanup to avoid zombie processes
+            asyncio.create_task(proc.wait())
 
         elif system == "Windows":
             await asyncio.create_subprocess_shell(

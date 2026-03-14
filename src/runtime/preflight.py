@@ -57,7 +57,7 @@ class PreflightManager:
         return result
 
     async def _check_backend(self) -> bool:
-        base = self.settings.API_BASE_URL.rstrip("/v1").rstrip("/")
+        base = self.settings.API_BASE_URL.removesuffix("/v1").rstrip("/")
         async with httpx.AsyncClient(timeout=5) as client:
             # Try OpenAI-compatible endpoint first (works with any provider)
             try:
@@ -83,7 +83,7 @@ class PreflightManager:
                 return False
 
     async def _check_models(self, result: PreflightResult):
-        base = self.settings.API_BASE_URL.rstrip("/v1").rstrip("/")
+        base = self.settings.API_BASE_URL.removesuffix("/v1").rstrip("/")
         available: set[str] = set()
 
         async with httpx.AsyncClient(timeout=5) as client:
@@ -141,7 +141,7 @@ class PreflightManager:
     @staticmethod
     async def unload_models(settings: Settings, model_names: list[str]):
         """Release models from memory (keep_alive=0). Fails silently for backends that don't support it."""
-        base = settings.API_BASE_URL.rstrip("/v1").rstrip("/")
+        base = settings.API_BASE_URL.removesuffix("/v1").rstrip("/")
         async with httpx.AsyncClient(timeout=5) as client:
             for model in model_names:
                 try:

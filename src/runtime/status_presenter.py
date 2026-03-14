@@ -22,10 +22,10 @@ _STATUS_LABELS = {
 
 def _box_top(label: str = "") -> str:
     if label:
-        inner = f" {label} "
+        inner = f"─ {label} "
         dashes = "─" * (_BOX_WIDTH - len(inner))
-        return f"╭─{inner}{dashes}╮"
-    return f"╭{'─' * (_BOX_WIDTH)}╮"
+        return f"╭{inner}{dashes}╮"
+    return f"╭{'─' * _BOX_WIDTH}╮"
 
 
 def _box_bottom() -> str:
@@ -41,7 +41,9 @@ def render_header(state: LiveRuntimeState, settings=None):
     """Print the live session header."""
     print()
     print(f"╭{'─' * _BOX_WIDTH}╮")
-    print(f"│  {BOLD}Eyra{NC}{' ' * (_BOX_WIDTH - 4)}│")
+    label = "Eyra"
+    pad = _BOX_WIDTH - 2 - len(label)
+    print(f"│  {BOLD}{label}{NC}{' ' * pad}│")
     print(f"╰{'─' * _BOX_WIDTH}╯")
     print()
 
@@ -79,6 +81,16 @@ def print_status_change(label: str):
     print(f"  {DIM}› {label}{NC}", flush=True)
 
 
+def _box_row_padded(label: str, value: str) -> str:
+    """Build a box row with label: value, right-padded and truncated to fit."""
+    content = f"{label}: {value}"
+    max_content = _BOX_WIDTH - 2  # 2 for leading "  "
+    if len(content) > max_content:
+        content = content[: max_content - 1] + "…"
+    pad = _BOX_WIDTH - 2 - len(content)
+    return f"│  {content}{' ' * max(pad, 0)}│"
+
+
 def render_status_card(
     state: LiveRuntimeState,
     quality_mode_value: str,
@@ -91,22 +103,14 @@ def render_status_card(
     goal = state.current_goal or "none"
 
     print()
-    print(f"╭─ Status {'─' * (_BOX_WIDTH - 9)}╮")
-    pad_v = _BOX_WIDTH - 10 - len(voice)
-    print(f"│  Voice: {voice}{' ' * max(pad_v, 0)}│")
+    print(_box_top("Status"))
+    print(_box_row_padded("Voice", voice))
     if model_name:
-        pad = _BOX_WIDTH - 10 - len(model_name)
-        print(f"│  Model: {model_name}{' ' * max(pad, 0)}│")
-    pad_q = _BOX_WIDTH - 12 - len(quality_mode_value)
-    print(f"│  Quality: {quality_mode_value}{' ' * max(pad_q, 0)}│")
-    pad_g = _BOX_WIDTH - 9 - len(goal)
-    print(f"│  Goal: {goal}{' ' * max(pad_g, 0)}│")
-    hist = f"{msg_count} messages"
-    pad_h = _BOX_WIDTH - 13 - len(hist)
-    print(f"│  History: {hist}{' ' * max(pad_h, 0)}│")
-    tools = f"{tool_count} available"
-    pad_t = _BOX_WIDTH - 11 - len(tools)
-    print(f"│  Tools: {tools}{' ' * max(pad_t, 0)}│")
+        print(_box_row_padded("Model", model_name))
+    print(_box_row_padded("Quality", quality_mode_value))
+    print(_box_row_padded("Goal", goal))
+    print(_box_row_padded("History", f"{msg_count} messages"))
+    print(_box_row_padded("Tools", f"{tool_count} available"))
     print(f"╰{'─' * _BOX_WIDTH}╯")
     print()
 
@@ -125,7 +129,7 @@ def render_help_card():
         ("/quit      ", "Exit Eyra"),
     ]
     print()
-    print(f"╭─ Commands {'─' * (_BOX_WIDTH - 11)}╮")
+    print(_box_top("Commands"))
     for cmd, desc in cmds:
         row = f"{CYAN}{cmd}{NC}{desc}"
         pad = _BOX_WIDTH - len(cmd) - len(desc) - 2

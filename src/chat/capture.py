@@ -106,17 +106,19 @@ async def capture_screenshot_in_memory() -> Image.Image:
     Returns:
         PIL.Image: The screenshot as an in-memory PIL Image.
     """
+    import asyncio
+
     await play_sound("camera")
 
-    with mss.mss() as sct:
-        # Grab the entire primary monitor
-        monitor = sct.monitors[0]
-        raw_screenshot = sct.grab(monitor)  # MSS returns an mss.base.ScreenShot
+    def _grab():
+        with mss.mss() as sct:
+            monitor = sct.monitors[0]
+            raw_screenshot = sct.grab(monitor)
+            return Image.frombytes(
+                "RGB", (raw_screenshot.width, raw_screenshot.height), raw_screenshot.rgb
+            )
 
-        # Convert raw bytes to a PIL Image (RGB)
-        img = Image.frombytes(
-            "RGB", (raw_screenshot.width, raw_screenshot.height), raw_screenshot.rgb
-        )
+    img = await asyncio.to_thread(_grab)
     logger.info("Screenshot captured in memory.")
     return img
 

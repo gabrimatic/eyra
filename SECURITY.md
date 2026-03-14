@@ -25,6 +25,8 @@ All permissions are requested on demand. Nothing runs in the background between 
 |----------|-------------|-------|
 | AI backend at `API_BASE_URL` | User-controlled | Loopback by default; remote if configured |
 | wh (local-whisper) | Trusted | Subprocess, runs on localhost, no network |
+| Filesystem sandbox | Enforced | Paths restricted to `FILESYSTEM_ALLOWED_PATHS` (default `~/,/tmp`). Rejects empty paths and binary file edits. |
+| Browser (Playwright) | Sandboxed | Headless Chromium, http/https only, 30s tool timeout |
 | `.env` file | User-controlled | Must not be committed |
 | User prompts | Untrusted input | Passed to AI backends, no shell execution |
 

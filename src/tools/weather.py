@@ -29,7 +29,9 @@ class WeatherTool(BaseTool):
     }
 
     async def execute(self, location: str = "", **kwargs) -> ToolResult:
-        query = location.strip().replace(" ", "+") if location else ""
+        from urllib.parse import quote
+
+        query = quote(location.strip()) if location else ""
         url = f"https://wttr.in/{query}?format=%l:+%C,+%t,+feels+like+%f,+humidity+%h,+wind+%w"
 
         def _fetch() -> str:

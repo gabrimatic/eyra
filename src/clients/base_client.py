@@ -99,6 +99,7 @@ class BaseAIClient(ABC):
         model_name: str | None = None,
         tools: ToolRegistry | None = None,
         include_costly: bool = True,
+        history: list[dict] | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Stream a completion with optional tool-calling support.

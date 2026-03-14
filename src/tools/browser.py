@@ -6,7 +6,6 @@ import logging
 import re
 import subprocess
 import sys
-
 from urllib.parse import quote_plus, urlparse
 
 from tools.base import BaseTool, ToolResult
@@ -78,6 +77,18 @@ class BrowserSession:
         async with self._lock:
             if self._page and not self._page.is_closed():
                 return self._page
+            # Close any existing browser before launching a new one
+            if self._browser:
+                try:
+                    await self._browser.close()
+                except Exception:
+                    pass
+            if self._cm:
+                try:
+                    await self._cm.__aexit__(None, None, None)
+                except Exception:
+                    pass
+                self._cm = None
             self._browser = await self._launch_browser()
             ctx = await self._browser.new_context(
                 viewport={"width": 1280, "height": 720},
@@ -90,11 +101,19 @@ class BrowserSession:
             return self._page
 
     async def close(self):
-        if self._browser:
-            await self._browser.close()
+        try:
+            if self._browser:
+                await self._browser.close()
+        except Exception:
+            pass
+        finally:
             self._browser = None
-        if self._cm:
-            await self._cm.__aexit__(None, None, None)
+        try:
+            if self._cm:
+                await self._cm.__aexit__(None, None, None)
+        except Exception:
+            pass
+        finally:
             self._cm = None
         self._page = None
 
@@ -162,12 +181,15 @@ class WebSearchTool(BaseTool):
                 wait_until="domcontentloaded",
                 timeout=15000,
             )
-            await page.wait_for_timeout(1200)
+            try:
+                await page.wait_for_selector("#results, .snippet, .result", timeout=5000)
+            except Exception:
+                pass
             text = await _extract_text(page)
             return ToolResult(content=f"Search: {query}\n{page.url}\n\n{text}")
         except Exception as e:
             logger.error("web_search failed: %s", e, exc_info=True)
-            return ToolResult(content=f"Browser error: {e}")
+            return ToolResult(content=f"Web search failed for '{query}'. The page may have timed out or been blocked.")
 
 
 class OpenUrlTool(BaseTool):
@@ -195,6 +217,9 @@ class OpenUrlTool(BaseTool):
     async def execute(self, url: str = "", **_) -> ToolResult:
         if not url:
             return ToolResult(content="Missing 'url'.")
+        # Strip protocol-relative prefix
+        if url.startswith("//"):
+            url = "https:" + url
         scheme = urlparse(url).scheme.lower()
         if scheme not in ("http", "https", ""):
             return ToolResult(content=f"Only http/https URLs are allowed, got: {scheme}")
@@ -212,7 +237,7 @@ class OpenUrlTool(BaseTool):
             return ToolResult(content=_page_header(page, title) + text)
         except Exception as e:
             logger.error("open_url failed: %s", e, exc_info=True)
-            return ToolResult(content=f"Browser error: {e}")
+            return ToolResult(content=f"Failed to open {url}. The page may have timed out or been unreachable.")
 
 
 class ClickElementTool(BaseTool):
@@ -266,7 +291,7 @@ class ClickElementTool(BaseTool):
             return ToolResult(content=_page_header(page, title) + text)
         except Exception as e:
             logger.error("click_element failed: %s", e, exc_info=True)
-            return ToolResult(content=f"Browser error: {e}")
+            return ToolResult(content=f"Could not click '{selector}': element not found or not clickable.")
 
 
 class PageScreenshotTool(BaseTool):
@@ -302,4 +327,4 @@ class PageScreenshotTool(BaseTool):
             )
         except Exception as e:
             logger.error("page_screenshot failed: %s", e, exc_info=True)
-            return ToolResult(content=f"Browser error: {e}")
+            return ToolResult(content="Failed to take page screenshot. The page may have crashed or timed out.")
