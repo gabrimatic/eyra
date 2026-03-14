@@ -24,6 +24,8 @@ def parse_allowed_roots(paths_str: str) -> tuple[Path, ...]:
 
 def _resolve(path_str: str, allowed_roots: tuple[Path, ...]) -> Path:
     """Resolve a path, expanding ~, and ensure it's under an allowed root."""
+    if not path_str or not path_str.strip():
+        raise ValueError("Missing path.")
     p = Path(path_str).expanduser().resolve()
     if not any(p == root or root in p.parents for root in allowed_roots):
         raise PermissionError(f"Access denied: path must be under {' or '.join(str(r) for r in allowed_roots)}")
@@ -172,7 +174,10 @@ class EditFileTool(BaseTool):
         p = _resolve(path, self._roots)
         if not p.is_file():
             return ToolResult(content=f"Not a file: {p}")
-        text = p.read_text(errors="replace")
+        try:
+            text = p.read_text()
+        except UnicodeDecodeError:
+            return ToolResult(content=f"Cannot edit {p.name}: file appears to be binary, not text.")
         count = text.count(find)
         if count == 0:
             return ToolResult(content=f"Text not found in {p.name}. No changes made.")
@@ -216,7 +221,13 @@ class ListDirectoryTool(BaseTool):
         p = _resolve(path, self._roots)
         if not p.is_dir():
             return ToolResult(content=f"Not a directory: {p}")
-        entries = sorted(p.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
+        try:
+            entries = sorted(
+                (e for i, e in enumerate(p.iterdir()) if i < _MAX_LIST_ENTRIES + 1),
+                key=lambda e: (not e.is_dir(), e.name.lower()),
+            )
+        except PermissionError:
+            return ToolResult(content=f"Permission denied: cannot list {p}")
         truncated = len(entries) > _MAX_LIST_ENTRIES
         if truncated:
             entries = entries[:_MAX_LIST_ENTRIES]

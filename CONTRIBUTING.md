@@ -32,6 +32,7 @@ eyra/
 │   │   ├── live_session.py      # Central orchestrator (voice + typed input)
 │   │   ├── models.py            # Runtime data models
 │   │   ├── preflight.py         # Backend and model validation
+│   │   ├── startup.py           # First-run setup and .env management
 │   │   ├── speech_controller.py # TTS/STT coordination
 │   │   ├── voice_input.py      # Silero VAD recording + local-whisper transcription
 │   │   └── status_presenter.py  # Session status display
@@ -49,6 +50,7 @@ eyra/
 │       ├── settings.py          # .env config loader
 │       ├── image_history.py     # Image context management
 │       ├── sound_player.py      # Audio feedback
+│       ├── theme.py             # Terminal colors and formatting
 │       └── mock_client.py       # Mock client for development
 ```
 
@@ -82,7 +84,7 @@ Tools are invoked by the model on demand. Keep tool implementations stateless wh
 uv run pytest -q                           # Run all tests
 uv run pytest tests/test_runtime.py -q     # Run a single test file
 uv run pytest tests/test_runtime.py -k "test_name" -q  # Run a single test
-ruff check src/                            # Lint
+uv run ruff check src/                     # Lint
 ```
 
 Manual verification flow:

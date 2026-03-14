@@ -73,28 +73,31 @@ if command -v screencapture &>/dev/null; then
     fi
 fi
 
-# Local Whisper (voice input + speech) — installed via Homebrew
+# Local Whisper (voice input + speech)
 if ! command -v wh &>/dev/null; then
     log_info "Installing Local Whisper..."
     brew tap gabrimatic/local-whisper 2>/dev/null
-    brew install local-whisper
+    brew install gabrimatic/local-whisper/local-whisper
 fi
 
 if command -v wh &>/dev/null; then
-    log_ok "Local Whisper ($(wh --version 2>/dev/null || echo 'installed'))"
-    if ! wh status 2>&1 | grep -qi running; then
-        log_info "Starting Local Whisper..."
-        brew services start local-whisper 2>/dev/null || wh start 2>/dev/null
-    fi
+    log_ok "Local Whisper (installed)"
     if wh status 2>&1 | grep -qi running; then
         log_ok "Local Whisper: running (voice input + speech)"
     else
-        log_warn "Local Whisper: installed but not running"
-        log_info "Start: brew services start local-whisper"
+        log_info "Starting Local Whisper..."
+        wh start 2>/dev/null || brew services start gabrimatic/local-whisper/local-whisper 2>/dev/null
+        sleep 1
+        if wh status 2>&1 | grep -qi running; then
+            log_ok "Local Whisper: running (voice input + speech)"
+        else
+            log_warn "Local Whisper: installed but not running"
+            log_info "Start: wh start"
+        fi
     fi
 else
-    log_warn "Local Whisper: installation failed (voice input + speech disabled)"
-    log_info "Install manually: brew tap gabrimatic/local-whisper && brew install local-whisper"
+    log_warn "Local Whisper: not installed (voice input + speech disabled)"
+    log_info "Install: brew tap gabrimatic/local-whisper && brew install local-whisper"
 fi
 
 # ── Register command ──────────────────────────────────────────────────────────

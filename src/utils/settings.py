@@ -3,8 +3,6 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 
 @dataclass
 class Settings:
@@ -34,8 +32,27 @@ class Settings:
 
     @classmethod
     def load_from_env(cls):
+        load_dotenv()
+
         def _bool(key: str, default: str = "true") -> bool:
             return os.getenv(key, default).lower() == "true"
+
+        def _int(key: str, default: str) -> int:
+            raw = os.getenv(key, default)
+            try:
+                return int(raw)
+            except ValueError:
+                raise ValueError(f"Invalid integer for {key}: '{raw}'. Check your .env file.")
+
+        def _float_range(key: str, default: str, lo: float, hi: float) -> float:
+            raw = os.getenv(key, default)
+            try:
+                val = float(raw)
+            except ValueError:
+                raise ValueError(f"Invalid number for {key}: '{raw}'. Check your .env file.")
+            if not lo <= val <= hi:
+                raise ValueError(f"{key}={val} is out of range [{lo}, {hi}]. Check your .env file.")
+            return val
 
         return cls(
             USE_MOCK_CLIENT=_bool("USE_MOCK_CLIENT", "false"),
@@ -47,9 +64,9 @@ class Settings:
             AUTO_PULL_MODELS=_bool("AUTO_PULL_MODELS"),
             LIVE_LISTENING_ENABLED=_bool("LIVE_LISTENING_ENABLED"),
             LIVE_SPEECH_ENABLED=_bool("LIVE_SPEECH_ENABLED"),
-            SPEECH_COOLDOWN_MS=int(os.getenv("SPEECH_COOLDOWN_MS", "3000")),
-            VOICE_SILENCE_MS=int(os.getenv("VOICE_SILENCE_MS", "1500")),
-            VOICE_VAD_THRESHOLD=float(os.getenv("VOICE_VAD_THRESHOLD", "0.6")),
+            SPEECH_COOLDOWN_MS=_int("SPEECH_COOLDOWN_MS", "3000"),
+            VOICE_SILENCE_MS=_int("VOICE_SILENCE_MS", "1500"),
+            VOICE_VAD_THRESHOLD=_float_range("VOICE_VAD_THRESHOLD", "0.6", 0.0, 1.0),
             FILESYSTEM_ALLOWED_PATHS=os.getenv("FILESYSTEM_ALLOWED_PATHS", "~,/tmp"),
             FILESYSTEM_DEFAULT_PATH=os.getenv("FILESYSTEM_DEFAULT_PATH", "~/Documents"),
             COMPLEXITY_ROUTING_ENABLED=_bool("COMPLEXITY_ROUTING_ENABLED", "false"),

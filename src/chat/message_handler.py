@@ -157,6 +157,7 @@ async def process_task_stream(
         if tool_registry:
             async for chunk in client.stream_with_tools(
                 context, model_name=model_name, tools=tool_registry, include_costly=is_complex,
+                history=messages,
             ):
                 yield chunk
         else:

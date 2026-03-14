@@ -31,7 +31,7 @@ async def main() -> None:
     file_handler.setFormatter(logging.Formatter(log_format, datefmt=log_datefmt))
 
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.WARNING)
+    console_handler.setLevel(logging.CRITICAL)
     console_handler.setFormatter(logging.Formatter(log_format, datefmt=log_datefmt))
 
     logging.basicConfig(
@@ -44,7 +44,11 @@ async def main() -> None:
     logger = logging.getLogger("Main")
     logger.info("Starting Eyra...")
 
-    settings = Settings.load_from_env()
+    try:
+        settings = Settings.load_from_env()
+    except ValueError as e:
+        print(f"\n  {RED}Configuration error:{NC} {e}\n")
+        return
     scorer = ComplexityScorer()
 
     # Preflight: check backend, models, capabilities
@@ -85,6 +89,6 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print()
+        print("\n  Interrupted.\n")
     except Exception as e:
         logging.getLogger("Main").error("Unhandled: %s", e)

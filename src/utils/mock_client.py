@@ -46,6 +46,7 @@ class MockAIClient(BaseAIClient):
         model_name: str | None = None,
         tools: ToolRegistry | None = None,
         include_costly: bool = True,
+        history: list[dict] | None = None,
     ) -> AsyncGenerator[str, None]:
         content = "This is a mock response."
         yield content

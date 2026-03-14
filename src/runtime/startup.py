@@ -126,7 +126,11 @@ def _write_env(base_url: str, api_key: str, model: str):
     if _ENV.exists():
         for line in _ENV.read_text().splitlines():
             key = line.split("=", 1)[0] if "=" in line else ""
-            if key and key not in provider_keys and line.strip() and not line.startswith("#"):
+            if line.startswith("#"):
+                # Preserve user comments that aren't our own managed comments
+                if line.strip() not in ("# Voice and speech", "# Custom"):
+                    extra.append(line)
+            elif key and key not in provider_keys and line.strip():
                 extra.append(line)
 
     content_lines = [
@@ -176,7 +180,8 @@ def _setup_ollama() -> tuple[str, str, str]:
         model = input("  No local models. Pull which model? (e.g. qwen3.5:4b): ").strip()
         if not model:
             raise RuntimeError("Model name required.")
-        subprocess.run(["ollama", "pull", model], check=True)
+        print(f"  {DIM}› Pulling {model}... (this may take a while){NC}")
+        subprocess.run(["ollama", "pull", model], check=True, timeout=600)
         _ok(f"Model: {model}")
         return base, api_key, model
 
@@ -191,7 +196,8 @@ def _setup_ollama() -> tuple[str, str, str]:
         model = input("  Model name (e.g. qwen3.5:4b): ").strip()
         if not model:
             raise RuntimeError("Model name required.")
-        subprocess.run(["ollama", "pull", model], check=True)
+        print(f"  {DIM}› Pulling {model}... (this may take a while){NC}")
+        subprocess.run(["ollama", "pull", model], check=True, timeout=600)
     else:
         model = choice
     _ok(f"Model: {model}")
@@ -278,8 +284,8 @@ def maybe_run_startup_selector() -> bool:
 
     # If backend is reachable, nothing to do
     if env_url:
-        check = f"{env_url.rstrip('/').rstrip('/v1')}/v1/models"
-        if _is_reachable(check) or _is_reachable(f"{env_url.rstrip('/').rstrip('/v1')}/api/tags"):
+        check = f"{env_url.rstrip('/').removesuffix('/v1')}/v1/models"
+        if _is_reachable(check) or _is_reachable(f"{env_url.rstrip('/').removesuffix('/v1')}/api/tags"):
             return False
 
     # Detect installed/running providers

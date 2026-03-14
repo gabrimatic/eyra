@@ -53,7 +53,11 @@ class ScreenshotTool(BaseTool):
     costly = True
 
     async def execute(self, **kwargs) -> ToolResult:
-        base64_img = await capture_screenshot_and_encode()
+        try:
+            base64_img = await capture_screenshot_and_encode()
+        except Exception as e:
+            logger.error("Screenshot capture failed: %s", e, exc_info=True)
+            return ToolResult(content="Failed to capture screenshot. Screen recording permission may be required.")
         app = await _get_active_app()
         window = await _get_active_window()
         context_parts = ["Screenshot captured."]

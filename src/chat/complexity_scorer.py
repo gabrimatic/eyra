@@ -69,7 +69,7 @@ _COMPLEX_ANALYSIS_PATTERNS: list[re.Pattern] = [
 
 _REASONING_CUES = [
     "why", "how does", "explain", "what causes", "reason", "because",
-    "trade-off", "tradeoff", "pros and cons", "implications", "consequence",
+    "trade-off", "trade-offs", "tradeoff", "tradeoffs", "pros and cons", "implications", "consequence",
     "assumption", "constraint", "caveat",
     "difference between", "differences between", "distinguish",
 ]
@@ -98,7 +98,7 @@ _DOMAIN_TERMS = frozenset([
     "concurrency", "mutex", "semaphore", "deadlock", "race condition",
     "design pattern", "dependency injection", "microservice",
     # ML / AI
-    "machine learning", "deep learning", "neural network", "transformer",
+    "machine learning", "deep learning", "neural network", "neural networks", "transformer",
     "gradient descent", "backpropagation", "loss function", "overfitting",
     "reinforcement learning", "attention mechanism", "fine-tuning",
     "embedding", "tokenizer", "inference", "training",
@@ -181,24 +181,24 @@ class ComplexityScorer:
         score = 0.0
 
         # Reasoning cues (weight: 0.15 each, max ~0.45)
-        reasoning_hits = sum(1 for cue in _REASONING_CUES if cue in text_lower)
+        reasoning_hits = sum(1 for cue in _REASONING_CUES if re.search(r'\b' + re.escape(cue.strip()) + r'\b', text_lower))
         score += min(0.45, reasoning_hits * 0.15)
 
         # Code/debug cues (weight: 0.10 each, max ~0.40)
-        code_hits = sum(1 for cue in _CODE_DEBUG_CUES if cue in text_lower)
+        code_hits = sum(1 for cue in _CODE_DEBUG_CUES if re.search(r'\b' + re.escape(cue.strip()) + r'\b', text_lower))
         score += min(0.40, code_hits * 0.10)
 
         # Structured output cues (weight: 0.10 each, max ~0.20)
-        struct_hits = sum(1 for cue in _STRUCTURED_OUTPUT_CUES if cue in text_lower)
+        struct_hits = sum(1 for cue in _STRUCTURED_OUTPUT_CUES if re.search(r'\b' + re.escape(cue.strip()) + r'\b', text_lower))
         score += min(0.20, struct_hits * 0.10)
 
         # Domain terms (weight: 0.12 each, max ~0.36)
-        domain_hits = sum(1 for term in _DOMAIN_TERMS if term in text_lower)
+        domain_hits = sum(1 for term in _DOMAIN_TERMS if re.search(r'\b' + re.escape(term) + r'\b', text_lower))
         score += min(0.36, domain_hits * 0.12)
 
         # Constraint count: sentences with "must", "should", "require", "need to", "ensure"
         constraint_words = ["must", "should", "require", "need to", "ensure", "make sure"]
-        constraint_hits = sum(1 for c in constraint_words if c in text_lower)
+        constraint_hits = sum(1 for c in constraint_words if re.search(r'\b' + re.escape(c.strip()) + r'\b', text_lower))
         score += min(0.20, constraint_hits * 0.10)
 
         # Prompt length bonus (longer prompts tend toward complexity)

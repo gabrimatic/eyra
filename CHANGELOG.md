@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.3.0] - 2026-03-15
+
+### Added
+
+- 30-second timeout per tool call execution (`asyncio.wait_for`) to prevent infinite hangs
+- `_int()` and `_float_range()` validation helpers for numeric env vars in `settings.py`
+- `VOICE_VAD_THRESHOLD` range validation (0.0 to 1.0)
+- Empty/blank path rejection in filesystem tools
+- Protocol-relative URL handling in `OpenUrlTool` (`//example.com` becomes `https://example.com`)
+- `_box_row_padded()` helper in `status_presenter.py` for truncating long values with `…`
+
+### Fixed
+
+- `rstrip("/v1")` replaced with `removesuffix("/v1")` in preflight and startup for safe URL parsing
+- `/goal` command now preserves original case instead of lowercasing
+- Race condition: `_handle_user_input` now checks `_busy` to prevent voice and typed input collision
+- Spinner properly awaited on cancel (`await spinner` after `cancel()`) to fix garbled output during tool calls
+- `_busy` cleared only after TTS finishes (`await speech.wait_for_speech()`)
+- Empty response no longer prints a stray newline
+- KeyboardInterrupt caught in input loop (shows fresh prompt instead of crashing)
+- Tool call history now persisted in conversation via `history` parameter in `stream_with_tools`
+- Image messages from screenshot tools placed after all tool result messages, not interleaved
+- Text-format tool call detection buffer increased from 30 to 50 chars, uses `in` instead of `startswith` to catch preamble before XML
+- `_TEXT_TOOL_PATTERNS` pattern 2 regex fixed to handle nested JSON arguments
+- `EditFileTool` reads with strict encoding and returns clean error for binary files instead of silently replacing characters
+- `ListDirectoryTool` uses a generator with early stop instead of materializing entire directory listing
+- `BrowserSession.page()` closes old browser/context before launching a new one (prevents Chromium process leak)
+- `BrowserSession.close()` wrapped in try/except/finally to prevent Playwright leak on browser crash
+- `WebSearchTool` uses `wait_for_selector` with fallback instead of hardcoded `wait_for_timeout`
+- Browser tool error messages return user-friendly strings instead of raw stack traces
+- Screenshot tool `execute()` wrapped in try/except with clean error message for capture failures
+- Weather tool location parameter URL-encoded with `urllib.parse.quote()` (fixes special characters)
+- `mss` screenshot capture in `capture.py` moved to `asyncio.to_thread()` to avoid blocking the event loop
+- Complexity scorer cue matching now uses word-boundary regex instead of substring search
+- Status presenter header box alignment and padding calculation corrected
+- Sound subprocess handles cleaned up via `asyncio.create_task(proc.wait())` instead of fire-and-forget (prevents zombie processes)
+
+### Changed
+
+- `load_dotenv()` moved from module-level to inside `Settings.load_from_env()` (no longer pollutes test env)
+- `.env` rewrite in startup now preserves user comments (except managed ones)
+- `ollama pull` timeout increased to 600 seconds with progress message
+- Console log handler level raised from WARNING to CRITICAL (no error stack traces in the terminal UI)
+- Voice transcription prefix changed from DIM to YELLOW for visibility
+- `conversation_messages` list passed directly to `process_task_stream` (not a copy) so tool call history is preserved
+- `stream_with_tools` accepts new `history: list[dict] | None` parameter across all client implementations
+- ANSI color constants in `theme.py` are empty strings when not in a terminal (`sys.stdout.isatty()` check)
+
+---
+
 ## [3.2.0] - 2026-03-12
 
 ### Fixed

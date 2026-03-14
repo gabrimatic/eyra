@@ -38,7 +38,7 @@ from tools.time_tool import TimeTool
 from tools.weather import WeatherTool
 from utils.settings import Settings
 from utils.sound_player import play_sound
-from utils.theme import CYAN, DIM, DIM_ITALIC, NC
+from utils.theme import CYAN, DIM, DIM_ITALIC, NC, YELLOW
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +152,10 @@ class LiveSession:
                 except EOFError:
                     self._shutdown.set()
                     return
+                except KeyboardInterrupt:
+                    # Ctrl-C during prompt: show a fresh prompt
+                    print()
+                    continue
 
                 user_input = user_input.strip()
                 if not user_input:
@@ -231,7 +235,7 @@ class LiveSession:
                     return
 
                 await play_sound("listen")
-                print(f"\r\033[2K  {DIM}(voice){NC} {text}")
+                print(f"\r\033[2K  {YELLOW}(voice){NC} {text}")
                 await self._handle_user_input(text, interaction_style=InteractionStyle.VOICE)
 
         except asyncio.CancelledError:
@@ -241,16 +245,17 @@ class LiveSession:
     # ── Command handling ──────────────────────────────────────────────────
 
     async def _handle_command(self, cmd: str) -> bool:
-        lower = cmd.lower().strip()
-        parts = lower.split(maxsplit=1)
-        command = parts[0]
+        stripped = cmd.strip()
+        parts_original = stripped.split(maxsplit=1)
+        lower_parts = stripped.lower().split(maxsplit=1)
+        command = lower_parts[0]
 
         if command == "/quit":
             self._shutdown.set()
             return True
 
         if command == "/voice":
-            arg = parts[1] if len(parts) > 1 else ""
+            arg = lower_parts[1] if len(lower_parts) > 1 else ""
             if arg == "on":
                 if not self.preflight.wh_available:
                     print("  Local Whisper is not available.")
@@ -285,7 +290,7 @@ class LiveSession:
             return True
 
         if command == "/goal":
-            goal = parts[1] if len(parts) > 1 else None
+            goal = parts_original[1] if len(parts_original) > 1 else None
             if goal:
                 self.state.current_goal = goal
                 print_status_change(f"Goal: {goal}")
@@ -306,7 +311,7 @@ class LiveSession:
             return True
 
         if command == "/mode":
-            mode_str = parts[1] if len(parts) > 1 else ""
+            mode_str = lower_parts[1] if len(lower_parts) > 1 else ""
             try:
                 self.quality_mode = QualityMode(mode_str)
                 print_status_change(f"Quality: {self.quality_mode.value}")
@@ -339,6 +344,9 @@ class LiveSession:
     # ── User input handling ───────────────────────────────────────────────
 
     async def _handle_user_input(self, text: str, interaction_style: InteractionStyle = InteractionStyle.TEXT):
+        if self._busy.is_set():
+            print(f"  {DIM}Please wait...{NC}")
+            return
         self.state.conversation_messages.append({"role": "user", "content": text})
         quality = self.quality_mode
         if self._needs_screen_context(text):
@@ -379,7 +387,7 @@ class LiveSession:
                     text_content=text_content,
                     complexity_scorer=self.scorer,
                     settings=self.settings,
-                    messages=list(self.state.conversation_messages),
+                    messages=self.state.conversation_messages,
                     quality_mode=quality_mode,
                     interaction_style=interaction_style,
                     tool_registry=self._tool_registry,
@@ -387,6 +395,10 @@ class LiveSession:
                     if not first_token:
                         first_token = True
                         spinner.cancel()
+                        try:
+                            await spinner
+                        except asyncio.CancelledError:
+                            pass
                         await play_sound("respond")
                         print(f"\r\033[2K\n  {CYAN}Eyra{NC} ", end="", flush=True)
 
@@ -412,13 +424,14 @@ class LiveSession:
 
             if not first_token:
                 print("\r\033[2K", end="")
-
-            print("\n")
+            else:
+                print("\n")
 
             if full_response.strip():
                 self.state.conversation_messages.append({"role": "assistant", "content": full_response})
                 self.state.current_status = RuntimeStatus.SPEAKING
                 await self.speech.speak(full_response.strip()[:200])
+                await self.speech.wait_for_speech()
 
             self.state.current_status = RuntimeStatus.IDLE
         finally:
