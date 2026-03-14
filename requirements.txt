@@ -7,14 +7,3 @@ pydantic>=2.0.0
 
 # Image capture
 mss>=10.1.0
-opencv-python>=4.11.0
-
-# NLP and ML
-spacy>=3.8.4
-numpy>=2.2.0
-openai-clip>=1.0.1
-
-# Complexity routing
-torch>=2.6.0
-torchvision>=0.21.0
-torchaudio>=2.6.0

@@ -1,41 +1,49 @@
 import asyncio
-import platform
 import os
+import platform
+
+_DARWIN_SOUNDS = {
+    "camera": [
+        "/System/Library/Audio/UISounds/photoShutter.caf",
+        "/System/Library/Audio/UISounds/PhotoShutter.caf",
+        "/System/Library/Sounds/Tink.aiff",
+    ],
+    "listen": ["/System/Library/Sounds/Tink.aiff"],
+    "process": ["/System/Library/Sounds/Pop.aiff"],
+    "respond": ["/System/Library/Sounds/Glass.aiff"],
+}
 
 
 async def play_sound(sound_type: str = "camera"):
-    """Play a system sound."""
+    """Play a system sound. Non-blocking -- fires and forgets the subprocess."""
     system = platform.system()
 
     try:
         if system == "Darwin":
-            if sound_type == "camera":
-                # Try different possible paths for the camera sound
-                sound_paths = [
-                    "/System/Library/Audio/UISounds/photoShutter.caf",
-                    "/System/Library/Audio/UISounds/PhotoShutter.caf",
-                    "/System/Library/Sounds/Tink.aiff",
-                ]
-
-                for path in sound_paths:
-                    if os.path.exists(path):
-                        cmd = f"afplay {path}"
-                        break
-                else:
-                    # Silently continue if no sound file found
-                    return
+            candidates = _DARWIN_SOUNDS.get(sound_type, [])
+            sound_path = next((p for p in candidates if os.path.exists(p)), None)
+            if sound_path is None:
+                return
+            cmd = ["afplay", sound_path]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+            )
+            # Fire-and-forget but schedule cleanup to avoid zombie processes
+            asyncio.create_task(proc.wait())
 
         elif system == "Windows":
-            cmd = r"powershell -c (New-Object Media.SoundPlayer 'C:\Windows\Media\Camera.wav').PlaySync()"
-        elif system == "Linux":
-            cmd = "paplay /usr/share/sounds/freedesktop/stereo/camera-shutter.oga"
-        else:
-            return
+            await asyncio.create_subprocess_shell(
+                r"powershell -c (New-Object Media.SoundPlayer 'C:\Windows\Media\Camera.wav').PlaySync()",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
 
-        process = await asyncio.create_subprocess_shell(
-            cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        await process.wait()
+        elif system == "Linux":
+            await asyncio.create_subprocess_shell(
+                "paplay /usr/share/sounds/freedesktop/stereo/camera-shutter.oga",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
 
     except Exception:
         # Silently handle any sound playback errors
