@@ -1,6 +1,6 @@
 # Contributing
 
-Bug fixes, new modes and backends, better docs. Here's how to get involved.
+Bug fixes, new tools, backend improvements, better docs. Here's how to get involved.
 
 ## Dev Setup
 
@@ -12,70 +12,93 @@ cd eyra
 
 Set `USE_MOCK_CLIENT=true` in `.env` to run without any AI backend during development.
 
-Voice mode requires local-whisper running locally. Check with `wh status`.
+Voice input and speech output require [Local Whisper](https://github.com/gabrimatic/local-whisper). Install: `brew tap gabrimatic/local-whisper && brew install local-whisper`. Check with `wh status`.
 
 ## Architecture
 
 ```
 eyra/
 ├── src/
-│   ├── main.py                  # Entry point, mode selection
+│   ├── main.py                  # Entry point, preflight checks, session launch
 │   ├── chat/
-│   │   ├── capture.py           # In-memory screenshot and webcam capture
-│   │   ├── complexity_scorer.py # NLP + CLIP task complexity routing
-│   │   ├── message_handler.py   # Message history and AI client routing
-│   │   └── words.py             # Complexity indicator vocabulary
+│   │   ├── capture.py           # In-memory screenshot capture
+│   │   ├── complexity_scorer.py # Deterministic prompt routing
+│   │   ├── message_handler.py   # Model selection, response shaping, streaming
+│   │   └── session_state.py     # Quality mode and interaction style enums
 │   ├── clients/
 │   │   ├── base_client.py       # BaseAIClient abstract class
 │   │   └── ai_client.py         # OpenAI-compatible async client
-│   ├── modes/
-│   │   ├── base_mode.py         # BaseMode abstract class
-│   │   ├── manual_mode.py
-│   │   ├── live_mode.py
-│   │   └── voice/
-│   │       ├── voice_mode.py    # Voice pipeline (STT + LLM + TTS)
+│   ├── runtime/
+│   │   ├── live_session.py      # Central orchestrator (voice + typed input)
+│   │   ├── models.py            # Runtime data models
+│   │   ├── preflight.py         # Backend and model validation
+│   │   ├── startup.py           # First-run setup and .env management
+│   │   ├── speech_controller.py # TTS/STT coordination
+│   │   ├── voice_input.py      # Silero VAD recording + local-whisper transcription
+│   │   └── status_presenter.py  # Session status display
+│   ├── tools/
+│   │   ├── base.py              # Base tool interface
+│   │   ├── registry.py          # Tool registration and lookup
+│   │   ├── screenshot.py        # On-demand screenshot tool
+│   │   ├── time_tool.py         # Current time tool
+│   │   ├── weather.py           # Weather info tool
+│   │   ├── clipboard.py         # Clipboard reader tool
+│   │   ├── system_info.py       # System info tool
+│   │   ├── browser.py           # Web search, URL navigation, page interaction
+│   │   └── filesystem.py        # Sandboxed file read/write/edit/list
 │   └── utils/
-│       ├── settings.py
-│       ├── image_history.py
-│       ├── sound_player.py
-│       └── mock_client.py
+│       ├── settings.py          # .env config loader
+│       ├── image_history.py     # Image context management
+│       ├── sound_player.py      # Audio feedback
+│       ├── theme.py             # Terminal colors and formatting
+│       └── mock_client.py       # Mock client for development
 ```
 
-The routing path for every request: `message_handler.py` → `complexity_scorer.py` → client selection → response streaming.
+The agent starts a single `LiveSession` with concurrent input loops for voice and typed input. The model can call tools (like screenshot) on demand. Routing path: `message_handler.py` → `complexity_scorer.py` → quality mode override → response shaping → client selection → streaming.
 
 ## New AI Backend
+
+Eyra works with any OpenAI-compatible endpoint out of the box. Just set `API_BASE_URL` and `API_KEY` in `.env`. No code changes needed for standard providers (Ollama, LM Studio, vLLM, OpenRouter, Groq, OpenAI, etc.).
+
+For a provider that doesn't follow the `/v1/chat/completions` spec:
 
 1. Create a file in `src/clients/`, e.g. `src/clients/my_client.py`
 2. Subclass `BaseAIClient` from `src/clients/base_client.py`
 3. Implement `generate_completion_stream(messages, model_name) -> AsyncIterator[str]`
-4. Implement `generate_completion_with_image_stream(messages, image_base64, model_name) -> AsyncIterator[str]`
-5. Register it in `src/chat/message_handler.py` in `get_ai_client()`
+4. Implement `stream_with_tools(messages, tools, model_name) -> AsyncIterator[str]`
+5. Wire it into `src/chat/message_handler.py`
 
 Keep streaming behavior consistent with existing clients. Responses should yield string chunks, not complete strings.
 
-## New Mode
+## New Tool
 
-1. Create a file in `src/modes/`, e.g. `src/modes/my_mode.py`
-2. Subclass `BaseMode` from `src/modes/base_mode.py`
-3. Implement `run()`
-4. Add a menu entry in `src/main.py`
+1. Create a file in `src/tools/`, e.g. `src/tools/my_tool.py`
+2. Implement the tool interface from `src/tools/base.py`
+3. Register it in `src/runtime/live_session.py` inside `_build_tool_registry()`
+
+Tools are invoked by the model on demand. Keep tool implementations stateless where possible.
 
 ## Testing
 
-There is no automated test suite at this time. Manual verification flow:
+```bash
+uv run pytest -q                           # Run all tests
+uv run pytest tests/test_runtime.py -q     # Run a single test file
+uv run pytest tests/test_runtime.py -k "test_name" -q  # Run a single test
+uv run ruff check src/                     # Lint
+```
 
-1. `USE_MOCK_CLIENT=true uv run python src/main.py` — confirm all three modes start without errors
-2. Manual mode: send a text prompt, confirm streamed response
-3. Manual mode: send `test #image`, confirm screenshot is captured and sent
-4. Live mode: run for 5 seconds, confirm loop output, interrupt with `Ctrl+C`
-5. Voice mode: run mode 3, speak when prompted, confirm response is spoken back via local-whisper
+Manual verification flow:
 
-For new clients, test with both text and image inputs at each complexity level.
+1. `USE_MOCK_CLIENT=true uv run python src/main.py` — confirm the agent starts as a live session
+2. Type a prompt, confirm streamed response
+3. Speak a prompt (requires Local Whisper), confirm voice response
+4. `/status` — confirm current state is displayed
+5. `/clear` — confirm session is reset
 
 ## PR Checklist
 
 - Code follows the style of the surrounding file (indentation, naming, structure)
-- No new dependencies added without updating `pyproject.toml` and `requirements.txt`
+- No new dependencies added without updating `pyproject.toml`
 - Mock client still works (`USE_MOCK_CLIENT=true`)
 - No credentials, API keys, or personal data in any file
 - Manual verification flow passes

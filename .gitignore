@@ -1,9 +1,44 @@
+# Environment
 .env
-test.jpg
+.venv/
+
+# Python
+__pycache__/
 *.pyc
-.vscode/*
-.venv/*
-node_modules/*
-models_cache/*
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Runtime artifacts
 *.wav
+*.log
+models_cache/
+screenshot.png
+
+# macOS
 .DS_Store
+
+# Editors
+.vscode/
+*.swp
+
+# Node (if any)
+node_modules/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Review artifacts
+.review/
+.reviews/
+
+# AI instructions (local only)
+CLAUDE.md
+AGENTS.md
+INSTRUCTIONS.md
+
+# Test fixtures
+test.jpg
+.scratchpad/

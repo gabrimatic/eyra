@@ -4,19 +4,17 @@
 
 Privacy is a core constraint, not a feature toggle.
 
-- **All processing is local.** Screenshots, webcam frames, and voice input are handled entirely on your Mac.
+- **All processing is local.** Screenshots and voice input are handled entirely on your Mac.
 - **No network calls** except to the configured AI backend. By default this is localhost.
 - **No telemetry, no analytics, no cloud.** No tracking data ever leaves your machine.
-- **Screenshots and webcam frames** exist only in memory and are never written to disk.
-- **First-run model download.** On first launch, the CLIP model (~340 MB) is downloaded to `~/.cache/clip/` by the `openai-clip` package. After that, no outbound connections occur except to the configured AI backend.
+- **Screenshots** exist only in memory and are never written to disk.
 
 ## Permissions
 
 | Permission | Why | Scope |
 |------------|-----|-------|
-| **Screen capture** | Screenshot mode and Live mode | On demand, not continuous |
-| **Camera** | `#selfie` keyword in Manual mode | On demand, single frame |
-| **Microphone** | Voice mode recording | Delegated to local-whisper (`wh`) |
+| **Screen capture** | Screenshot tool (on-demand, model-invoked) | Single frame when requested |
+| **Microphone** | Voice input recording | In-process via sounddevice (Silero VAD); transcription via local-whisper |
 | **Network** | AI backend API | Loopback by default; follows `API_BASE_URL` |
 
 All permissions are requested on demand. Nothing runs in the background between interactions.
@@ -27,6 +25,8 @@ All permissions are requested on demand. Nothing runs in the background between 
 |----------|-------------|-------|
 | AI backend at `API_BASE_URL` | User-controlled | Loopback by default; remote if configured |
 | wh (local-whisper) | Trusted | Subprocess, runs on localhost, no network |
+| Filesystem sandbox | Enforced | Paths restricted to `FILESYSTEM_ALLOWED_PATHS` (default `~/,/tmp`). Rejects empty paths and binary file edits. |
+| Browser (Playwright) | Sandboxed | Headless Chromium, http/https only, 30s tool timeout |
 | `.env` file | User-controlled | Must not be committed |
 | User prompts | Untrusted input | Passed to AI backends, no shell execution |
 
@@ -51,7 +51,7 @@ Expect acknowledgment within 48 hours.
 
 These are not considered vulnerabilities:
 
-- Issues in third-party dependencies (AI providers, local-whisper, spaCy, CLIP)
+- Issues in third-party dependencies (AI providers, local-whisper)
 - Issues requiring physical access to the machine
 - Denial-of-service via resource exhaustion on private machines
 
@@ -59,4 +59,4 @@ These are not considered vulnerabilities:
 
 | Version | Supported |
 |---------|-----------|
-| 1.x     | Yes       |
+| 3.x     | Yes       |

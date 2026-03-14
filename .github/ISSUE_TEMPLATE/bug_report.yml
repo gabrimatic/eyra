@@ -7,7 +7,7 @@ body:
     attributes:
       label: Summary
       description: A single sentence describing what's broken.
-      placeholder: "Voice mode does not produce a spoken response after transcription."
+      placeholder: "Voice input does not produce a spoken response after transcription."
     validations:
       required: true
 
@@ -18,9 +18,8 @@ body:
       description: Shortest path to reproduce the issue.
       placeholder: |
         1. Run python src/main.py
-        2. Select Voice Mode (3)
-        3. Speak when prompted
-        4. Observe no audio response
+        2. Speak a prompt
+        3. Observe no audio response
 
     validations:
       required: true
@@ -58,13 +57,13 @@ body:
       required: true
 
   - type: dropdown
-    id: mode
+    id: input_method
     attributes:
-      label: Mode
+      label: Input method
       options:
-        - Manual
-        - Live
         - Voice
+        - Typed
+        - Both
     validations:
       required: true
 
