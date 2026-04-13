@@ -26,15 +26,15 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "openai>=1.0.0",
+    "openai>=2.31.0",
     "mss>=10.1.0",
     "numpy>=1.26.0",
     "pillow>=11.0.0",
     "prompt-toolkit>=3.0.0",
     "pydantic>=2.11.0",
-    "python-dotenv>=1.1.0",
+    "python-dotenv>=1.2.2",
     "silero-vad>=5.1",
-    "sounddevice>=0.5.0",
+    "sounddevice>=0.5.5",
     "onnxruntime>=1.17.0",
     "playwright>=1.58.0",
 ]
@@ -47,9 +47,9 @@ Changelog = "https://github.com/gabrimatic/eyra/blob/master/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0",
+    "pytest>=9.0.3",
     "pytest-asyncio>=0.23",
-    "ruff>=0.11.0",
+    "ruff>=0.15.10",
 ]
 
 [tool.ruff]
