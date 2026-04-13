@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.3.1] - 2026-04-13
+
+### Changed
+
+- Bump `openai` minimum from 1.0.0 to 2.31.0
+- Bump `python-dotenv` minimum from 1.1.0 to 1.2.2
+- Bump `sounddevice` minimum from 0.5.0 to 0.5.5
+- Bump `pytest` minimum from 8.0 to 9.0.3
+- Bump `ruff` minimum from 0.11.0 to 0.15.10
+
+---
+
 ## [3.3.0] - 2026-03-15
 
 ### Added
