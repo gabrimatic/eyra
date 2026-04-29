@@ -4,9 +4,9 @@
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)]()
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)]()
 
-**Personal on-device agent for the terminal.**
+An on-device agent for the terminal.
 
-Eyra listens, thinks, and acts. It takes voice or typed input, routes to the right model, and calls tools when needed. Everything runs on your machine by default. No telemetry, no polling. Works with any OpenAI-compatible provider, local or remote.
+Eyra accepts voice or typed input, routes the request to the right model, and calls tools when needed. By default everything runs on your machine. No telemetry. Works with any OpenAI-compatible provider, local or remote.
 
 <p align="center"><img src="screenshot.png" width="800" alt="Eyra terminal screenshot"></p>
 
@@ -38,30 +38,30 @@ Eyra
   Type anything or speak. /help for commands.
 ```
 
-From this point, Eyra is listening. Type or speak at any time.
+Eyra is now listening. Type or speak at any time.
 
 ---
 
-## What It Does
+## What it does
 
-- Launches directly into a live, always-on agent session
-- Accepts typed or spoken input without leaving the session
-- Routes requests to the appropriate model (complexity routing available as an experimental option)
-- Uses tools (screenshot, time, weather, clipboard, system info, web browsing, filesystem) on demand via function calling
-- Speaks responses via local-whisper when available
-- Works with any OpenAI-compatible provider (Ollama, LM Studio, vLLM, OpenRouter, etc.)
-- All image data stays in memory, no disk I/O
+- Launches into an always-on agent session.
+- Accepts typed or spoken input without leaving the session.
+- Routes requests to the appropriate model. Complexity routing is available as an experimental option.
+- Uses tools on demand via function calling: screenshot, time, weather, clipboard, system info, web browsing, filesystem.
+- Speaks responses via local-whisper when available.
+- Works with any OpenAI-compatible provider (Ollama, LM Studio, vLLM, OpenRouter, etc.).
+- Image data is kept in memory; no disk I/O.
 
 ---
 
-## How It Works
+## How it works
 
-Eyra runs as one live session with concurrent subsystems:
+Eyra runs as one live session with several concurrent subsystems:
 
-- **Voice** is powered by [Local Whisper](https://github.com/gabrimatic/local-whisper), which handles both directions: input (ASR via Qwen3-ASR) and output (TTS via Kokoro). Eyra records from the microphone via sounddevice and classifies each 32ms frame with Silero VAD. When the speaker pauses, audio is transcribed through Local Whisper. Speak naturally; Eyra interrupts its own speech to hear you. Toggle with `/voice on|off`.
-- **Typed input** is always available inline. Both input channels feed the same conversation.
-- **Complexity routing** (experimental, off by default) scores requests deterministically and dispatches to Simple, Moderate, or Complex tier. When disabled, all requests use a single configurable model.
-- **Tool use** gives the model access to screenshot, time, weather, clipboard, and system info. Tools are defined as OpenAI function-calling schemas and executed locally. When complexity routing is enabled, Simple/Moderate tiers get lightweight tools and Complex gets all tools including screenshot.
+- **Voice** is handled by [Local Whisper](https://github.com/gabrimatic/local-whisper) for both directions: input (ASR via Qwen3-ASR) and output (TTS via Kokoro). Eyra records the microphone via sounddevice and classifies each 32ms frame with Silero VAD. When the speaker pauses, the audio is transcribed through Local Whisper. Eyra will interrupt its own speech to hear you. Toggle with `/voice on|off`.
+- **Typed input** is always available inline. Both channels feed the same conversation.
+- **Complexity routing** is experimental and off by default. When enabled, requests are scored deterministically and dispatched to a Simple, Moderate, or Complex tier. When disabled, all requests use a single configured model.
+- **Tool use** gives the model access to screenshot, time, weather, clipboard, and system info. Tools are defined as OpenAI function-calling schemas and executed locally. With complexity routing enabled, Simple/Moderate tiers receive lightweight tools and Complex receives all tools including screenshot.
 
 ### Preflight
 
@@ -169,13 +169,13 @@ COMPLEXITY_ROUTING_ENABLED=false
 | Component | Where it runs |
 |-----------|--------------|
 | AI backend | `API_BASE_URL` (default: localhost:11434) |
-| Silero VAD | Neural ONNX model, runs in-process, fully local |
-| Voice recording | sounddevice (PortAudio), in-process, fully local |
-| wh transcribe (local-whisper) | Subprocess, fully local |
-| wh whisper (local-whisper) | Subprocess, fully local |
-| Screenshots | In-memory only, never written to disk |
+| Silero VAD | ONNX model, in-process, local |
+| Voice recording | sounddevice (PortAudio), in-process, local |
+| wh transcribe (local-whisper) | Subprocess, local |
+| wh whisper (local-whisper) | Subprocess, local |
+| Screenshots | In-memory; never written to disk |
 
-No telemetry. No analytics. By default everything runs on your machine. If you point `API_BASE_URL` at a remote provider, prompts and images will leave your machine to that provider.
+No telemetry. By default everything runs on your machine. If `API_BASE_URL` points at a remote provider, prompts and images will leave your machine to that provider.
 
 ---
 
