@@ -133,7 +133,7 @@ All model names are set in `.env`. Any model supported by your provider works.
 <details><summary><strong>.env reference</strong></summary>
 
 ```env
-# Provider — any OpenAI-compatible endpoint
+# Provider: any OpenAI-compatible endpoint
 API_BASE_URL=http://localhost:11434/v1
 API_KEY=ollama        # leave as-is for local; set your key for cloud providers
 
@@ -142,7 +142,7 @@ USE_MOCK_CLIENT=false
 # Default model for all requests (used when complexity routing is off)
 MODEL=qwen3.5:4b
 
-# Tier models — only used when COMPLEXITY_ROUTING_ENABLED=true
+# Tier models: only used when COMPLEXITY_ROUTING_ENABLED=true
 SIMPLE_MODEL=qwen3.5:2b
 MODERATE_MODEL=qwen3.5:4b
 
