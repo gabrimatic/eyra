@@ -156,6 +156,10 @@ VOICE_VAD_THRESHOLD=0.6        # Silero VAD sensitivity (0.0-1.0, higher = stric
 
 # Experimental: complexity-based routing. When disabled, all requests use MODEL.
 COMPLEXITY_ROUTING_ENABLED=false
+
+# Filesystem sandbox: comma-separated list of allowed root paths
+FILESYSTEM_ALLOWED_PATHS=~,/tmp
+FILESYSTEM_DEFAULT_PATH=~/Documents
 ```
 
 `API_BASE_URL` accepts any OpenAI-compatible endpoint. Point it at Ollama (default), LM Studio, vLLM, OpenRouter, Groq, or OpenAI itself. `API_KEY` is ignored by local providers but required for cloud ones.
@@ -193,7 +197,8 @@ eyra/
 │   │   ├── preflight.py           # Backend, model, and capability validation
 │   │   ├── speech_controller.py   # TTS output and STT input coordination
 │   │   ├── voice_input.py         # Silero VAD recording + local-whisper transcription
-│   │   └── status_presenter.py    # User-facing status header and updates
+│   │   ├── status_presenter.py    # User-facing status header and updates
+│   │   └── startup.py             # First-run setup and .env management
 │   ├── tools/
 │   │   ├── base.py                # BaseTool abstract + ToolResult
 │   │   ├── registry.py            # Tool registry and dispatch
@@ -216,6 +221,7 @@ eyra/
 │       ├── settings.py
 │       ├── image_history.py
 │       ├── sound_player.py
+│       ├── theme.py
 │       └── mock_client.py
 ```
 
