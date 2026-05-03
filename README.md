@@ -140,11 +140,11 @@ API_KEY=ollama        # leave as-is for local; set your key for cloud providers
 USE_MOCK_CLIENT=false
 
 # Default model for all requests (used when complexity routing is off)
-MODEL=qwen3.5:4b
+MODEL=gemma3:4b
 
 # Tier models: only used when COMPLEXITY_ROUTING_ENABLED=true
 SIMPLE_MODEL=qwen3.5:2b
-MODERATE_MODEL=qwen3.5:4b
+MODERATE_MODEL=gemma3:4b
 
 # Live runtime settings
 AUTO_PULL_MODELS=true
