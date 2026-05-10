@@ -16,6 +16,8 @@ from tools.filesystem import (
     WriteFileTool,
 )
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
 
 def _run(coro):
     return asyncio.run(coro)
@@ -79,7 +81,7 @@ class TestSecurity:
 class TestReadFileTool:
     def test_read_file(self):
         async def run():
-            r = await ReadFileTool().execute(path="~/Developer/Projects/eyra/pyproject.toml")
+            r = await ReadFileTool().execute(path=str(PROJECT_ROOT / "pyproject.toml"))
             assert "eyra" in r.content
         _run(run())
 
@@ -163,14 +165,14 @@ class TestEditFileTool:
 class TestListDirectoryTool:
     def test_list_directory(self):
         async def run():
-            r = await ListDirectoryTool().execute(path="~/Developer/Projects/eyra/src/tools")
+            r = await ListDirectoryTool().execute(path=str(PROJECT_ROOT / "src" / "tools"))
             assert "browser.py" in r.content
             assert "filesystem.py" in r.content
         _run(run())
 
     def test_list_not_a_directory(self):
         async def run():
-            r = await ListDirectoryTool().execute(path="~/Developer/Projects/eyra/pyproject.toml")
+            r = await ListDirectoryTool().execute(path=str(PROJECT_ROOT / "pyproject.toml"))
             assert "Not a directory" in r.content
         _run(run())
 
@@ -187,6 +189,6 @@ class TestCreateDirectoryTool:
 
     def test_mkdir_already_exists(self):
         async def run():
-            r = await CreateDirectoryTool().execute(path="~/Developer/Projects/eyra")
+            r = await CreateDirectoryTool().execute(path=str(PROJECT_ROOT))
             assert "Already exists" in r.content
         _run(run())
