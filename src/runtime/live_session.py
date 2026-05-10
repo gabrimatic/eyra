@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 import time
+from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI
@@ -111,11 +112,12 @@ class LiveSession:
             registry.register(ClickElementTool(session=self._browser_session))
             registry.register(PageScreenshotTool(session=self._browser_session))
         fs_roots = parse_allowed_roots(self.settings.FILESYSTEM_ALLOWED_PATHS)
-        registry.register(ReadFileTool(allowed_roots=fs_roots))
-        registry.register(WriteFileTool(allowed_roots=fs_roots))
-        registry.register(EditFileTool(allowed_roots=fs_roots))
-        registry.register(ListDirectoryTool(allowed_roots=fs_roots))
-        registry.register(CreateDirectoryTool(allowed_roots=fs_roots))
+        fs_default = Path(getattr(self.settings, "FILESYSTEM_DEFAULT_PATH", "~/Documents"))
+        registry.register(ReadFileTool(allowed_roots=fs_roots, default_path=fs_default))
+        registry.register(WriteFileTool(allowed_roots=fs_roots, default_path=fs_default))
+        registry.register(EditFileTool(allowed_roots=fs_roots, default_path=fs_default))
+        registry.register(ListDirectoryTool(allowed_roots=fs_roots, default_path=fs_default))
+        registry.register(CreateDirectoryTool(allowed_roots=fs_roots, default_path=fs_default))
         return registry
 
     async def run(self):

@@ -32,6 +32,14 @@ def _mock_stream():
     return stream
 
 
+class _FakeSocketPath:
+    def exists(self):
+        return True
+
+    def __str__(self):
+        return "/tmp/fake-whisper.sock"
+
+
 def _make_vi(**kwargs):
     """Create a VoiceInput with mocked Silero model loading."""
     with patch("runtime.voice_input.load_silero_vad") as mock_load:
@@ -219,8 +227,9 @@ class TestVoiceInputTranscription:
             b'{"type": "done", "text": "hello world", "success": true}\n',
         ])
 
-        with patch("runtime.voice_input.asyncio.open_unix_connection", new_callable=AsyncMock, return_value=(mock_reader, mock_writer)):
-            assert _run(vi._transcribe_socket("/tmp/test.wav")) == "hello world"
+        with patch("runtime.voice_input.SOCKET_PATH", _FakeSocketPath()):
+            with patch("runtime.voice_input.asyncio.open_unix_connection", new_callable=AsyncMock, return_value=(mock_reader, mock_writer)):
+                assert _run(vi._transcribe_socket("/tmp/test.wav")) == "hello world"
 
     def test_transcribe_socket_error_falls_back_to_cli(self):
         vi = _make_vi()

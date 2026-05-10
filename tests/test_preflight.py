@@ -41,6 +41,11 @@ class _OllamaCompatibleClient:
             return _Response(200, {"models": [{"name": "gemma3:4b"}]})
         return _Response(404)
 
+    async def post(self, url: str, json: dict):
+        if url.endswith("/api/show"):
+            return _Response(200, {"capabilities": ["completion", "vision"]})
+        return _Response(404)
+
 
 class _HangingProcess:
     def __init__(self):
@@ -65,6 +70,56 @@ class TestPreflightBackend:
             assert _run(manager._check_backend()) is True
 
         assert manager._is_ollama is True
+
+    def test_ollama_model_without_tools_warns_but_stays_ready(self, capsys):
+        settings = Settings(LIVE_LISTENING_ENABLED=False, LIVE_SPEECH_ENABLED=False)
+        result = PreflightManager(settings)
+        with patch("runtime.preflight.httpx.AsyncClient", _OllamaCompatibleClient):
+            preflight = _run(result.run())
+
+        assert preflight.models_ready == ["gemma3:4b"]
+        assert preflight.models_missing == []
+        assert "lacks native tool calling" in capsys.readouterr().out
+
+    def test_mock_client_bypasses_backend_and_models(self):
+        settings = Settings(USE_MOCK_CLIENT=True, LIVE_LISTENING_ENABLED=False, LIVE_SPEECH_ENABLED=False)
+        manager = PreflightManager(settings)
+
+        with patch.object(manager, "_check_backend", new_callable=AsyncMock) as mock_backend:
+            result = _run(manager.run())
+
+        assert result.backend_reachable is True
+        assert result.models_ready == [settings.MODEL]
+        assert result.models_missing == []
+        mock_backend.assert_not_called()
+
+    def test_resolve_wh_uses_launch_agent_program_arguments(self, tmp_path):
+        wh = tmp_path / "wh"
+        wh.write_text("#!/bin/sh\n")
+        launch_agents = tmp_path / "Library" / "LaunchAgents"
+        launch_agents.mkdir(parents=True)
+        plist = launch_agents / "com.local-whisper.plist"
+        plist.write_bytes(
+            b"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>ProgramArguments</key>
+  <array>
+    <string>"""
+            + str(wh).encode()
+            + b"""</string>
+    <string>serve</string>
+  </array>
+</dict>
+</plist>
+"""
+        )
+
+        with patch("runtime.preflight.shutil.which", return_value=None):
+            with patch("runtime.preflight.pathlib.Path.home", return_value=tmp_path):
+                assert PreflightManager._resolve_wh() == str(wh)
 
 
 class TestModelPull:

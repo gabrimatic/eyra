@@ -175,7 +175,9 @@ class TestSpeechController:
         mock_speech_proc.wait = AsyncMock(return_value=0)
         ctrl._speaking_proc = mock_speech_proc
 
-        with patch.object(ctrl._voice_input, "listen", new_callable=AsyncMock, return_value="hello world"):
+        voice_input = MagicMock()
+        voice_input.listen = AsyncMock(return_value="hello world")
+        with patch.object(ctrl, "_get_voice_input", return_value=voice_input):
             result = _run(ctrl.listen())
             assert result == "hello world"
             mock_speech_proc.wait.assert_called_once()
@@ -205,26 +207,51 @@ class TestSpeechController:
         ctrl, state = self._make_controller()
         state.listening_enabled = True
 
-        with patch.object(ctrl._voice_input, "listen", new_callable=AsyncMock, return_value="test speech"):
+        voice_input = MagicMock()
+        voice_input.listen = AsyncMock(return_value="test speech")
+        with patch.object(ctrl, "_get_voice_input", return_value=voice_input):
             result = _run(ctrl.listen())
             assert result == "test speech"
-            ctrl._voice_input.listen.assert_called_once()
+            voice_input.listen.assert_called_once()
 
     def test_listen_returns_none_on_silence(self):
         """listen() returns None when VoiceInput detects no speech."""
         ctrl, state = self._make_controller()
         state.listening_enabled = True
 
-        with patch.object(ctrl._voice_input, "listen", new_callable=AsyncMock, return_value=None):
+        voice_input = MagicMock()
+        voice_input.listen = AsyncMock(return_value=None)
+        with patch.object(ctrl, "_get_voice_input", return_value=voice_input):
             result = _run(ctrl.listen())
             assert result is None
 
     def test_cancel_listen_cancels_voice_input(self):
         """cancel_listen() forwards to VoiceInput.cancel()."""
         ctrl, _ = self._make_controller()
-        with patch.object(ctrl._voice_input, "cancel") as mock_cancel:
-            ctrl.cancel_listen()
-            mock_cancel.assert_called_once()
+        voice_input = MagicMock()
+        ctrl._voice_input = voice_input
+        ctrl.cancel_listen()
+        voice_input.cancel.assert_called_once()
+
+    def test_disabled_controller_does_not_initialize_voice_input(self):
+        ctrl, state = self._make_controller()
+        state.listening_enabled = False
+
+        with patch.object(ctrl, "_get_voice_input") as mock_get_voice:
+            result = _run(ctrl.listen())
+
+        assert result is None
+        mock_get_voice.assert_not_called()
+
+    def test_voice_init_failure_disables_listening(self):
+        ctrl, state = self._make_controller()
+        state.listening_enabled = True
+
+        with patch("runtime.voice_input.load_silero_vad", side_effect=RuntimeError("vad unavailable")):
+            result = _run(ctrl.listen())
+
+        assert result is None
+        assert state.listening_enabled is False
 
 
 # ---------------------------------------------------------------------------

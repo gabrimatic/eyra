@@ -112,7 +112,7 @@ async def capture_screenshot_in_memory() -> Image.Image:
 
     def _grab():
         with mss.mss() as sct:
-            monitor = sct.monitors[0]
+            monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
             raw_screenshot = sct.grab(monitor)
             return Image.frombytes(
                 "RGB", (raw_screenshot.width, raw_screenshot.height), raw_screenshot.rgb

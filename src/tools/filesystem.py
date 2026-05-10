@@ -22,11 +22,18 @@ def parse_allowed_roots(paths_str: str) -> tuple[Path, ...]:
     return tuple(roots) if roots else (Path.home(),)
 
 
-def _resolve(path_str: str, allowed_roots: tuple[Path, ...]) -> Path:
-    """Resolve a path, expanding ~, and ensure it's under an allowed root."""
+def _resolve(path_str: str, allowed_roots: tuple[Path, ...], default_path: Path | None = None) -> Path:
+    """Resolve a path, expanding ~, and ensure it's under an allowed root.
+
+    Relative paths are resolved under FILESYSTEM_DEFAULT_PATH so tools do not
+    accidentally read or write in whatever directory launched the app.
+    """
     if not path_str or not path_str.strip():
         raise ValueError("Missing path.")
-    p = Path(path_str).expanduser().resolve()
+    raw = Path(path_str).expanduser()
+    if not raw.is_absolute() and default_path is not None:
+        raw = default_path / raw
+    p = raw.resolve()
     if not any(p == root or root in p.parents for root in allowed_roots):
         raise PermissionError(f"Access denied: path must be under {' or '.join(str(r) for r in allowed_roots)}")
     return p
@@ -59,8 +66,9 @@ class ReadFileTool(BaseTool):
     }
     costly = False
 
-    def __init__(self, allowed_roots: tuple[Path, ...] = ()):
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
         self._roots = allowed_roots or (Path.home(), Path("/tmp").resolve())
+        self._default_path = default_path.expanduser().resolve() if default_path else None
 
     async def execute(self, path: str = "", **_) -> ToolResult:
         try:
@@ -72,7 +80,7 @@ class ReadFileTool(BaseTool):
             return ToolResult(content=f"Filesystem error: {e}")
 
     def _run(self, path: str) -> ToolResult:
-        p = _resolve(path, self._roots)
+        p = _resolve(path, self._roots, self._default_path)
         if not p.is_file():
             return ToolResult(content=f"Not a file: {p}")
         size = p.stat().st_size
@@ -108,8 +116,9 @@ class WriteFileTool(BaseTool):
     }
     costly = False
 
-    def __init__(self, allowed_roots: tuple[Path, ...] = ()):
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
         self._roots = allowed_roots or (Path.home(), Path("/tmp").resolve())
+        self._default_path = default_path.expanduser().resolve() if default_path else None
 
     async def execute(self, path: str = "", content: str = "", **_) -> ToolResult:
         try:
@@ -121,7 +130,7 @@ class WriteFileTool(BaseTool):
             return ToolResult(content=f"Filesystem error: {e}")
 
     def _run(self, path: str, content: str) -> ToolResult:
-        p = _resolve(path, self._roots)
+        p = _resolve(path, self._roots, self._default_path)
         p.parent.mkdir(parents=True, exist_ok=True)
         existed = p.exists()
         p.write_text(content)
@@ -156,8 +165,9 @@ class EditFileTool(BaseTool):
     }
     costly = False
 
-    def __init__(self, allowed_roots: tuple[Path, ...] = ()):
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
         self._roots = allowed_roots or (Path.home(), Path("/tmp").resolve())
+        self._default_path = default_path.expanduser().resolve() if default_path else None
 
     async def execute(self, path: str = "", find: str = "", replace: str = "", **_) -> ToolResult:
         try:
@@ -171,7 +181,7 @@ class EditFileTool(BaseTool):
     def _run(self, path: str, find: str, replace: str) -> ToolResult:
         if not find:
             return ToolResult(content="Missing 'find' text.")
-        p = _resolve(path, self._roots)
+        p = _resolve(path, self._roots, self._default_path)
         if not p.is_file():
             return ToolResult(content=f"Not a file: {p}")
         try:
@@ -205,8 +215,9 @@ class ListDirectoryTool(BaseTool):
     }
     costly = False
 
-    def __init__(self, allowed_roots: tuple[Path, ...] = ()):
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
         self._roots = allowed_roots or (Path.home(), Path("/tmp").resolve())
+        self._default_path = default_path.expanduser().resolve() if default_path else None
 
     async def execute(self, path: str = "", **_) -> ToolResult:
         try:
@@ -218,7 +229,7 @@ class ListDirectoryTool(BaseTool):
             return ToolResult(content=f"Filesystem error: {e}")
 
     def _run(self, path: str) -> ToolResult:
-        p = _resolve(path, self._roots)
+        p = _resolve(path, self._roots, self._default_path)
         if not p.is_dir():
             return ToolResult(content=f"Not a directory: {p}")
         try:
@@ -264,8 +275,9 @@ class CreateDirectoryTool(BaseTool):
     }
     costly = False
 
-    def __init__(self, allowed_roots: tuple[Path, ...] = ()):
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
         self._roots = allowed_roots or (Path.home(), Path("/tmp").resolve())
+        self._default_path = default_path.expanduser().resolve() if default_path else None
 
     async def execute(self, path: str = "", **_) -> ToolResult:
         try:
@@ -277,7 +289,7 @@ class CreateDirectoryTool(BaseTool):
             return ToolResult(content=f"Filesystem error: {e}")
 
     def _run(self, path: str) -> ToolResult:
-        p = _resolve(path, self._roots)
+        p = _resolve(path, self._roots, self._default_path)
         if p.exists():
             return ToolResult(content=f"Already exists: {p}")
         p.mkdir(parents=True, exist_ok=True)

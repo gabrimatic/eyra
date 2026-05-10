@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import pathlib
+import plistlib
 import shutil
 import subprocess
 import tempfile
@@ -43,15 +44,25 @@ class PreflightManager:
         result = PreflightResult()
         print(f"\n{CYAN}▶{NC} Preflight\n")
 
-        # Backend
-        result.backend_reachable = await self._check_backend()
+        if self.settings.USE_MOCK_CLIENT:
+            result.backend_reachable = True
+            result.models_ready = list(self.settings.all_model_names)
+            _ok("Backend: mock client")
+            for model in result.models_ready:
+                _ok(f"Model: {model}")
+        else:
+            # Backend
+            result.backend_reachable = await self._check_backend()
 
-        # Models
-        if result.backend_reachable:
-            await self._check_models(result)
+            # Models
+            if result.backend_reachable:
+                await self._check_models(result)
 
         # Capabilities (sync/blocking — run off the event loop)
-        result.wh_available = await asyncio.to_thread(self._check_wh, result)
+        if self.settings.LIVE_LISTENING_ENABLED or self.settings.LIVE_SPEECH_ENABLED:
+            result.wh_available = await asyncio.to_thread(self._check_wh, result)
+        else:
+            _ok("Local Whisper: skipped (voice disabled)")
         result.screen_capture_available = self._check_screen_capture()
 
         print()
@@ -123,17 +134,36 @@ class PreflightManager:
             if found:
                 result.models_ready.append(model)
                 _ok(f"Model: {model}")
+                await self._warn_if_ollama_model_lacks_tools(model)
             elif self.settings.AUTO_PULL_MODELS and self._is_ollama:
                 print(f"  {DIM}›{NC} Pulling {model}...", end="", flush=True)
                 if await self._pull_model(model):
                     result.models_ready.append(model)
                     print(f"\r  {GREEN}✓{NC} Model: {model}    ")
+                    await self._warn_if_ollama_model_lacks_tools(model)
                 else:
                     result.models_missing.append(model)
                     print(f"\r  {RED}✗{NC} Model: {model} (pull failed)    ")
             else:
                 result.models_missing.append(model)
                 _fail(f"Model missing: {model}")
+
+    async def _warn_if_ollama_model_lacks_tools(self, model: str) -> None:
+        """Warn when Ollama reports a model that cannot accept native tools."""
+        if not self._is_ollama:
+            return
+        base = self.settings.API_BASE_URL.removesuffix("/v1").rstrip("/")
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.post(f"{base}/api/show", json={"model": model})
+            if resp.status_code != 200:
+                return
+            capabilities = set(resp.json().get("capabilities") or [])
+        except Exception as e:
+            logger.debug("Could not inspect Ollama model capabilities for %s: %s", model, e)
+            return
+        if capabilities and "tools" not in capabilities:
+            _warn(f"Model lacks native tool calling: {model}")
 
     async def _pull_model(self, model: str) -> bool:
         if shutil.which("ollama") is None:
@@ -245,8 +275,37 @@ class PreflightManager:
 
     @staticmethod
     def _resolve_wh() -> str | None:
-        """Find the wh binary on PATH (installed via Homebrew)."""
-        return shutil.which("wh")
+        """Find the wh binary from PATH, LaunchAgent plists, or common Homebrew paths."""
+        path_wh = shutil.which("wh")
+        if path_wh:
+            return path_wh
+
+        launch_agent_dir = pathlib.Path.home() / "Library" / "LaunchAgents"
+        for plist_path in launch_agent_dir.glob("*.plist"):
+            try:
+                data = plistlib.loads(plist_path.read_bytes())
+            except Exception:
+                continue
+            args = data.get("ProgramArguments")
+            candidates: list[str] = []
+            if isinstance(args, list):
+                candidates.extend(str(arg) for arg in args)
+            program = data.get("Program")
+            if isinstance(program, str):
+                candidates.append(program)
+            for candidate in candidates:
+                path = pathlib.Path(candidate).expanduser()
+                if path.name == "wh" and path.is_file():
+                    return str(path)
+
+        for candidate in (
+            "/opt/homebrew/bin/wh",
+            "/usr/local/bin/wh",
+            str(pathlib.Path.home() / ".local" / "bin" / "wh"),
+        ):
+            if pathlib.Path(candidate).is_file():
+                return candidate
+        return None
 
     @staticmethod
     def _wh_is_running(wh_bin: str) -> bool:

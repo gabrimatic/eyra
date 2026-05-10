@@ -52,6 +52,7 @@ Eyra is now listening. Type or speak at any time.
 - Speaks responses via local-whisper when available.
 - Works with any OpenAI-compatible provider (Ollama, LM Studio, vLLM, OpenRouter, etc.).
 - Image data is kept in memory; no disk I/O.
+- Mock mode (`USE_MOCK_CLIENT=true`) starts without a backend for development and smoke tests.
 
 ---
 
@@ -63,6 +64,7 @@ Eyra runs as one live session with several concurrent subsystems:
 - **Typed input** is always available inline. Both channels feed the same conversation.
 - **Complexity routing** is experimental and off by default. When enabled, requests are scored deterministically and dispatched to a Simple, Moderate, or Complex tier. When disabled, all requests use a single configured model.
 - **Tool use** gives the model access to screenshot, time, clipboard, system info, and sandboxed filesystem actions. Weather and browser tools are opt-in because they contact remote sites. Tools are defined as OpenAI function-calling schemas and executed locally unless a network tool is explicitly enabled. With complexity routing enabled, Simple/Moderate tiers receive lightweight tools and Complex receives all tools including screenshot.
+- Some local models do not support native tool calling. Eyra detects that backend error and falls back to plain streaming so the session keeps working; choose a tool-capable model if you need local tools.
 
 ### Preflight
 
@@ -70,10 +72,12 @@ On startup, Eyra validates:
 
 - Backend reachability (tries `/v1/models`, falls back to Ollama `/api/tags`)
 - Every configured model exists (auto-pulls via Ollama if needed)
+- Ollama model capabilities, with a warning when the selected model does not advertise native tool calling
 - [Local Whisper](https://github.com/gabrimatic/local-whisper) for voice input and speech output (`brew tap gabrimatic/local-whisper && brew install local-whisper`)
 - Screen capture (macOS built-in)
 
 The session does not start until the backend and models are confirmed ready.
+When `USE_MOCK_CLIENT=true`, backend and model checks are bypassed intentionally so the local session can be smoke-tested without a running provider.
 
 ---
 
@@ -163,6 +167,7 @@ COMPLEXITY_ROUTING_ENABLED=false
 
 # Filesystem sandbox: comma-separated list of allowed root paths
 FILESYSTEM_ALLOWED_PATHS=~,/tmp
+# Relative file paths are resolved under this directory, then checked against the sandbox.
 FILESYSTEM_DEFAULT_PATH=~/Documents
 ```
 
@@ -249,6 +254,18 @@ If using a different provider, verify `API_BASE_URL` and `API_KEY` in `.env` are
 
 </details>
 
+<details><summary><strong>Tools are not being used</strong></summary>
+
+The selected model must support native tool calling. In Ollama, check:
+
+```bash
+ollama show <model>
+```
+
+If the model does not list tools, text chat will still work, but local tool calls will be skipped by the backend. Choose a tool-capable model for filesystem, screenshot, time, clipboard, weather, or browser actions.
+
+</details>
+
 <details><summary><strong>Voice not working</strong></summary>
 
 Voice requires [Local Whisper](https://github.com/gabrimatic/local-whisper), which powers both input (ASR) and output (TTS). Install it:
@@ -275,7 +292,7 @@ uv run pytest -q
 uv run ruff check src tests
 uv lock --check
 bash -n setup.sh
-USE_MOCK_CLIENT=true uv run python src/main.py
+USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv run python src/main.py
 ```
 
 ---
