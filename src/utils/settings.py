@@ -27,6 +27,8 @@ class Settings:
     FILESYSTEM_ALLOWED_PATHS: str = "~,/tmp"
     # Filesystem tool: default working directory for the model (~ expanded)
     FILESYSTEM_DEFAULT_PATH: str = "~/Documents"
+    # Network-backed tools (weather and browser) are opt-in so the default runtime stays local.
+    NETWORK_TOOLS_ENABLED: bool = False
     # Experimental: complexity-based routing. When disabled, all requests use MODEL.
     COMPLEXITY_ROUTING_ENABLED: bool = False
 
@@ -35,7 +37,12 @@ class Settings:
         load_dotenv()
 
         def _bool(key: str, default: str = "true") -> bool:
-            return os.getenv(key, default).lower() == "true"
+            raw = os.getenv(key, default).strip().lower()
+            if raw in {"true", "1", "yes", "on"}:
+                return True
+            if raw in {"false", "0", "no", "off"}:
+                return False
+            raise ValueError(f"Invalid boolean for {key}: '{raw}'. Use true or false.")
 
         def _int(key: str, default: str) -> int:
             raw = os.getenv(key, default)
@@ -69,6 +76,7 @@ class Settings:
             VOICE_VAD_THRESHOLD=_float_range("VOICE_VAD_THRESHOLD", "0.6", 0.0, 1.0),
             FILESYSTEM_ALLOWED_PATHS=os.getenv("FILESYSTEM_ALLOWED_PATHS", "~,/tmp"),
             FILESYSTEM_DEFAULT_PATH=os.getenv("FILESYSTEM_DEFAULT_PATH", "~/Documents"),
+            NETWORK_TOOLS_ENABLED=_bool("NETWORK_TOOLS_ENABLED", "false"),
             COMPLEXITY_ROUTING_ENABLED=_bool("COMPLEXITY_ROUTING_ENABLED", "false"),
         )
 

@@ -243,6 +243,7 @@ class TestLiveSessionCommands:
         settings.VOICE_SILENCE_MS = 1500
         settings.VOICE_VAD_THRESHOLD = 0.6
         settings.FILESYSTEM_ALLOWED_PATHS = "~,/tmp"
+        settings.NETWORK_TOOLS_ENABLED = False
 
         preflight = PreflightResult(backend_reachable=True, models_ready=["m"])
         state = LiveRuntimeState.from_preflight(preflight)
@@ -294,6 +295,30 @@ class TestLiveSessionCommands:
         session = self._make_session()
         result = _run(session._handle_command("/notacommand"))
         assert result is True
+
+    def test_network_tools_disabled_by_default(self):
+        session = self._make_session()
+        names = {
+            tool["function"]["name"]
+            for tool in session._tool_registry.to_openai_tools(include_costly=True)
+        }
+        assert "get_current_time" in names
+        assert "take_screenshot" in names
+        assert "get_weather" not in names
+        assert "web_search" not in names
+
+    def test_network_tools_enabled_registers_remote_tools(self):
+        session = self._make_session()
+        session.settings.NETWORK_TOOLS_ENABLED = True
+        session._tool_registry = session._build_tool_registry()
+
+        names = {
+            tool["function"]["name"]
+            for tool in session._tool_registry.to_openai_tools(include_costly=True)
+        }
+        assert "get_weather" in names
+        assert "web_search" in names
+        assert "open_url" in names
 
 
 # ---------------------------------------------------------------------------

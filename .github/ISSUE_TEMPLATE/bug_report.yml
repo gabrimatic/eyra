@@ -73,6 +73,11 @@ body:
       label: AI backend
       options:
         - Ollama (local)
+        - LM Studio (local)
+        - OpenRouter
+        - Groq
+        - OpenAI
+        - Custom OpenAI-compatible
         - Mock client
     validations:
       required: true

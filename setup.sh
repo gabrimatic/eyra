@@ -21,10 +21,13 @@ trap 'echo ""; echo -e "  ${DIM}Setup cancelled.${NC}"; echo ""; exit 130' INT
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
+EYRA_DIR="$(cd "$(dirname "$0")" && pwd)"
+command -v realpath &>/dev/null && EYRA_DIR="$(realpath "$EYRA_DIR")"
+
 echo ""
 echo -e "${BOLD}╭────────────────────────────────────────╮${NC}"
 echo -e "${BOLD}│${NC}  ${CYAN}Eyra${NC} · Setup                         ${BOLD}│${NC}"
-echo -e "${BOLD}│${NC}  ${DIM}Voice-first AI assistant${NC}               ${BOLD}│${NC}"
+echo -e "${BOLD}│${NC}  ${DIM}Voice-first local agent${NC}                 ${BOLD}│${NC}"
 echo -e "${BOLD}╰────────────────────────────────────────╯${NC}"
 
 # ── System requirements ───────────────────────────────────────────────────────
@@ -100,10 +103,39 @@ else
     log_info "Install: brew tap gabrimatic/local-whisper && brew install local-whisper"
 fi
 
-# ── Register command ──────────────────────────────────────────────────────────
+# ── Provider configuration ────────────────────────────────────────────────────
 
-EYRA_DIR="$(cd "$(dirname "$0")" && pwd)"
-command -v realpath &>/dev/null && EYRA_DIR="$(realpath "$EYRA_DIR")"
+log_step "Configuring AI provider..."
+if ! PYTHONPATH="$EYRA_DIR/src" uv run python -c "from runtime.startup import maybe_run_startup_selector; maybe_run_startup_selector()"; then
+    fail "Provider configuration failed."
+fi
+log_ok "Provider configuration saved"
+
+log_step "Verifying backend and models..."
+if ! PYTHONPATH="$EYRA_DIR/src" uv run python - <<'PY'
+import asyncio
+
+from runtime.preflight import PreflightManager
+from utils.settings import Settings
+
+
+async def main() -> None:
+    settings = Settings.load_from_env()
+    result = await PreflightManager(settings).run()
+    if not result.backend_reachable:
+        raise SystemExit("Backend is not reachable.")
+    if result.models_missing:
+        raise SystemExit("Missing models: " + ", ".join(result.models_missing))
+
+
+asyncio.run(main())
+PY
+then
+    fail "Backend/model verification failed."
+fi
+log_ok "Backend and models verified"
+
+# ── Register command ──────────────────────────────────────────────────────────
 
 log_step "Registering eyra command..."
 

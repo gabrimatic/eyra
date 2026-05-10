@@ -7,15 +7,16 @@ import wave
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
+import sounddevice as sd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from runtime.voice_input import (
+    _LOOKBACK_FRAMES,
     CHANNELS,
     FRAME_SAMPLES,
     SAMPLE_RATE,
     VoiceInput,
-    _LOOKBACK_FRAMES,
 )
 
 
@@ -257,7 +258,3 @@ class TestVoiceInputTranscription:
         with patch.object(vi, "_record", return_value=fake_audio):
             with patch.object(vi, "_transcribe", new_callable=AsyncMock, return_value="test result"):
                 assert _run(vi.listen()) == "test result"
-
-
-# Need sd imported for PortAudioError in test
-import sounddevice as sd  # noqa: E402
