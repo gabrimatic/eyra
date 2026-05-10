@@ -6,31 +6,47 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+
 jobs:
-  lint:
-    name: Lint
+  verify:
+    name: Verify
     runs-on: macos-15
+    timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
-      - name: Install ruff
-        run: pip install ruff
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.1.0
 
-      - name: Lint with ruff
-        run: ruff check src/
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Check lockfile
+        run: uv lock --check
+
+      - name: Lint
+        run: uv run --frozen ruff check src tests
+
+      - name: Install browser test runtime
+        run: uv run --frozen playwright install chromium
+
+      - name: Test
+        run: uv run --frozen pytest -q
 
   setup-check:
     name: setup.sh syntax check
     runs-on: macos-15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check setup.sh syntax
         run: bash -n setup.sh

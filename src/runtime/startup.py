@@ -119,16 +119,27 @@ def _provider_label(url: str) -> str:
 def _write_env(base_url: str, api_key: str, model: str):
     """Write provider config to .env, preserving unrelated lines. Updates os.environ immediately."""
     provider_keys = {
-        "API_BASE_URL", "API_KEY", "USE_MOCK_CLIENT", "MODEL",
-        "LIVE_LISTENING_ENABLED", "LIVE_SPEECH_ENABLED", "SPEECH_COOLDOWN_MS",
+        "API_BASE_URL", "API_KEY", "USE_MOCK_CLIENT", "MODEL", "SIMPLE_MODEL", "MODERATE_MODEL",
+        "AUTO_PULL_MODELS", "LIVE_LISTENING_ENABLED", "LIVE_SPEECH_ENABLED", "SPEECH_COOLDOWN_MS",
+        "VOICE_SILENCE_MS", "VOICE_VAD_THRESHOLD", "NETWORK_TOOLS_ENABLED",
+        "FILESYSTEM_ALLOWED_PATHS", "FILESYSTEM_DEFAULT_PATH", "COMPLEXITY_ROUTING_ENABLED",
     }
     extra: list[str] = []
+    existing: dict[str, str] = {}
     if _ENV.exists():
         for line in _ENV.read_text().splitlines():
             key = line.split("=", 1)[0] if "=" in line else ""
+            if key:
+                existing[key] = line.split("=", 1)[1]
             if line.startswith("#"):
                 # Preserve user comments that aren't our own managed comments
-                if line.strip() not in ("# Voice and speech", "# Custom"):
+                if line.strip() not in (
+                    "# Voice and speech",
+                    "# Filesystem sandbox",
+                    "# Optional network tools",
+                    "# Experimental routing",
+                    "# Custom",
+                ):
                     extra.append(line)
             elif key and key not in provider_keys and line.strip():
                 extra.append(line)
@@ -141,10 +152,28 @@ def _write_env(base_url: str, api_key: str, model: str):
         "",
         f"MODEL={model}",
         "",
+        "# Tier models, only used when COMPLEXITY_ROUTING_ENABLED=true",
+        f"SIMPLE_MODEL={existing.get('SIMPLE_MODEL', 'qwen3.5:2b')}",
+        f"MODERATE_MODEL={existing.get('MODERATE_MODEL', model)}",
+        "",
+        f"AUTO_PULL_MODELS={existing.get('AUTO_PULL_MODELS', 'true')}",
+        "",
         "# Voice and speech",
-        "LIVE_LISTENING_ENABLED=true",
-        "LIVE_SPEECH_ENABLED=true",
-        "SPEECH_COOLDOWN_MS=3000",
+        f"LIVE_LISTENING_ENABLED={existing.get('LIVE_LISTENING_ENABLED', 'true')}",
+        f"LIVE_SPEECH_ENABLED={existing.get('LIVE_SPEECH_ENABLED', 'true')}",
+        f"SPEECH_COOLDOWN_MS={existing.get('SPEECH_COOLDOWN_MS', '3000')}",
+        f"VOICE_SILENCE_MS={existing.get('VOICE_SILENCE_MS', '1500')}",
+        f"VOICE_VAD_THRESHOLD={existing.get('VOICE_VAD_THRESHOLD', '0.6')}",
+        "",
+        "# Optional network tools",
+        f"NETWORK_TOOLS_ENABLED={existing.get('NETWORK_TOOLS_ENABLED', 'false')}",
+        "",
+        "# Filesystem sandbox",
+        f"FILESYSTEM_ALLOWED_PATHS={existing.get('FILESYSTEM_ALLOWED_PATHS', '~,/tmp')}",
+        f"FILESYSTEM_DEFAULT_PATH={existing.get('FILESYSTEM_DEFAULT_PATH', '~/Documents')}",
+        "",
+        "# Experimental routing",
+        f"COMPLEXITY_ROUTING_ENABLED={existing.get('COMPLEXITY_ROUTING_ENABLED', 'false')}",
     ]
     if extra:
         content_lines += ["", "# Custom"] + extra

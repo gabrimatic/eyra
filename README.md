@@ -22,7 +22,7 @@ cd eyra
 chmod +x setup.sh && ./setup.sh
 ```
 
-Setup creates `.env`, installs dependencies, and verifies your backend and models. Then run:
+Setup creates `.env`, installs dependencies, verifies your backend and models, and registers the `eyra` command. Then run:
 
 ```bash
 uv run python src/main.py
@@ -47,7 +47,8 @@ Eyra is now listening. Type or speak at any time.
 - Launches into an always-on agent session.
 - Accepts typed or spoken input without leaving the session.
 - Routes requests to the appropriate model. Complexity routing is available as an experimental option.
-- Uses tools on demand via function calling: screenshot, time, weather, clipboard, system info, web browsing, filesystem.
+- Uses local tools on demand via function calling: screenshot, time, clipboard, system info, and sandboxed filesystem access.
+- Offers optional network tools for weather and web browsing when `NETWORK_TOOLS_ENABLED=true`.
 - Speaks responses via local-whisper when available.
 - Works with any OpenAI-compatible provider (Ollama, LM Studio, vLLM, OpenRouter, etc.).
 - Image data is kept in memory; no disk I/O.
@@ -61,7 +62,7 @@ Eyra runs as one live session with several concurrent subsystems:
 - **Voice** is handled by [Local Whisper](https://github.com/gabrimatic/local-whisper) for both directions: input (ASR via Qwen3-ASR) and output (TTS via Kokoro). Eyra records the microphone via sounddevice and classifies each 32ms frame with Silero VAD. When the speaker pauses, the audio is transcribed through Local Whisper. Eyra will interrupt its own speech to hear you. Toggle with `/voice on|off`.
 - **Typed input** is always available inline. Both channels feed the same conversation.
 - **Complexity routing** is experimental and off by default. When enabled, requests are scored deterministically and dispatched to a Simple, Moderate, or Complex tier. When disabled, all requests use a single configured model.
-- **Tool use** gives the model access to screenshot, time, weather, clipboard, and system info. Tools are defined as OpenAI function-calling schemas and executed locally. With complexity routing enabled, Simple/Moderate tiers receive lightweight tools and Complex receives all tools including screenshot.
+- **Tool use** gives the model access to screenshot, time, clipboard, system info, and sandboxed filesystem actions. Weather and browser tools are opt-in because they contact remote sites. Tools are defined as OpenAI function-calling schemas and executed locally unless a network tool is explicitly enabled. With complexity routing enabled, Simple/Moderate tiers receive lightweight tools and Complex receives all tools including screenshot.
 
 ### Preflight
 
@@ -154,6 +155,9 @@ SPEECH_COOLDOWN_MS=3000
 VOICE_SILENCE_MS=1500          # silence after speech before processing (ms)
 VOICE_VAD_THRESHOLD=0.6        # Silero VAD sensitivity (0.0-1.0, higher = stricter)
 
+# Optional network tools. Keep false for fully local default behavior.
+NETWORK_TOOLS_ENABLED=false
+
 # Experimental: complexity-based routing. When disabled, all requests use MODEL.
 COMPLEXITY_ROUTING_ENABLED=false
 
@@ -178,8 +182,9 @@ FILESYSTEM_DEFAULT_PATH=~/Documents
 | wh transcribe (local-whisper) | Subprocess, local |
 | wh whisper (local-whisper) | Subprocess, local |
 | Screenshots | In-memory; never written to disk |
+| Weather/browser tools | Disabled by default; contact remote sites only when `NETWORK_TOOLS_ENABLED=true` and a tool is used |
 
-No telemetry. By default everything runs on your machine. If `API_BASE_URL` points at a remote provider, prompts and images will leave your machine to that provider.
+No telemetry. By default everything runs on your machine. If `API_BASE_URL` points at a remote provider, prompts and images will leave your machine to that provider. If optional network tools are enabled, those tools send the requested URL, search query, or weather location to the relevant remote service.
 
 ---
 
@@ -204,10 +209,10 @@ eyra/
 │   │   ├── registry.py            # Tool registry and dispatch
 │   │   ├── screenshot.py          # In-memory screenshot via mss
 │   │   ├── time_tool.py           # Current time tool
-│   │   ├── weather.py             # Weather info tool
+│   │   ├── weather.py             # Optional network weather tool
 │   │   ├── clipboard.py           # Clipboard reader tool
 │   │   ├── system_info.py         # System info tool
-│   │   ├── browser.py             # Web search, URL navigation, page interaction
+│   │   ├── browser.py             # Optional network browser tools
 │   │   └── filesystem.py          # Sandboxed file read/write/edit/list
 │   ├── chat/
 │   │   ├── capture.py             # In-memory screenshot capture
@@ -267,6 +272,9 @@ git clone https://github.com/gabrimatic/eyra.git
 cd eyra
 ./setup.sh
 uv run pytest -q
+uv run ruff check src tests
+uv lock --check
+bash -n setup.sh
 USE_MOCK_CLIENT=true uv run python src/main.py
 ```
 

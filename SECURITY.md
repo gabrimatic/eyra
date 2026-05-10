@@ -4,9 +4,9 @@
 
 Privacy is a core constraint, not a feature toggle.
 
-- **All processing is local.** Screenshots and voice input are handled entirely on your Mac.
-- **No network calls** except to the configured AI backend. By default this is localhost.
-- **No telemetry, no analytics, no cloud.** No tracking data ever leaves your machine.
+- **Default processing is local.** Screenshots and voice input are handled entirely on your Mac; remote AI providers are opt-in through `API_BASE_URL`.
+- **No silent network calls.** The configured AI backend is localhost by default. Weather and browser tools are disabled unless `NETWORK_TOOLS_ENABLED=true`.
+- **No telemetry and no analytics.** No tracking data ever leaves your machine.
 - **Screenshots** exist only in memory and are never written to disk.
 
 ## Permissions
@@ -16,6 +16,7 @@ Privacy is a core constraint, not a feature toggle.
 | **Screen capture** | Screenshot tool (on-demand, model-invoked) | Single frame when requested |
 | **Microphone** | Voice input recording | In-process via sounddevice (Silero VAD); transcription via local-whisper |
 | **Network** | AI backend API | Loopback by default; follows `API_BASE_URL` |
+| **Network tools** | Weather and browser lookup | Disabled by default; enabled only with `NETWORK_TOOLS_ENABLED=true` |
 
 All permissions are requested on demand. Nothing runs in the background between interactions.
 
@@ -26,7 +27,7 @@ All permissions are requested on demand. Nothing runs in the background between 
 | AI backend at `API_BASE_URL` | User-controlled | Loopback by default; remote if configured |
 | wh (local-whisper) | Trusted | Subprocess, runs on localhost, no network |
 | Filesystem sandbox | Enforced | Paths restricted to `FILESYSTEM_ALLOWED_PATHS` (default `~/,/tmp`). Rejects empty paths and binary file edits. |
-| Browser (Playwright) | Sandboxed | Headless Chromium, http/https only, 30s tool timeout |
+| Weather/browser tools | Opt-in | Contact remote sites only when `NETWORK_TOOLS_ENABLED=true` and a tool is used. Browser uses headless Chromium, http/https only, 30s tool timeout. |
 | `.env` file | User-controlled | Must not be committed |
 | User prompts | Untrusted input | Passed to AI backends, no shell execution |
 

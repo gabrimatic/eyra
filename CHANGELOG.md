@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.3.2] - 2026-05-11
+
+### Added
+
+- `NETWORK_TOOLS_ENABLED` setting. Weather and browser tools are now opt-in so the default runtime remains local-only.
+- CI coverage for lockfile freshness, linting, tests, setup script syntax, Playwright browser installation, and GitHub Action updates.
+
+### Fixed
+
+- Ollama model auto-pull now works when Ollama's OpenAI-compatible `/v1/models` endpoint is reachable.
+- Ollama model pulls during preflight now time out after 600 seconds instead of waiting forever.
+- `setup.sh` now creates/verifies provider configuration during setup instead of leaving first-run setup to runtime.
+- Project version metadata now matches the 3.x changelog line.
+
+### Removed
+
+- Stale `requirements.txt`; `pyproject.toml` and `uv.lock` are the canonical dependency files.
+
+---
+
 ## [3.3.1] - 2026-04-13
 
 ### Changed

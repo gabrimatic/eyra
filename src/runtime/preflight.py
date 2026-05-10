@@ -19,6 +19,7 @@ from utils.theme import CYAN, DIM, GREEN, NC, RED, YELLOW
 logger = logging.getLogger(__name__)
 
 WH_INSTALL_HINT = "brew tap gabrimatic/local-whisper && brew install local-whisper"
+_MODEL_PULL_TIMEOUT = 600
 
 
 def _ok(msg: str):
@@ -63,6 +64,7 @@ class PreflightManager:
             try:
                 resp = await client.get(f"{base}/v1/models")
                 if resp.status_code == 200:
+                    self._is_ollama = await self._ollama_tags_available(client, base)
                     _ok(f"Backend: {base}")
                     return True
             except Exception as e:
@@ -81,6 +83,16 @@ class PreflightManager:
                 _fail(f"Backend unreachable: {base}")
                 logger.debug("Backend check failed: %s", e)
                 return False
+
+    @staticmethod
+    async def _ollama_tags_available(client: httpx.AsyncClient, base: str) -> bool:
+        """Detect Ollama even when its OpenAI-compatible /v1/models endpoint works."""
+        try:
+            resp = await client.get(f"{base}/api/tags")
+            return resp.status_code == 200
+        except Exception as e:
+            logger.debug("Ollama /api/tags probe failed: %s", e)
+            return False
 
     async def _check_models(self, result: PreflightResult):
         base = self.settings.API_BASE_URL.removesuffix("/v1").rstrip("/")
@@ -133,7 +145,13 @@ class PreflightManager:
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            await proc.wait()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=_MODEL_PULL_TIMEOUT)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                logger.debug("ollama pull timed out after %ss: %s", _MODEL_PULL_TIMEOUT, model)
+                return False
             return proc.returncode == 0
         except Exception:
             return False
@@ -276,4 +294,3 @@ class PreflightManager:
         else:
             _warn("Screen capture: not available")
         return available
-

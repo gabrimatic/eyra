@@ -91,4 +91,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n  Interrupted.\n")
     except Exception as e:
-        logging.getLogger("Main").error("Unhandled: %s", e)
+        logging.getLogger("Main").exception("Unhandled: %s", e)
+        print(f"\n  {RED}Something went wrong.{NC} Check eyra.log and try again.\n")

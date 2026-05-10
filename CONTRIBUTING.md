@@ -14,6 +14,8 @@ Set `USE_MOCK_CLIENT=true` in `.env` to run without any AI backend during develo
 
 Voice input and speech output require [Local Whisper](https://github.com/gabrimatic/local-whisper). Install: `brew tap gabrimatic/local-whisper && brew install local-whisper`. Check with `wh status`.
 
+Network tools are disabled by default. Set `NETWORK_TOOLS_ENABLED=true` in `.env` only when testing weather or browser tools.
+
 ## Architecture
 
 ```
@@ -41,10 +43,10 @@ eyra/
 │   │   ├── registry.py          # Tool registration and lookup
 │   │   ├── screenshot.py        # On-demand screenshot tool
 │   │   ├── time_tool.py         # Current time tool
-│   │   ├── weather.py           # Weather info tool
+│   │   ├── weather.py           # Optional network weather tool
 │   │   ├── clipboard.py         # Clipboard reader tool
 │   │   ├── system_info.py       # System info tool
-│   │   ├── browser.py           # Web search, URL navigation, page interaction
+│   │   ├── browser.py           # Optional network browser tools
 │   │   └── filesystem.py        # Sandboxed file read/write/edit/list
 │   └── utils/
 │       ├── settings.py          # .env config loader
@@ -76,7 +78,7 @@ Keep streaming behavior consistent with existing clients. Responses should yield
 2. Implement the tool interface from `src/tools/base.py`
 3. Register it in `src/runtime/live_session.py` inside `_build_tool_registry()`
 
-Tools are invoked by the model on demand. Keep tool implementations stateless where possible.
+Tools are invoked by the model on demand. Keep tool implementations stateless where possible. Any tool that contacts the network must be gated behind `NETWORK_TOOLS_ENABLED`.
 
 ## Testing
 
@@ -84,7 +86,9 @@ Tools are invoked by the model on demand. Keep tool implementations stateless wh
 uv run pytest -q                           # Run all tests
 uv run pytest tests/test_runtime.py -q     # Run a single test file
 uv run pytest tests/test_runtime.py -k "test_name" -q  # Run a single test
-uv run ruff check src/                     # Lint
+uv run ruff check src tests                # Lint
+uv lock --check                            # Verify uv.lock matches pyproject.toml
+bash -n setup.sh                           # Check setup script syntax
 ```
 
 Manual verification flow:
@@ -111,7 +115,7 @@ Include:
 - macOS version
 - Python version (`python --version`)
 - AI backend version if relevant (e.g. `ollama --version`)
-- Full terminal output including traceback
+- Relevant terminal output or logs
 - Steps to reproduce
 - `.env` contents (no secrets)
 
