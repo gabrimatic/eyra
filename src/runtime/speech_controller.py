@@ -7,7 +7,6 @@ import logging
 import time
 
 from runtime.models import LiveRuntimeState
-from runtime.voice_input import VoiceInput
 
 logger = logging.getLogger(__name__)
 
@@ -16,12 +15,28 @@ class SpeechController:
     def __init__(self, state: LiveRuntimeState, cooldown_ms: int = 3000, silence_duration_ms: int = 1500, vad_threshold: float = 0.6):
         self.state = state
         self.cooldown_s = cooldown_ms / 1000.0
+        self._silence_duration_ms = silence_duration_ms
+        self._vad_threshold = vad_threshold
         self._speaking_proc: asyncio.subprocess.Process | None = None
-        self._voice_input = VoiceInput(
-            silence_duration_ms=silence_duration_ms,
-            threshold=vad_threshold,
-            wh_bin=state.wh_bin,
-        )
+        self._voice_input = None
+
+    def _get_voice_input(self):
+        """Create the microphone/VAD pipeline only when voice input is actually used."""
+        if self._voice_input is not None:
+            return self._voice_input
+        try:
+            from runtime.voice_input import VoiceInput
+
+            self._voice_input = VoiceInput(
+                silence_duration_ms=self._silence_duration_ms,
+                threshold=self._vad_threshold,
+                wh_bin=self.state.wh_bin,
+            )
+        except Exception as e:
+            logger.debug("Voice input initialization failed: %s", e)
+            self.state.listening_enabled = False
+            return None
+        return self._voice_input
 
     @property
     def is_speaking(self) -> bool:
@@ -86,8 +101,12 @@ class SpeechController:
         # Wait for any ongoing speech to finish first
         await self.wait_for_speech()
 
-        return await self._voice_input.listen()
+        voice_input = self._get_voice_input()
+        if voice_input is None:
+            return None
+        return await voice_input.listen()
 
     def cancel_listen(self):
         """Cancel an in-progress listen from another coroutine."""
-        self._voice_input.cancel()
+        if self._voice_input is not None:
+            self._voice_input.cancel()

@@ -58,6 +58,17 @@ def _clean_for_history(content: str) -> str:
     return _strip_tokens(result)
 
 
+def _is_tools_unsupported_error(error: Exception) -> bool:
+    """Return True when a backend rejects the OpenAI tools parameter."""
+    text = str(error).lower()
+    return (
+        "does not support tools" in text
+        or "tools are not supported" in text
+        or "unknown field \"tools\"" in text
+        or "unsupported parameter" in text and "tools" in text
+    )
+
+
 class StreamCleaner:
     """Filters streaming text, replacing <think>/<​/think> with sentinel
     markers and stripping special tokens that local servers sometimes leak.
@@ -139,6 +150,7 @@ class AIClient(BaseAIClient):
             base_url=settings.API_BASE_URL,
             api_key=settings.API_KEY,
         )
+        self._native_tools_supported: bool | None = None
         self.logger = logging.getLogger(self.__class__.__name__)
 
     async def close(self) -> None:
@@ -265,6 +277,11 @@ class AIClient(BaseAIClient):
                 yield chunk
             return
 
+        if self._native_tools_supported is False:
+            async for chunk in self.generate_completion_stream(messages, model_name=model_name):
+                yield chunk
+            return
+
         chosen_model = model_name or self.model_name
         openai_tools = tools.to_openai_tools(include_costly=include_costly)
 
@@ -277,14 +294,24 @@ class AIClient(BaseAIClient):
             _BUFFER_THRESHOLD = 50
             _cleaner = StreamCleaner()
 
-            stream = await self.client.chat.completions.create(
-                model=chosen_model,
-                messages=messages,
-                tools=openai_tools,
-                tool_choice="auto",
-                temperature=0.7,
-                stream=True,
-            )
+            try:
+                stream = await self.client.chat.completions.create(
+                    model=chosen_model,
+                    messages=messages,
+                    tools=openai_tools,
+                    tool_choice="auto",
+                    temperature=0.7,
+                    stream=True,
+                )
+            except Exception as e:
+                if _is_tools_unsupported_error(e):
+                    self._native_tools_supported = False
+                    self.logger.info("Model %s does not support native tools; retrying without tools", chosen_model)
+                    async for chunk in self.generate_completion_stream(messages, model_name=chosen_model):
+                        yield chunk
+                    return
+                raise
+            self._native_tools_supported = True
 
             async for chunk in stream:
                 if not chunk.choices:
@@ -364,6 +391,16 @@ class AIClient(BaseAIClient):
 
             self.logger.info("Tool calls: %s", [tc["name"] for tc in tool_calls_raw.values()])
 
+            normalized_tool_calls = []
+            for i, tc in tool_calls_raw.items():
+                name = tc["name"].strip()
+                arguments = tc["arguments"].strip() or "{}"
+                normalized_tool_calls.append({
+                    "id": tc["id"] or f"call_{i}",
+                    "name": name,
+                    "arguments": arguments,
+                })
+
             # Build the assistant message with tool_calls for context
             assistant_tool_calls = [
                 {
@@ -371,7 +408,7 @@ class AIClient(BaseAIClient):
                     "type": "function",
                     "function": {"name": tc["name"], "arguments": tc["arguments"]},
                 }
-                for tc in tool_calls_raw.values()
+                for tc in normalized_tool_calls
             ]
             clean_content = _clean_for_history(accumulated_content) if accumulated_content else None
             assistant_msg = {
@@ -385,7 +422,7 @@ class AIClient(BaseAIClient):
 
             # Execute each tool and append results (tool messages first, then any images)
             pending_images: list[dict] = []
-            for tc in tool_calls_raw.values():
+            for tc in normalized_tool_calls:
                 try:
                     result = await asyncio.wait_for(tools.execute(tc["name"], tc["arguments"]), timeout=30)
                 except asyncio.TimeoutError:

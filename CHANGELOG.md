@@ -19,6 +19,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Ollama model pulls during preflight now time out after 600 seconds instead of waiting forever.
 - `setup.sh` now creates/verifies provider configuration during setup instead of leaving first-run setup to runtime.
 - Project version metadata now matches the 3.x changelog line.
+- `pillow` and `pygments` lockfile entries now resolve to patched versions reported by Dependabot.
+- `USE_MOCK_CLIENT=true` now bypasses provider setup and backend/model preflight so development smoke tests work without a running backend.
+- Local Whisper detection now checks PATH, LaunchAgent plists, and common Homebrew locations.
+- Voice input is initialized lazily so typed-only sessions can start even when voice is disabled or unavailable.
+- Relative filesystem tool paths now resolve under `FILESYSTEM_DEFAULT_PATH` before sandbox enforcement.
+- Invalid JSON tool arguments now return a clear tool error instead of silently running with empty arguments.
+- Models that reject native tool-calling now fall back to plain streaming instead of failing the whole response.
+- Ollama preflight now warns when the selected model does not advertise native tool-calling capability.
 
 ### Removed
 

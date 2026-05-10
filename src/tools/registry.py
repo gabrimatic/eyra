@@ -37,7 +37,7 @@ class ToolRegistry:
         try:
             kwargs = json.loads(arguments) if arguments.strip() else {}
         except json.JSONDecodeError:
-            kwargs = {}
+            return ToolResult(content=f"Invalid JSON arguments for tool '{name}'.")
 
         try:
             return await tool.execute(**kwargs)

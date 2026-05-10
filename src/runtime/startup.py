@@ -185,6 +185,7 @@ def _write_env(base_url: str, api_key: str, model: str):
     os.environ["API_BASE_URL"] = base_url
     os.environ["API_KEY"] = api_key
     os.environ["MODEL"] = model
+    os.environ["USE_MOCK_CLIENT"] = "false"
 
 
 # ── Provider setup ────────────────────────────────────────────────────────────
@@ -302,14 +303,28 @@ def maybe_run_startup_selector() -> bool:
     """
     from utils.theme import CYAN
 
-    # Read current config from .env (may not exist yet)
+    # Read current config from .env (may not exist yet), then let live env vars override it.
     env_url = env_model = ""
+    use_mock = False
     if _ENV.exists():
         for line in _ENV.read_text().splitlines():
             if line.startswith("API_BASE_URL="):
                 env_url = line[len("API_BASE_URL="):].strip()
             elif line.startswith("MODEL="):
                 env_model = line[len("MODEL="):].strip()
+            elif line.startswith("USE_MOCK_CLIENT="):
+                use_mock = line[len("USE_MOCK_CLIENT="):].strip().lower() in {"true", "1", "yes", "on"}
+
+    if os.getenv("API_BASE_URL"):
+        env_url = os.environ["API_BASE_URL"].strip()
+    if os.getenv("MODEL"):
+        env_model = os.environ["MODEL"].strip()
+    if os.getenv("USE_MOCK_CLIENT"):
+        use_mock = os.environ["USE_MOCK_CLIENT"].strip().lower() in {"true", "1", "yes", "on"}
+
+    if use_mock:
+        _info("Mock client enabled; skipping provider setup.")
+        return False
 
     # If backend is reachable, nothing to do
     if env_url:

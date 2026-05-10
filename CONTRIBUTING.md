@@ -10,7 +10,7 @@ cd eyra
 ./setup.sh
 ```
 
-Set `USE_MOCK_CLIENT=true` in `.env` to run without any AI backend during development.
+Set `USE_MOCK_CLIENT=true` in `.env` to run without any backend during development. Mock mode bypasses provider and model preflight on purpose.
 
 Voice input and speech output require [Local Whisper](https://github.com/gabrimatic/local-whisper). Install: `brew tap gabrimatic/local-whisper && brew install local-whisper`. Check with `wh status`.
 
@@ -79,6 +79,7 @@ Keep streaming behavior consistent with existing clients. Responses should yield
 3. Register it in `src/runtime/live_session.py` inside `_build_tool_registry()`
 
 Tools are invoked by the model on demand. Keep tool implementations stateless where possible. Any tool that contacts the network must be gated behind `NETWORK_TOOLS_ENABLED`.
+Relative filesystem paths resolve under `FILESYSTEM_DEFAULT_PATH` and are still checked against `FILESYSTEM_ALLOWED_PATHS`.
 
 ## Testing
 
@@ -93,7 +94,7 @@ bash -n setup.sh                           # Check setup script syntax
 
 Manual verification flow:
 
-1. `USE_MOCK_CLIENT=true uv run python src/main.py` — confirm the agent starts as a live session
+1. `USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv run python src/main.py` — confirm the agent starts as a live session
 2. Type a prompt, confirm streamed response
 3. Speak a prompt (requires Local Whisper), confirm voice response
 4. `/status` — confirm current state is displayed

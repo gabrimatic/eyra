@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from clients.ai_client import _parse_text_tool_calls
+from clients.ai_client import _is_tools_unsupported_error, _parse_text_tool_calls
 from tools.base import ToolResult
 from tools.registry import ToolRegistry
 from tools.screenshot import ScreenshotTool
@@ -55,6 +55,12 @@ class TestToolRegistry:
         registry = ToolRegistry()
         result = _run(registry.execute("nonexistent", "{}"))
         assert "Unknown tool" in result.content
+
+    def test_execute_rejects_invalid_json_arguments(self):
+        registry = ToolRegistry()
+        registry.register(ScreenshotTool())
+        result = _run(registry.execute("take_screenshot", "{bad json"))
+        assert "Invalid JSON" in result.content
 
     def test_empty_registry(self):
         registry = ToolRegistry()
@@ -138,3 +144,12 @@ class TestTextToolCallParser:
         content = '<function=write_file>{"path": "~/test.txt", "content": "hello"}</function>'
         result = _parse_text_tool_calls(content)
         assert result[0]["id"].startswith("text_")
+
+
+class TestToolFallbackDetection:
+    def test_detects_ollama_tools_unsupported_error(self):
+        error = Exception("registry.ollama.ai/library/gemma3:4b does not support tools")
+        assert _is_tools_unsupported_error(error) is True
+
+    def test_ignores_unrelated_errors(self):
+        assert _is_tools_unsupported_error(Exception("connection failed")) is False

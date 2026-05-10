@@ -4,6 +4,7 @@ import asyncio
 import os
 import sys
 import tempfile
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -109,6 +110,31 @@ class TestWriteFileTool:
                 r = await ReadFileTool().execute(path=path)
                 assert "second" in r.content
                 assert "first" not in r.content
+        _run(run())
+
+    def test_relative_paths_use_default_path(self):
+        async def run():
+            with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
+                default_path = Path(d)
+                tool = WriteFileTool(
+                    allowed_roots=(default_path,),
+                    default_path=default_path,
+                )
+                r = await tool.execute(path="notes/test.txt", content="relative")
+                assert "Created" in r.content
+                assert (default_path / "notes" / "test.txt").read_text() == "relative"
+        _run(run())
+
+    def test_relative_default_still_enforces_allowed_roots(self):
+        async def run():
+            with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as allowed:
+                with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as outside:
+                    tool = WriteFileTool(
+                        allowed_roots=(Path(allowed),),
+                        default_path=Path(outside),
+                    )
+                    r = await tool.execute(path="blocked.txt", content="nope")
+                    assert "Access denied" in r.content
         _run(run())
 
 
