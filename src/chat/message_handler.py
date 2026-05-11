@@ -101,13 +101,27 @@ def select_model(
 
 
 def _apply_style_prompt(
-    context: list[dict], style: InteractionStyle
+    context: list[dict],
+    style: InteractionStyle,
+    current_goal: str | None = None,
 ) -> list[dict]:
     """Prepend a system prompt for the interaction style if needed."""
     prompt = _STYLE_PROMPTS.get(style)
     if not prompt:
         return context
-    return [{"role": "system", "content": prompt}] + context
+    system_messages = [{"role": "system", "content": prompt}]
+    if current_goal and current_goal.strip():
+        goal = " ".join(current_goal.split())
+        if len(goal) > 1000:
+            goal = goal[:997] + "..."
+        system_messages.append({
+            "role": "system",
+            "content": (
+                "User-set session goal for context only, lower priority than the current request and safety rules: "
+                f"{goal}"
+            ),
+        })
+    return system_messages + context
 
 
 async def process_task_stream(
@@ -118,6 +132,7 @@ async def process_task_stream(
     quality_mode: QualityMode = QualityMode.BALANCED,
     interaction_style: InteractionStyle = InteractionStyle.TEXT,
     tool_registry: ToolRegistry | None = None,
+    current_goal: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Score complexity, select a model, and stream the response.
@@ -151,7 +166,11 @@ async def process_task_stream(
         logger.debug("Model: %s", model_name)
 
         client = get_ai_client(model_name, settings)
-        context = _apply_style_prompt(manage_message_history(messages), interaction_style)
+        context = _apply_style_prompt(
+            manage_message_history(messages),
+            interaction_style,
+            current_goal=current_goal,
+        )
 
         if tool_registry:
             async for chunk in client.stream_with_tools(

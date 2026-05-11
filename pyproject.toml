@@ -39,6 +39,9 @@ dependencies = [
     "playwright>=1.58.0",
 ]
 
+[project.scripts]
+eyra = "main:run"
+
 [project.urls]
 Homepage = "https://github.com/gabrimatic/eyra"
 Repository = "https://github.com/gabrimatic/eyra"
@@ -62,6 +65,7 @@ ignore = ["E501"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/chat", "src/clients", "src/tools", "src/utils", "src/runtime"]
+force-include = { "src/main.py" = "main.py" }
 
 [tool.hatch.metadata]
 allow-direct-references = true

@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 import warnings
+from pathlib import Path
 
 from chat.complexity_scorer import ComplexityScorer
 from chat.message_handler import close_all_clients, get_used_model_names
@@ -21,18 +22,46 @@ from utils.theme import NC, RED, YELLOW
 warnings.filterwarnings("ignore", category=FutureWarning, message=".*weights_only.*")
 
 
+def get_log_file_path() -> Path:
+    """Return the user-writable log file path for this runtime."""
+    override = os.getenv("EYRA_LOG_FILE", "").strip()
+    if override:
+        return Path(override).expanduser()
+    if os.name == "posix" and os.uname().sysname == "Darwin":
+        return Path.home() / "Library" / "Logs" / "Eyra" / "eyra.log"
+    state_home = os.getenv("XDG_STATE_HOME", "").strip()
+    base = Path(state_home).expanduser() if state_home else Path.home() / ".local" / "state"
+    return base / "eyra" / "eyra.log"
+
+
+def _file_handler_for(log_file: Path, formatter: logging.Formatter) -> logging.Handler:
+    """Create a file handler, falling back to /tmp if the preferred path is unavailable."""
+    candidates = [log_file, Path("/tmp") / "eyra.log"]
+    for candidate in candidates:
+        try:
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            handler = logging.FileHandler(candidate)
+            handler.setLevel(logging.DEBUG)
+            handler.setFormatter(formatter)
+            return handler
+        except OSError:
+            continue
+    handler = logging.NullHandler()
+    handler.setLevel(logging.DEBUG)
+    return handler
+
+
 async def main() -> None:
     log_format = "[%(asctime)s] %(levelname)s - %(message)s"
     log_datefmt = "%Y-%m-%d %H:%M:%S"
-    log_file = os.path.join(os.path.dirname(__file__), "..", "eyra.log")
+    formatter = logging.Formatter(log_format, datefmt=log_datefmt)
+    log_file = get_log_file_path()
 
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(logging.Formatter(log_format, datefmt=log_datefmt))
+    file_handler = _file_handler_for(log_file, formatter)
 
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.CRITICAL)
-    console_handler.setFormatter(logging.Formatter(log_format, datefmt=log_datefmt))
+    console_handler.setFormatter(formatter)
 
     logging.basicConfig(
         level=logging.DEBUG,
@@ -83,8 +112,10 @@ async def main() -> None:
         logger.info("Session ended.")
 
 
-if __name__ == "__main__":
+def run() -> None:
+    """Console-script entry point."""
     from runtime.startup import maybe_run_startup_selector
+
     maybe_run_startup_selector()
     try:
         asyncio.run(main())
@@ -92,4 +123,8 @@ if __name__ == "__main__":
         print("\n  Interrupted.\n")
     except Exception as e:
         logging.getLogger("Main").exception("Unhandled: %s", e)
-        print(f"\n  {RED}Something went wrong.{NC} Check eyra.log and try again.\n")
+        print(f"\n  {RED}Something went wrong.{NC} Check {get_log_file_path()} and try again.\n")
+
+
+if __name__ == "__main__":
+    run()

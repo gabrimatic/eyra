@@ -577,10 +577,63 @@ class TestVoiceCommand:
         assert state.listening_enabled is True
         assert state.speech_enabled is True
 
+    def test_voice_on_recovers_when_startup_skipped_voice(self):
+        async def run():
+            session, state = self._make_session(wh_available=False, listening=False, speech=False)
+
+            async def idle_voice_loop():
+                return None
+
+            session._voice_input_loop = idle_voice_loop
+
+            async def check_local_whisper(_manager, result):
+                result.wh_bin = "/opt/wh"
+                return True
+
+            with patch("runtime.live_session.PreflightManager.check_local_whisper", check_local_whisper):
+                await session._handle_command("/voice on")
+
+            assert state.listening_enabled is True
+            assert state.speech_enabled is True
+            assert state.wh_bin == "/opt/wh"
+            assert session.preflight.wh_available is True
+
+        _run(run())
+
+    def test_voice_off_cancels_owned_voice_task(self):
+        async def run():
+            session, state = self._make_session()
+
+            async def idle_voice_loop():
+                await asyncio.sleep(60)
+
+            session._voice_input_loop = idle_voice_loop
+            await session._handle_command("/voice off")
+            await session._handle_command("/voice on")
+
+            task = session._voice_task
+            assert task is not None
+            assert task.done() is False
+
+            await session._handle_command("/voice off")
+
+            assert state.listening_enabled is False
+            assert state.speech_enabled is False
+            assert task.done() is True
+
+        _run(run())
+
     def test_voice_on_blocked_without_wh(self, capsys):
         session, state = self._make_session(wh_available=False, listening=False, speech=False)
         assert state.listening_enabled is False
-        _run(session._handle_command("/voice on"))
+
+        async def check_local_whisper(_manager, result):
+            result.wh_bin = None
+            return False
+
+        with patch("runtime.live_session.PreflightManager.check_local_whisper", check_local_whisper):
+            _run(session._handle_command("/voice on"))
+
         assert state.listening_enabled is False
         assert state.speech_enabled is False
         out = capsys.readouterr().out

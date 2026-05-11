@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## Unreleased
+
+### Added
+
+- Packaged installs now expose the `eyra` console command and include the runtime entry module in the wheel.
+
+### Changed
+
+- `/voice on` now rechecks Local Whisper at runtime and starts an owned voice loop when voice was disabled or unavailable at startup.
+- `/voice off` now cancels the owned voice task instead of relying on global task-name lookup.
+- `write_file` now protects existing files unless `overwrite=true` is provided explicitly.
+- Runtime logs now use a user-writable log path by default, with `EYRA_LOG_FILE` as an override.
+- `/goal` now reaches the response pipeline as session context for future replies.
+- Weather lookups require an explicit location and no longer use remote IP geolocation.
+- Tool-call logs now record tool names and argument keys without persisting argument values.
+- `.env.example` now includes `AUTO_PULL_MODELS`.
+- CI and contributor docs now include wheel-build verification.
+
 ## [3.3.2] - 2026-05-11
 
 ### Added

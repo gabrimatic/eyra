@@ -14,24 +14,26 @@ class WeatherTool(BaseTool):
         "Fetches the current weather conditions for a given location. "
         "Call this when the user asks about the weather, temperature, or forecast. "
         "Returns temperature, humidity, wind, and conditions.\n"
-        "Example: {\"location\": \"Tokyo\"}\n"
-        "Example (auto-detect): {}"
+        "Always provide a location; Eyra does not use remote IP geolocation."
     )
     parameters = {
         "type": "object",
         "properties": {
             "location": {
                 "type": "string",
-                "description": "City or place name. Examples: 'London', 'New York', 'Tehran'. Omit to auto-detect the user's location.",
+                "description": "City or place name. Examples: 'London', 'New York', 'Tehran'.",
             },
         },
-        "required": [],
+        "required": ["location"],
     }
 
     async def execute(self, location: str = "", **kwargs) -> ToolResult:
         from urllib.parse import quote
 
-        query = quote(location.strip()) if location else ""
+        if not location.strip():
+            return ToolResult(content="Missing 'location'. Tell me which city or place to check.")
+
+        query = quote(location.strip())
         url = f"https://wttr.in/{query}?format=%l:+%C,+%t,+feels+like+%f,+humidity+%h,+wind+%w"
 
         def _fetch() -> str:

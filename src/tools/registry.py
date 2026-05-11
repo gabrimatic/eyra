@@ -8,6 +8,20 @@ from tools.base import BaseTool, ToolResult
 logger = logging.getLogger(__name__)
 
 
+def _summarize_arguments_for_log(arguments: str) -> str:
+    """Summarize tool arguments without logging user-provided values."""
+    if not arguments.strip():
+        return "no arguments"
+    try:
+        parsed = json.loads(arguments)
+    except json.JSONDecodeError:
+        return "invalid JSON arguments"
+    if isinstance(parsed, dict):
+        keys = ", ".join(str(key) for key in parsed)
+        return f"argument keys: {keys}" if keys else "no arguments"
+    return f"{type(parsed).__name__} arguments"
+
+
 class ToolRegistry:
     """Registry of available tools."""
 
@@ -28,7 +42,7 @@ class ToolRegistry:
 
     async def execute(self, name: str, arguments: str) -> ToolResult:
         """Execute a tool by name with JSON-encoded arguments."""
-        logger.info("Tool call: %s(%s)", name, arguments[:200] if arguments else "")
+        logger.info("Tool call: %s (%s)", name, _summarize_arguments_for_log(arguments or ""))
         tool = self._tools.get(name)
         if not tool:
             logger.warning("Unknown tool requested: %s", name)

@@ -96,7 +96,8 @@ class ReadFileTool(BaseTool):
 class WriteFileTool(BaseTool):
     name = "write_file"
     description = (
-        "Create or overwrite a file with the given text content. "
+        "Create a text file with the given content. "
+        "If the file already exists, set overwrite to true only when the user explicitly asked to replace it. "
         "Call this when the user asks to save, create, or write a file. "
         'Example: {"path": "~/notes.txt", "content": "Hello world"}'
     )
@@ -111,6 +112,10 @@ class WriteFileTool(BaseTool):
                 "type": "string",
                 "description": "The full text content to write into the file.",
             },
+            "overwrite": {
+                "type": "boolean",
+                "description": "Set true only when replacing an existing file is intentional.",
+            },
         },
         "required": ["path", "content"],
     }
@@ -120,17 +125,26 @@ class WriteFileTool(BaseTool):
         self._roots = allowed_roots or (Path.home(), Path("/tmp").resolve())
         self._default_path = default_path.expanduser().resolve() if default_path else None
 
-    async def execute(self, path: str = "", content: str = "", **_) -> ToolResult:
+    async def execute(self, path: str = "", content: str = "", overwrite: bool = False, **_) -> ToolResult:
         try:
-            return await asyncio.to_thread(self._run, path, content)
+            return await asyncio.to_thread(self._run, path, content, overwrite is True)
         except PermissionError as e:
             return ToolResult(content=str(e))
         except Exception as e:
             logger.error("write_file failed: %s", e, exc_info=True)
             return ToolResult(content=f"Filesystem error: {e}")
 
-    def _run(self, path: str, content: str) -> ToolResult:
+    def _run(self, path: str, content: str, overwrite: bool) -> ToolResult:
         p = _resolve(path, self._roots, self._default_path)
+        if p.exists() and not p.is_file():
+            return ToolResult(content=f"Path exists and is not a file: {p}")
+        if p.exists() and not overwrite:
+            return ToolResult(
+                content=(
+                    f"File already exists: {p}. "
+                    "Call write_file with overwrite=true only if the user asked to replace it."
+                )
+            )
         p.parent.mkdir(parents=True, exist_ok=True)
         existed = p.exists()
         p.write_text(content)
