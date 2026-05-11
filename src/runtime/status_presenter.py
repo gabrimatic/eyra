@@ -74,6 +74,19 @@ def render_header(state: LiveRuntimeState, settings=None):
         model_name = getattr(settings, "MODEL", None)
         if model_name:
             print(f"  {DIM}Model: {model_name}{NC}")
+        enabled = []
+        if getattr(settings, "WEB_UI_ENABLED", False):
+            enabled.append(f"web http://{settings.WEB_UI_HOST}:{settings.WEB_UI_PORT}")
+        if getattr(settings, "OS_TOOLS_ENABLED", False):
+            enabled.append("os")
+        if getattr(settings, "MCP_TOOLS_ENABLED", False):
+            enabled.append("mcp")
+        if getattr(settings, "AGENT_TOOLS_ENABLED", False):
+            enabled.append("agents")
+        if getattr(settings, "REALTIME_VOICE_ENABLED", False):
+            enabled.append("realtime")
+        if enabled:
+            print(f"  {DIM}Enabled: {', '.join(enabled)}{NC}")
 
     if state.current_goal:
         print(f"  Goal: {state.current_goal}")
@@ -148,4 +161,5 @@ def render_help_card():
         pad = _BOX_WIDTH - len(cmd) - len(desc) - 2
         print(f"│  {row}{' ' * max(pad, 0)}│")
     print(f"╰{'─' * _BOX_WIDTH}╯")
+    print(f"  {DIM}Web UI: run eyra-web when WEB_UI_ENABLED=true.{NC}")
     print()

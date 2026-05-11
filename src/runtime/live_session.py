@@ -4,7 +4,6 @@ import asyncio
 import logging
 import re
 import time
-from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI
@@ -23,21 +22,9 @@ from runtime.status_presenter import (
     render_status_card,
     voice_status_label,
 )
-from tools.browser import BrowserSession, ClickElementTool, OpenUrlTool, PageScreenshotTool, WebSearchTool
-from tools.clipboard import ClipboardTool
-from tools.filesystem import (
-    CreateDirectoryTool,
-    EditFileTool,
-    ListDirectoryTool,
-    ReadFileTool,
-    WriteFileTool,
-    parse_allowed_roots,
-)
+from runtime.tooling import build_tool_registry
+from tools.browser import BrowserSession
 from tools.registry import ToolRegistry
-from tools.screenshot import ScreenshotTool
-from tools.system_info import SystemInfoTool
-from tools.time_tool import TimeTool
-from tools.weather import WeatherTool
 from utils.settings import Settings
 from utils.sound_player import play_sound
 from utils.theme import CYAN, DIM, DIM_ITALIC, NC, YELLOW
@@ -102,25 +89,7 @@ class LiveSession:
         self._voice_task: asyncio.Task | None = None
 
     def _build_tool_registry(self) -> ToolRegistry:
-        registry = ToolRegistry()
-        registry.register(TimeTool())
-        registry.register(ClipboardTool())
-        registry.register(SystemInfoTool())
-        registry.register(ScreenshotTool())
-        if self.settings.NETWORK_TOOLS_ENABLED:
-            registry.register(WeatherTool())
-            registry.register(WebSearchTool(session=self._browser_session))
-            registry.register(OpenUrlTool(session=self._browser_session))
-            registry.register(ClickElementTool(session=self._browser_session))
-            registry.register(PageScreenshotTool(session=self._browser_session))
-        fs_roots = parse_allowed_roots(self.settings.FILESYSTEM_ALLOWED_PATHS)
-        fs_default = Path(getattr(self.settings, "FILESYSTEM_DEFAULT_PATH", "~/Documents"))
-        registry.register(ReadFileTool(allowed_roots=fs_roots, default_path=fs_default))
-        registry.register(WriteFileTool(allowed_roots=fs_roots, default_path=fs_default))
-        registry.register(EditFileTool(allowed_roots=fs_roots, default_path=fs_default))
-        registry.register(ListDirectoryTool(allowed_roots=fs_roots, default_path=fs_default))
-        registry.register(CreateDirectoryTool(allowed_roots=fs_roots, default_path=fs_default))
-        return registry
+        return build_tool_registry(self.settings, browser_session=self._browser_session)
 
     async def run(self):
         """Main entry point. Runs until quit."""

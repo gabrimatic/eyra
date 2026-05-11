@@ -41,6 +41,7 @@ dependencies = [
 
 [project.scripts]
 eyra = "main:run"
+eyra-web = "web.server:run"
 
 [project.urls]
 Homepage = "https://github.com/gabrimatic/eyra"
@@ -64,7 +65,7 @@ select = ["E", "F", "I", "W"]
 ignore = ["E501"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/chat", "src/clients", "src/tools", "src/utils", "src/runtime"]
+packages = ["src/chat", "src/clients", "src/tools", "src/utils", "src/runtime", "src/web"]
 force-include = { "src/main.py" = "main.py" }
 
 [tool.hatch.metadata]

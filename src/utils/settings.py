@@ -29,6 +29,22 @@ class Settings:
     FILESYSTEM_DEFAULT_PATH: str = "~/Documents"
     # Network-backed tools (weather and browser) are opt-in so the default runtime stays local.
     NETWORK_TOOLS_ENABLED: bool = False
+    # OS/operator tools are powerful and therefore opt-in. They stay local.
+    OS_TOOLS_ENABLED: bool = False
+    # External agent bridges are opt-in and disabled by default.
+    AGENT_TOOLS_ENABLED: bool = False
+    # MCP bridges are opt-in and disabled by default.
+    MCP_TOOLS_ENABLED: bool = False
+    MCP_CONFIG_PATH: str = "~/.config/eyra/mcp.json"
+    # Built-in Web UI. Disabled by default so terminal-only local use stays quiet.
+    WEB_UI_ENABLED: bool = False
+    WEB_UI_HOST: str = "127.0.0.1"
+    WEB_UI_PORT: int = 8765
+    # Realtime voice is online and explicit opt-in. Local Whisper remains the local voice path.
+    REALTIME_VOICE_ENABLED: bool = False
+    REALTIME_MODEL: str = "gpt-realtime-2"
+    REALTIME_VOICE: str = "marin"
+    OPENAI_API_KEY: str = ""
     # Experimental: complexity-based routing. When disabled, all requests use MODEL.
     COMPLEXITY_ROUTING_ENABLED: bool = False
 
@@ -77,6 +93,17 @@ class Settings:
             FILESYSTEM_ALLOWED_PATHS=os.getenv("FILESYSTEM_ALLOWED_PATHS", "~/Documents,/tmp"),
             FILESYSTEM_DEFAULT_PATH=os.getenv("FILESYSTEM_DEFAULT_PATH", "~/Documents"),
             NETWORK_TOOLS_ENABLED=_bool("NETWORK_TOOLS_ENABLED", "false"),
+            OS_TOOLS_ENABLED=_bool("OS_TOOLS_ENABLED", "false"),
+            AGENT_TOOLS_ENABLED=_bool("AGENT_TOOLS_ENABLED", "false"),
+            MCP_TOOLS_ENABLED=_bool("MCP_TOOLS_ENABLED", "false"),
+            MCP_CONFIG_PATH=os.getenv("MCP_CONFIG_PATH", "~/.config/eyra/mcp.json"),
+            WEB_UI_ENABLED=_bool("WEB_UI_ENABLED", "false"),
+            WEB_UI_HOST=os.getenv("WEB_UI_HOST", "127.0.0.1"),
+            WEB_UI_PORT=_int("WEB_UI_PORT", "8765"),
+            REALTIME_VOICE_ENABLED=_bool("REALTIME_VOICE_ENABLED", "false"),
+            REALTIME_MODEL=os.getenv("REALTIME_MODEL", "gpt-realtime-2"),
+            REALTIME_VOICE=os.getenv("REALTIME_VOICE", "marin"),
+            OPENAI_API_KEY=os.getenv("OPENAI_API_KEY", ""),
             COMPLEXITY_ROUTING_ENABLED=_bool("COMPLEXITY_ROUTING_ENABLED", "false"),
         )
 
