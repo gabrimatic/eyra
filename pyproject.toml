@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "openai>=2.31.0",
+    "openai>=2.36.0",
     "mss>=10.1.0",
     "numpy>=1.26.0",
     "pillow>=12.2.0",
