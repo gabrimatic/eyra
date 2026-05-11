@@ -98,13 +98,36 @@ class SpeechController:
         if not self.state.listening_enabled:
             return None
 
-        # Wait for any ongoing speech to finish first
-        await self.wait_for_speech()
-
         voice_input = self._get_voice_input()
         if voice_input is None:
             return None
-        return await voice_input.listen()
+
+        if not self.is_speaking:
+            return await voice_input.listen()
+
+        loop = asyncio.get_running_loop()
+        interrupt_requested = False
+        interrupt_future = None
+
+        def interrupt_on_user_speech() -> None:
+            nonlocal interrupt_future, interrupt_requested
+            if interrupt_requested:
+                return
+            interrupt_requested = True
+            try:
+                interrupt_future = asyncio.run_coroutine_threadsafe(self.interrupt(), loop)
+            except RuntimeError:
+                logger.debug("Could not schedule speech interruption; event loop is closed")
+
+        text = await voice_input.listen(on_speech_start=interrupt_on_user_speech)
+        if interrupt_future is not None:
+            try:
+                await asyncio.wrap_future(interrupt_future)
+            except Exception:
+                logger.debug("Scheduled speech interruption failed", exc_info=True)
+        elif text and self.is_speaking:
+            await self.interrupt()
+        return text
 
     def cancel_listen(self):
         """Cancel an in-progress listen from another coroutine."""

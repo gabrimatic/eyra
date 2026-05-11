@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from tools.approval import GLOBAL_APPROVAL_MANAGER, ApprovalManager, approval_required_message
 from tools.base import BaseTool, ToolResult
 
 _DEFAULT_TIMEOUT = 20
@@ -158,12 +159,35 @@ class CallMcpTool(ListMcpTools):
             "server": {"type": "string"},
             "tool": {"type": "string"},
             "arguments": {"type": "object"},
+            "approval_id": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve MCP calls."},
         },
         "required": ["server", "tool"],
     }
     costly = True
 
-    async def execute(self, server: str = "", tool: str = "", arguments: dict[str, Any] | None = None, **_) -> ToolResult:
+    def __init__(
+        self,
+        config_path: str | Path,
+        timeout: int | float = _DEFAULT_TIMEOUT,
+        approval_manager: ApprovalManager | None = None,
+    ):
+        super().__init__(config_path=config_path, timeout=timeout)
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(
+        self,
+        server: str = "",
+        tool: str = "",
+        arguments: dict[str, Any] | None = None,
+        approval_id: str = "",
+        confirmed: bool = False,
+        **_,
+    ) -> ToolResult:
+        details = {"server": server, "tool": tool, "arguments": arguments or {}}
+        if not approval_id or not self._approvals.consume(approval_id, self.name, "MCP tool call", details):
+            approval = self._approvals.request(self.name, "MCP tool call", details)
+            return ToolResult(content=approval_required_message(approval))
         try:
             server_config = self._server_config(server)
             async with _McpSession(server_config, timeout=self.timeout) as session:

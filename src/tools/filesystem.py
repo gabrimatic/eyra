@@ -1,10 +1,12 @@
 """Filesystem tools — read, write, edit, move, copy, and open local paths."""
 
 import asyncio
+import hashlib
 import logging
 import shutil
 from pathlib import Path
 
+from tools.approval import GLOBAL_APPROVAL_MANAGER, ApprovalManager, approval_required_message
 from tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,28 @@ def _human_size(size: int) -> str:
             return f"{size:.1f} {unit}" if unit != "B" else f"{size} B"
         size /= 1024
     return f"{size:.1f} TB"
+
+
+def _content_fingerprint(content: str) -> str:
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
+def _trusted_overwrite(token: str, expected: str) -> bool:
+    return bool(token and expected and token == expected)
+
+
+def _approval_or_result(
+    manager: ApprovalManager,
+    *,
+    tool_name: str,
+    title: str,
+    details: dict[str, object],
+    approval_id: str = "",
+) -> ToolResult | None:
+    if approval_id and manager.consume(approval_id, tool_name, title, details):
+        return None
+    approval = manager.request(tool_name, title, details)
+    return ToolResult(content=approval_required_message(approval))
 
 
 class ReadFileTool(BaseTool):
@@ -129,25 +153,54 @@ class WriteFileTool(BaseTool):
                 "type": "boolean",
                 "description": "Set true only when replacing an existing file is intentional.",
             },
+            "approval_id": {
+                "type": "string",
+                "description": "Server-issued approval id for this exact overwrite action.",
+            },
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve file overwrites."},
         },
         "required": ["path", "content"],
     }
     costly = False
 
-    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+    def __init__(
+        self,
+        allowed_roots: tuple[Path, ...] = (),
+        default_path: Path | None = None,
+        approval_manager: ApprovalManager | None = None,
+        trusted_overwrite_token: str = "",
+    ):
         self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
         self._default_path = default_path.expanduser().resolve() if default_path else None
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+        self._trusted_overwrite_token = trusted_overwrite_token
 
-    async def execute(self, path: str = "", content: str = "", overwrite: bool = False, **_) -> ToolResult:
+    async def execute(
+        self,
+        path: str = "",
+        content: str = "",
+        overwrite: bool = False,
+        approval_id: str = "",
+        confirmed: bool = False,
+        trusted_overwrite_token: str = "",
+        **_,
+    ) -> ToolResult:
         try:
-            return await asyncio.to_thread(self._run, path, content, overwrite is True)
+            return await asyncio.to_thread(
+                self._run,
+                path,
+                content,
+                overwrite is True,
+                approval_id,
+                trusted_overwrite_token,
+            )
         except PermissionError as e:
             return ToolResult(content=str(e))
         except Exception as e:
             logger.error("write_file failed: %s", e, exc_info=True)
             return ToolResult(content=f"Filesystem error: {e}")
 
-    def _run(self, path: str, content: str, overwrite: bool) -> ToolResult:
+    def _run(self, path: str, content: str, overwrite: bool, approval_id: str, trusted_overwrite_token: str) -> ToolResult:
         p = _resolve(path, self._roots, self._default_path)
         if p.exists() and not p.is_file():
             return ToolResult(content=f"Path exists and is not a file: {p}")
@@ -158,6 +211,20 @@ class WriteFileTool(BaseTool):
                     "Call write_file with overwrite=true only if the user asked to replace it."
                 )
             )
+        if p.exists() and overwrite and not _trusted_overwrite(trusted_overwrite_token, self._trusted_overwrite_token):
+            approval = _approval_or_result(
+                self._approvals,
+                tool_name=self.name,
+                title="file overwrite",
+                details={
+                    "path": str(p),
+                    "content_length": len(content.encode()),
+                    "content_sha256": _content_fingerprint(content),
+                },
+                approval_id=approval_id,
+            )
+            if approval is not None:
+                return approval
         p.parent.mkdir(parents=True, exist_ok=True)
         existed = p.exists()
         p.write_text(content)
@@ -338,25 +405,54 @@ class MovePathTool(BaseTool):
                 "type": "boolean",
                 "description": "Set true only when replacing the destination is explicitly requested.",
             },
+            "approval_id": {
+                "type": "string",
+                "description": "Server-issued approval id for this exact overwrite action.",
+            },
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve move overwrites."},
         },
         "required": ["source", "destination"],
     }
     costly = False
 
-    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+    def __init__(
+        self,
+        allowed_roots: tuple[Path, ...] = (),
+        default_path: Path | None = None,
+        approval_manager: ApprovalManager | None = None,
+        trusted_overwrite_token: str = "",
+    ):
         self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
         self._default_path = default_path.expanduser().resolve() if default_path else None
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+        self._trusted_overwrite_token = trusted_overwrite_token
 
-    async def execute(self, source: str = "", destination: str = "", overwrite: bool = False, **_) -> ToolResult:
+    async def execute(
+        self,
+        source: str = "",
+        destination: str = "",
+        overwrite: bool = False,
+        approval_id: str = "",
+        confirmed: bool = False,
+        trusted_overwrite_token: str = "",
+        **_,
+    ) -> ToolResult:
         try:
-            return await asyncio.to_thread(self._run, source, destination, overwrite is True)
+            return await asyncio.to_thread(
+                self._run,
+                source,
+                destination,
+                overwrite is True,
+                approval_id,
+                trusted_overwrite_token,
+            )
         except PermissionError as e:
             return ToolResult(content=str(e))
         except Exception as e:
             logger.error("move_path failed: %s", e, exc_info=True)
             return ToolResult(content=f"Filesystem error: {e}")
 
-    def _run(self, source: str, destination: str, overwrite: bool) -> ToolResult:
+    def _run(self, source: str, destination: str, overwrite: bool, approval_id: str, trusted_overwrite_token: str) -> ToolResult:
         src = _resolve(source, self._roots, self._default_path)
         dest = _resolve(destination, self._roots, self._default_path)
         if not src.exists():
@@ -369,6 +465,16 @@ class MovePathTool(BaseTool):
                         "Call move_path with overwrite=true only if the user asked to replace it."
                     )
                 )
+            if not _trusted_overwrite(trusted_overwrite_token, self._trusted_overwrite_token):
+                approval = _approval_or_result(
+                    self._approvals,
+                    tool_name=self.name,
+                    title="move overwrite",
+                    details={"source": str(src), "destination": str(dest)},
+                    approval_id=approval_id,
+                )
+                if approval is not None:
+                    return approval
             if dest.is_dir():
                 shutil.rmtree(dest)
             else:
@@ -393,25 +499,54 @@ class CopyPathTool(BaseTool):
                 "type": "boolean",
                 "description": "Set true only when replacing the destination is explicitly requested.",
             },
+            "approval_id": {
+                "type": "string",
+                "description": "Server-issued approval id for this exact overwrite action.",
+            },
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve copy overwrites."},
         },
         "required": ["source", "destination"],
     }
     costly = False
 
-    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+    def __init__(
+        self,
+        allowed_roots: tuple[Path, ...] = (),
+        default_path: Path | None = None,
+        approval_manager: ApprovalManager | None = None,
+        trusted_overwrite_token: str = "",
+    ):
         self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
         self._default_path = default_path.expanduser().resolve() if default_path else None
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+        self._trusted_overwrite_token = trusted_overwrite_token
 
-    async def execute(self, source: str = "", destination: str = "", overwrite: bool = False, **_) -> ToolResult:
+    async def execute(
+        self,
+        source: str = "",
+        destination: str = "",
+        overwrite: bool = False,
+        approval_id: str = "",
+        confirmed: bool = False,
+        trusted_overwrite_token: str = "",
+        **_,
+    ) -> ToolResult:
         try:
-            return await asyncio.to_thread(self._run, source, destination, overwrite is True)
+            return await asyncio.to_thread(
+                self._run,
+                source,
+                destination,
+                overwrite is True,
+                approval_id,
+                trusted_overwrite_token,
+            )
         except PermissionError as e:
             return ToolResult(content=str(e))
         except Exception as e:
             logger.error("copy_path failed: %s", e, exc_info=True)
             return ToolResult(content=f"Filesystem error: {e}")
 
-    def _run(self, source: str, destination: str, overwrite: bool) -> ToolResult:
+    def _run(self, source: str, destination: str, overwrite: bool, approval_id: str, trusted_overwrite_token: str) -> ToolResult:
         src = _resolve(source, self._roots, self._default_path)
         dest = _resolve(destination, self._roots, self._default_path)
         if not src.exists():
@@ -424,6 +559,16 @@ class CopyPathTool(BaseTool):
                         "Call copy_path with overwrite=true only if the user asked to replace it."
                     )
                 )
+            if not _trusted_overwrite(trusted_overwrite_token, self._trusted_overwrite_token):
+                approval = _approval_or_result(
+                    self._approvals,
+                    tool_name=self.name,
+                    title="copy overwrite",
+                    details={"source": str(src), "destination": str(dest)},
+                    approval_id=approval_id,
+                )
+                if approval is not None:
+                    return approval
             if dest.is_dir():
                 shutil.rmtree(dest)
             else:

@@ -124,6 +124,13 @@ class TestWebServerHelpers:
         local = Settings(WEB_UI_HOST="127.0.0.1", WEB_UI_REQUIRE_TOKEN="auto")
         exposed = Settings(WEB_UI_HOST="0.0.0.0", WEB_UI_REQUIRE_TOKEN="auto")
 
+        assert web_auth_required(local) is True
+        assert web_auth_required(exposed) is True
+
+    def test_web_auth_false_cannot_disable_token_on_lan_bind(self):
+        local = Settings(WEB_UI_HOST="127.0.0.1", WEB_UI_REQUIRE_TOKEN="false")
+        exposed = Settings(WEB_UI_HOST="0.0.0.0", WEB_UI_REQUIRE_TOKEN="false")
+
         assert web_auth_required(local) is False
         assert web_auth_required(exposed) is True
 
@@ -137,6 +144,19 @@ class TestWebServerHelpers:
         settings = Settings(REALTIME_VOICE_ENABLED=True, REALTIME_TOOLS_ENABLED=False)
 
         assert realtime_tools(settings) == []
+
+    def test_realtime_allowed_tools_cannot_expose_risky_local_tools(self):
+        settings = Settings(
+            REALTIME_VOICE_ENABLED=True,
+            REALTIME_TOOLS_ENABLED=True,
+            REALTIME_ALLOWED_TOOLS="read_clipboard,get_current_time",
+        )
+
+        tools = realtime_tools(settings)
+        names = {tool["name"] for tool in tools}
+
+        assert "get_current_time" in names
+        assert "read_clipboard" not in names
 
     def test_web_runtime_creates_background_task_for_long_work(self, tmp_path):
         settings = Settings(
@@ -182,7 +202,7 @@ class TestWebServerHelpers:
 
     def test_web_api_rejects_unauthorized_requests_when_token_required(self):
         settings = Settings(
-            WEB_UI_HOST="0.0.0.0",
+            WEB_UI_HOST="127.0.0.1",
             WEB_UI_REQUIRE_TOKEN="auto",
             USE_MOCK_CLIENT=True,
             LIVE_LISTENING_ENABLED=False,
@@ -216,6 +236,76 @@ class TestWebServerHelpers:
 
             assert response.status == 200
             assert "tasks" in payload
+        finally:
+            server.shutdown()
+            server.server_close()
+            runtime.close()
+
+    def test_web_api_rejects_cross_origin_requests(self):
+        settings = Settings(
+            WEB_UI_HOST="127.0.0.1",
+            WEB_UI_REQUIRE_TOKEN="true",
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+        )
+        runtime = WebAssistantRuntime(settings)
+        handler = type(
+            "TestEyraWebHandler",
+            (_EyraWebHandler,),
+            {
+                "settings": settings,
+                "runtime": runtime,
+                "web_session_token": "secret-token",
+                "realtime_tool_token": "rt-secret",
+            },
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            request = urllib.request.Request(
+                base + "/api/tasks",
+                headers={"X-Eyra-Web-Token": "secret-token", "Origin": "https://example.com"},
+            )
+            try:
+                urllib.request.urlopen(request, timeout=5)
+                raise AssertionError("cross-origin request unexpectedly succeeded")
+            except urllib.error.HTTPError as e:
+                assert e.code == 403
+        finally:
+            server.shutdown()
+            server.server_close()
+            runtime.close()
+
+    def test_web_responses_include_security_headers(self):
+        settings = Settings(USE_MOCK_CLIENT=True, LIVE_LISTENING_ENABLED=False, LIVE_SPEECH_ENABLED=False)
+        runtime = WebAssistantRuntime(settings)
+        handler = type(
+            "TestEyraWebHandler",
+            (_EyraWebHandler,),
+            {
+                "settings": settings,
+                "runtime": runtime,
+                "web_session_token": "secret-token",
+                "realtime_tool_token": "rt-secret",
+            },
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            with urllib.request.urlopen(base + "/api/health", timeout=5) as response:
+                headers = {key.lower(): value for key, value in response.headers.items()}
+
+            assert headers["cache-control"] == "no-store"
+            assert headers["referrer-policy"] == "no-referrer"
+            assert headers["x-content-type-options"] == "nosniff"
+            assert headers["x-frame-options"] == "DENY"
+            assert "default-src 'self'" in headers["content-security-policy"]
+            assert "access-control-allow-origin" not in headers
         finally:
             server.shutdown()
             server.server_close()

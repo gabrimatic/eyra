@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import secrets
 import time
 from datetime import datetime
 
@@ -109,6 +110,7 @@ class LiveSession:
         self._busy = asyncio.Event()
         self._browser_session = BrowserSession()
         self.approvals = ApprovalManager()
+        self._trusted_overwrite_token = secrets.token_urlsafe(32)
         self._tool_registry = self._build_tool_registry()
         self._voice_task: asyncio.Task | None = None
         self._input_tasks: set[asyncio.Task] = set()
@@ -126,6 +128,7 @@ class LiveSession:
             self.settings,
             browser_session=self._browser_session,
             approval_manager=self.approvals,
+            trusted_overwrite_token=self._trusted_overwrite_token,
         )
 
     async def run(self):
@@ -229,15 +232,11 @@ class LiveSession:
                 if not self.state.listening_enabled:
                     break
 
-                # Wait while speaking before opening the mic. Background tasks do not block listening.
-                if self.speech.is_speaking:
-                    await asyncio.sleep(0.2)
-                    continue
-
                 self.state.current_status = RuntimeStatus.LISTENING
                 try:
                     # This blocks until speech is detected and transcribed,
-                    # or until cancelled (by _stream_response or shutdown).
+                    # or until cancelled. The mic remains active during TTS so
+                    # a real user barge-in can interrupt speech output.
                     text = await self.speech.listen()
                 except Exception as e:
                     consecutive_errors += 1
@@ -605,7 +604,16 @@ class LiveSession:
             if self._pending_overwrite is None:
                 print("  I do not have a pending file overwrite. Please name the file to replace.")
                 return True
-            result = await self._tool_registry.execute("write_file", json.dumps({**self._pending_overwrite, "overwrite": True}))
+            result = await self._tool_registry.execute(
+                "write_file",
+                json.dumps(
+                    {
+                        **self._pending_overwrite,
+                        "overwrite": True,
+                        "trusted_overwrite_token": self._trusted_overwrite_token,
+                    }
+                ),
+            )
             self._pending_overwrite = None
             print(f"  {result.content}")
             return True
@@ -663,7 +671,14 @@ class LiveSession:
             destination = self._path_in_named_folder(move_match.group("dest"), name)
             result = await self._tool_registry.execute(
                 "move_path",
-                json.dumps({"source": source, "destination": destination, "overwrite": "overwrite" in lowered}),
+                json.dumps(
+                    {
+                        "source": source,
+                        "destination": destination,
+                        "overwrite": "overwrite" in lowered,
+                        "trusted_overwrite_token": self._trusted_overwrite_token if "overwrite" in lowered else "",
+                    }
+                ),
             )
             print(f"  {result.content}")
             return True
@@ -680,7 +695,14 @@ class LiveSession:
             destination = self._path_in_named_folder(copy_match.group("dest"), name)
             result = await self._tool_registry.execute(
                 "copy_path",
-                json.dumps({"source": source, "destination": destination, "overwrite": "overwrite" in lowered}),
+                json.dumps(
+                    {
+                        "source": source,
+                        "destination": destination,
+                        "overwrite": "overwrite" in lowered,
+                        "trusted_overwrite_token": self._trusted_overwrite_token if "overwrite" in lowered else "",
+                    }
+                ),
             )
             print(f"  {result.content}")
             return True
@@ -706,7 +728,14 @@ class LiveSession:
             )
             result = await self._tool_registry.execute(
                 "write_file",
-                json.dumps({"path": path, "content": content, "overwrite": overwrite}),
+                json.dumps(
+                    {
+                        "path": path,
+                        "content": content,
+                        "overwrite": overwrite,
+                        "trusted_overwrite_token": self._trusted_overwrite_token if overwrite else "",
+                    }
+                ),
             )
             if result.content.startswith("File already exists:"):
                 self._pending_overwrite = {"path": path, "content": content}
