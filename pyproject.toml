@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "eyra"
 version = "3.3.2"
-description = "Voice-first local agent for macOS terminals."
+description = "Local-first voice agent for macOS terminals."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"

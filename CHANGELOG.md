@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+This file tracks meaningful project changes.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Packaged installs now expose the `eyra` console command and include the runtime entry module in the wheel.
+- Packaged installs expose the `eyra` console command and include the runtime entry module in the wheel.
 
 ### Changed
 
@@ -20,7 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/mode fast` now explains when complexity routing is disabled instead of silently switching to an unused mode.
 - `write_file` now protects existing files unless `overwrite=true` is provided explicitly.
 - The default filesystem sandbox is now `~/Documents,/tmp` instead of the whole home directory.
-- Runtime logs now use a user-writable log path by default, with `EYRA_LOG_FILE` as an override.
+- Runtime logs now use a writable log path by default, with `EYRA_LOG_FILE` as an override.
 - `/goal` now reaches the response pipeline as session context for future replies.
 - Weather lookups require an explicit location and no longer use remote IP geolocation.
 - Tool-call logs now record tool names and argument keys without persisting argument values.
@@ -78,7 +78,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `VOICE_VAD_THRESHOLD` range validation (0.0 to 1.0)
 - Empty/blank path rejection in filesystem tools
 - Protocol-relative URL handling in `OpenUrlTool` (`//example.com` becomes `https://example.com`)
-- `_box_row_padded()` helper in `status_presenter.py` for truncating long values with `…`
+- `_box_row_padded()` helper in `status_presenter.py` for truncating long values with `...`
 
 ### Fixed
 
@@ -98,7 +98,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `BrowserSession.page()` closes old browser/context before launching a new one (prevents Chromium process leak)
 - `BrowserSession.close()` wrapped in try/except/finally to prevent Playwright leak on browser crash
 - `WebSearchTool` uses `wait_for_selector` with fallback instead of hardcoded `wait_for_timeout`
-- Browser tool error messages return user-friendly strings instead of raw stack traces
+- Browser tool error messages return clean text instead of raw stack traces
 - Screenshot tool `execute()` wrapped in try/except with clean error message for capture failures
 - Weather tool location parameter URL-encoded with `urllib.parse.quote()` (fixes special characters)
 - `mss` screenshot capture in `capture.py` moved to `asyncio.to_thread()` to avoid blocking the event loop
@@ -109,7 +109,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - `load_dotenv()` moved from module-level to inside `Settings.load_from_env()` (no longer pollutes test env)
-- `.env` rewrite in startup now preserves user comments (except managed ones)
+- `.env` rewrite in startup now preserves existing comments (except managed ones)
 - `ollama pull` timeout increased to 600 seconds with progress message
 - Console log handler level raised from WARNING to CRITICAL (no error stack traces in the terminal UI)
 - Voice transcription prefix changed from DIM to YELLOW for visibility

@@ -2,16 +2,16 @@
 
 ## Summary
 
-Be respectful. Be constructive. Make this a good place for everyone regardless of background, identity, or experience level.
+Keep discussion useful, specific, and kind. Eyra should be a good place to contribute regardless of background, identity, or experience level.
 
-## Expected Behavior
+## Expected behavior
 
-- Welcoming and inclusive language
-- Respect for differing viewpoints and experiences
-- Graceful acceptance of constructive criticism
-- Focus on what's best for the project and community
+- Use welcoming and inclusive language
+- Respect different viewpoints and experiences
+- Accept constructive criticism without making it personal
+- Focus on what helps the project and the people using it
 
-## Unacceptable Behavior
+## Unacceptable behavior
 
 - Trolling, insults, derogatory comments, personal or political attacks
 - Public or private harassment
@@ -22,7 +22,7 @@ Be respectful. Be constructive. Make this a good place for everyone regardless o
 
 Report unacceptable behavior to the project maintainer at [gabrimatic.info](https://gabrimatic.info).
 
-All complaints are reviewed promptly and fairly. Confidentiality is maintained for reporters.
+Reports are reviewed promptly and fairly. Reporter confidentiality is maintained.
 
 ## Attribution
 
