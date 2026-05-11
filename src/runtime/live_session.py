@@ -1,10 +1,12 @@
 """Unified live session orchestrator."""
 
 import asyncio
+import json
 import logging
 import re
+import secrets
 import time
-from pathlib import Path
+from datetime import datetime
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI
@@ -23,21 +25,12 @@ from runtime.status_presenter import (
     render_status_card,
     voice_status_label,
 )
-from tools.browser import BrowserSession, ClickElementTool, OpenUrlTool, PageScreenshotTool, WebSearchTool
-from tools.clipboard import ClipboardTool
-from tools.filesystem import (
-    CreateDirectoryTool,
-    EditFileTool,
-    ListDirectoryTool,
-    ReadFileTool,
-    WriteFileTool,
-    parse_allowed_roots,
-)
+from runtime.tasks import BackgroundTask, BackgroundTaskManager, TaskStatus
+from runtime.tooling import build_tool_registry
+from runtime.vision import analyze_screen
+from tools.approval import ApprovalManager
+from tools.browser import BrowserSession
 from tools.registry import ToolRegistry
-from tools.screenshot import ScreenshotTool
-from tools.system_info import SystemInfoTool
-from tools.time_tool import TimeTool
-from tools.weather import WeatherTool
 from utils.settings import Settings
 from utils.sound_player import play_sound
 from utils.theme import CYAN, DIM, DIM_ITALIC, NC, YELLOW
@@ -45,9 +38,10 @@ from utils.theme import CYAN, DIM, DIM_ITALIC, NC, YELLOW
 logger = logging.getLogger(__name__)
 
 _COMMANDS = {
-    "/voice", "/mute", "/unmute",
+    "/voice", "/voice-test", "/mute", "/unmute",
     "/goal", "/status", "/quit", "/clear",
-    "/mode", "/help",
+    "/mode", "/help", "/tasks", "/task", "/cancel",
+    "/approvals", "/approve", "/reject",
 }
 
 _QUIT_WORDS = {"quit", "exit", "bye", "goodbye", "q"}
@@ -58,18 +52,35 @@ _THINK_SPLIT = re.compile(f"({re.escape(THINK_START)}|{re.escape(THINK_END)})")
 # Screen-intent detection: only match UI-specific nouns or
 # action verbs with a visual direct object.
 _UI_NOUNS = (
-    r"screen|display|window|app|browser|tab|page|"
+    r"screen|display|window|app|browser|tab|"
     r"button|menu|dialog|popup|modal|sidebar|toolbar|"
     r"notification|icon|cursor|selection|highlight"
 )
 _SCREEN_CUES = re.compile(
     rf"\b({_UI_NOUNS})\b"
     r"|"
-    rf"\b(look\s+at|show\s+me|read\s+the|text\s+on|code\s+on|what'?s\s+on)\s+(the\s+)?({_UI_NOUNS}|this|that|it|here)\b"
+    rf"\b(look(?:ing)?\s+at|show\s+me|read\s+the|text\s+on|code\s+on|what'?s\s+on)\s+(the\s+)?({_UI_NOUNS}|this|that|it|here)\b"
+    r"|"
+    r"\bwhat\s+(?:i'?m|i am)\s+looking\s+at\b"
     r"|"
     r"\b(what\s+is\s+(this|that)|what'?s\s+(this|that)|see\s+(this|that|here)|explain\s+(this|that))\b",
     re.I,
 )
+
+
+def _settings_int(settings: Settings, name: str, default: int) -> int:
+    value = getattr(settings, name, default)
+    return value if isinstance(value, int) and not isinstance(value, bool) else default
+
+
+def _settings_bool(settings: Settings, name: str, default: bool) -> bool:
+    value = getattr(settings, name, default)
+    return value if isinstance(value, bool) else default
+
+
+def _settings_str(settings: Settings, name: str, default: str = "") -> str:
+    value = getattr(settings, name, default)
+    return value if isinstance(value, str) else default
 
 
 class LiveSession:
@@ -98,29 +109,27 @@ class LiveSession:
         # Voice loop yields when this is set.
         self._busy = asyncio.Event()
         self._browser_session = BrowserSession()
+        self.approvals = ApprovalManager()
+        self._trusted_overwrite_token = secrets.token_urlsafe(32)
         self._tool_registry = self._build_tool_registry()
         self._voice_task: asyncio.Task | None = None
+        self._input_tasks: set[asyncio.Task] = set()
+        self._render_lock = asyncio.Lock()
+        self._model_semaphore = asyncio.Semaphore(max(1, _settings_int(settings, "MODEL_CONCURRENCY", 1)))
+        self._pending_overwrite: dict[str, str] | None = None
+        self.task_manager = BackgroundTaskManager(
+            max_concurrent=_settings_int(settings, "MAX_BACKGROUND_TASKS", 2),
+            task_timeout_seconds=_settings_int(settings, "TASK_TIMEOUT_SECONDS", 300),
+            on_event=self._on_task_event,
+        )
 
     def _build_tool_registry(self) -> ToolRegistry:
-        registry = ToolRegistry()
-        registry.register(TimeTool())
-        registry.register(ClipboardTool())
-        registry.register(SystemInfoTool())
-        registry.register(ScreenshotTool())
-        if self.settings.NETWORK_TOOLS_ENABLED:
-            registry.register(WeatherTool())
-            registry.register(WebSearchTool(session=self._browser_session))
-            registry.register(OpenUrlTool(session=self._browser_session))
-            registry.register(ClickElementTool(session=self._browser_session))
-            registry.register(PageScreenshotTool(session=self._browser_session))
-        fs_roots = parse_allowed_roots(self.settings.FILESYSTEM_ALLOWED_PATHS)
-        fs_default = Path(getattr(self.settings, "FILESYSTEM_DEFAULT_PATH", "~/Documents"))
-        registry.register(ReadFileTool(allowed_roots=fs_roots, default_path=fs_default))
-        registry.register(WriteFileTool(allowed_roots=fs_roots, default_path=fs_default))
-        registry.register(EditFileTool(allowed_roots=fs_roots, default_path=fs_default))
-        registry.register(ListDirectoryTool(allowed_roots=fs_roots, default_path=fs_default))
-        registry.register(CreateDirectoryTool(allowed_roots=fs_roots, default_path=fs_default))
-        return registry
+        return build_tool_registry(
+            self.settings,
+            browser_session=self._browser_session,
+            approval_manager=self.approvals,
+            trusted_overwrite_token=self._trusted_overwrite_token,
+        )
 
     async def run(self):
         """Main entry point. Runs until quit."""
@@ -143,6 +152,10 @@ class LiveSession:
             if self._voice_task is not None:
                 self._voice_task.cancel()
                 tasks.append(self._voice_task)
+            await self.task_manager.shutdown()
+            for t in list(self._input_tasks):
+                t.cancel()
+                tasks.append(t)
             await asyncio.gather(*tasks, return_exceptions=True)
             await self.speech.interrupt()
             await self._browser_session.close()
@@ -195,7 +208,7 @@ class LiveSession:
                     self._shutdown.set()
                     return
 
-                await self._handle_user_input(user_input)
+                self._schedule_input(user_input, InteractionStyle.TEXT)
 
         except asyncio.CancelledError:
             return
@@ -219,15 +232,11 @@ class LiveSession:
                 if not self.state.listening_enabled:
                     break
 
-                # Wait while the session is busy or speaking before opening the mic
-                if self._busy.is_set() or self.speech.is_speaking:
-                    await asyncio.sleep(0.2)
-                    continue
-
                 self.state.current_status = RuntimeStatus.LISTENING
                 try:
                     # This blocks until speech is detected and transcribed,
-                    # or until cancelled (by _stream_response or shutdown).
+                    # or until cancelled. The mic remains active during TTS so
+                    # a real user barge-in can interrupt speech output.
                     text = await self.speech.listen()
                 except Exception as e:
                     consecutive_errors += 1
@@ -259,11 +268,19 @@ class LiveSession:
 
                 await play_sound("listen")
                 print(f"\r\033[2K  {YELLOW}(voice){NC} {text}")
-                await self._handle_user_input(text, interaction_style=InteractionStyle.VOICE)
+                self._schedule_input(text, InteractionStyle.VOICE)
 
         except asyncio.CancelledError:
             self.speech.cancel_listen()
             return
+
+    def _schedule_input(self, text: str, interaction_style: InteractionStyle) -> None:
+        task = asyncio.create_task(
+            self._handle_user_input(text, interaction_style=interaction_style),
+            name="eyra-input",
+        )
+        self._input_tasks.add(task)
+        task.add_done_callback(self._input_tasks.discard)
 
     # ── Command handling ──────────────────────────────────────────────────
 
@@ -302,6 +319,17 @@ class LiveSession:
                 print(f"  Voice is {voice_status}. Usage: /voice on|off")
             return True
 
+        if command == "/voice-test":
+            if not self.state.speech_enabled:
+                print("  Speech output is off. Run /voice on or /unmute after Local Whisper is available.")
+                return True
+            print("  Voice interruption test started. Speak over Eyra now; TTS should stop and your next input should process.")
+            await self.speech.speak(
+                "This is Eyra's voice interruption test. Start speaking now. "
+                "If interruption is working, this spoken sentence should stop and your new input should be processed."
+            )
+            return True
+
         if command == "/mute":
             self.state.speech_muted = True
             print_status_change("Speech muted")
@@ -326,6 +354,56 @@ class LiveSession:
 
         if command == "/status":
             self._print_status()
+            return True
+
+        if command == "/tasks":
+            self._print_tasks()
+            return True
+
+        if command == "/task":
+            task_id = lower_parts[1] if len(lower_parts) > 1 else ""
+            self._print_task_detail(task_id)
+            return True
+
+        if command == "/cancel":
+            arg = lower_parts[1] if len(lower_parts) > 1 else ""
+            if arg == "all":
+                count = self.task_manager.cancel_all()
+                print_status_change(f"Cancelled {count} task{'s' if count != 1 else ''}")
+            elif arg:
+                if self.task_manager.cancel_task(arg):
+                    print_status_change(f"Cancelled task {arg}")
+                else:
+                    print(f"  No cancellable task found for: {arg}")
+            else:
+                print("  Usage: /cancel <id>|all")
+            return True
+
+        if command == "/approvals":
+            pending = self.approvals.list_pending()
+            print()
+            print("  Pending approvals")
+            if not pending:
+                print("  None.")
+            for approval in pending:
+                print(f"  {approval.id}  {approval.tool_name}  {approval.title}")
+            print()
+            return True
+
+        if command == "/approve":
+            approval_id = lower_parts[1] if len(lower_parts) > 1 else ""
+            if approval_id and self.approvals.approve(approval_id):
+                print_status_change(f"Approved {approval_id}")
+            else:
+                print(f"  No pending approval found for: {approval_id}")
+            return True
+
+        if command == "/reject":
+            approval_id = lower_parts[1] if len(lower_parts) > 1 else ""
+            if approval_id and self.approvals.reject(approval_id):
+                print_status_change(f"Rejected {approval_id}")
+            else:
+                print(f"  No pending approval found for: {approval_id}")
             return True
 
         if command == "/clear":
@@ -387,13 +465,91 @@ class LiveSession:
 
     def _print_status(self):
         model_name = getattr(self.settings, "MODEL", "")
+        worker_model = _settings_str(self.settings, "WORKER_MODEL", "") or model_name
+        vision_model = _settings_str(self.settings, "VISION_MODEL", "") or model_name
         render_status_card(
             state=self.state,
             quality_mode_value=self.quality_mode.value,
             tool_count=len(self._tool_registry.to_openai_tools()),
             msg_count=len(self.state.conversation_messages),
             model_name=model_name or "",
+            task_summary=self._task_summary(),
+            extra_rows=[
+                ("Worker", worker_model or "default"),
+                ("Vision", vision_model or "default"),
+                ("Model tools", self._capability_label(worker_model, "tool")),
+                ("Vision img", self._capability_label(vision_model, "vision")),
+                ("Web UI", "eyra-web" if _settings_bool(self.settings, "WEB_UI_ENABLED", False) else "off"),
+                ("Network", "on" if _settings_bool(self.settings, "NETWORK_TOOLS_ENABLED", False) else "off"),
+                ("OS tools", "on" if _settings_bool(self.settings, "OS_TOOLS_ENABLED", False) else "off"),
+                ("MCP", "on" if _settings_bool(self.settings, "MCP_TOOLS_ENABLED", False) else "off"),
+                ("Agents", "on" if _settings_bool(self.settings, "AGENT_TOOLS_ENABLED", False) else "off"),
+                ("Realtime", "on" if _settings_bool(self.settings, "REALTIME_VOICE_ENABLED", False) else "off"),
+                ("Sandbox", _settings_str(self.settings, "FILESYSTEM_ALLOWED_PATHS", "")),
+            ],
         )
+
+    def _task_summary(self) -> str:
+        active = len(self.task_manager.active_tasks())
+        recent = len(self.task_manager.list_tasks(include_recent=True))
+        return f"{active} active, {recent} recent"
+
+    def _capability_label(self, model: str, capability: str) -> str:
+        if not model:
+            return "unknown"
+        if capability == "tool":
+            checked = set(getattr(self.preflight, "tool_capability_checked_models", []))
+            capable = set(getattr(self.preflight, "tool_capable_models", []))
+        else:
+            checked = set(getattr(self.preflight, "vision_capability_checked_models", []))
+            capable = set(getattr(self.preflight, "vision_capable_models", []))
+        if model not in checked:
+            return "unknown"
+        return "yes" if model in capable else "no"
+
+    def _print_tasks(self):
+        rows = self.task_manager.list_tasks(include_recent=True)
+        print()
+        print("  Tasks")
+        if not rows:
+            print("  No tasks yet.")
+            print()
+            return
+        for task in rows:
+            print(f"  {task.id}  {task.status.value:<16} {task.title}")
+            if task.progress_summary:
+                print(f"      {task.progress_summary}")
+        print()
+
+    def _print_task_detail(self, task_id: str):
+        if not task_id:
+            print("  Usage: /task <id>")
+            return
+        task = self.task_manager.get_task(task_id)
+        if task is None:
+            print(f"  No task found for: {task_id}")
+            return
+        print()
+        print(f"  Task {task.id}: {task.title}")
+        print(f"  Status: {task.status.value}")
+        print(f"  Request: {task.original_request}")
+        print(f"  Progress: {task.progress_summary}")
+        if task.needs_user_input:
+            print("  Waiting for user input: yes")
+        if task.required_filesystem or task.required_network or task.required_vision:
+            reqs = []
+            if task.required_filesystem:
+                reqs.append("filesystem")
+            if task.required_network:
+                reqs.append("network")
+            if task.required_vision:
+                reqs.append("vision")
+            print(f"  Required: {', '.join(reqs)}")
+        if task.final_result:
+            print(f"\n  Result:\n{self._indent(task.final_result)}")
+        if task.error:
+            print(f"\n  Error: {task.error}")
+        print()
 
     # ── Screen context detection ──────────────────────────────────────────
 
@@ -403,14 +559,379 @@ class LiveSession:
     # ── User input handling ───────────────────────────────────────────────
 
     async def _handle_user_input(self, text: str, interaction_style: InteractionStyle = InteractionStyle.TEXT):
-        if self._busy.is_set():
-            print(f"  {DIM}Please wait...{NC}")
-            return
         self.state.conversation_messages.append({"role": "user", "content": text})
+        if await self._handle_local_intent(text):
+            return
+
         quality = self.quality_mode
         if self._needs_screen_context(text):
-            quality = QualityMode.BEST  # force Complex tier so tools are available
+            if not self._vision_available():
+                print(
+                    "  Screen analysis needs a vision-capable model. Set VISION_MODEL to a model that can process "
+                    "images, or use a main MODEL with vision support."
+                )
+                return
+            quality = QualityMode.BEST
+        if _settings_bool(self.settings, "BACKGROUND_TASKS_ENABLED", True) and self._should_background_task(text):
+            if self._requires_model_driven_tools(text) and not self._tool_actions_available():
+                self._print_model_without_tools()
+                return
+            title = self._task_title(text)
+            task = self.task_manager.create_task(
+                title=title,
+                original_request=text,
+                worker=lambda task: self._run_worker_task(
+                    task,
+                    text_content=text,
+                    quality_mode=quality,
+                    interaction_style=interaction_style,
+                ),
+                related_context=list(self.state.conversation_messages[-6:]),
+                used_tools=True,
+                required_network=self._requires_network(text),
+                required_filesystem=self._requires_filesystem(text),
+                required_vision=self._needs_screen_context(text),
+            )
+            print_status_change(f"Task {task.id} accepted: {task.title}")
+            return
+
         await self._stream_response(text_content=text, quality_mode=quality, interaction_style=interaction_style)
+
+    async def _handle_local_intent(self, text: str) -> bool:
+        lowered = text.strip().lower()
+        lowered_clean = lowered.rstrip(".!?")
+        if lowered_clean in {"overwrite it", "overwrite that", "overwrite that file", "replace it", "replace that file"}:
+            if self._pending_overwrite is None:
+                print("  I do not have a pending file overwrite. Please name the file to replace.")
+                return True
+            result = await self._tool_registry.execute(
+                "write_file",
+                json.dumps(
+                    {
+                        **self._pending_overwrite,
+                        "overwrite": True,
+                        "trusted_overwrite_token": self._trusted_overwrite_token,
+                    }
+                ),
+            )
+            self._pending_overwrite = None
+            print(f"  {result.content}")
+            return True
+
+        if lowered in {"what are you doing?", "what are you doing", "what's going on?", "what's going on"}:
+            self._print_tasks()
+            return True
+        if lowered in {"show tasks", "show my tasks", "list tasks", "what happened with that task?"}:
+            self._print_tasks()
+            return True
+        if re.search(r"\bcancel (that|it|the task)\b", lowered):
+            task = self.task_manager.latest_active_task()
+            if task is None:
+                print("  No running task to cancel.")
+            elif self.task_manager.cancel_task(task.id):
+                print_status_change(f"Cancelled task {task.id}")
+            return True
+        if lowered in {"cancel all", "cancel everything"}:
+            count = self.task_manager.cancel_all()
+            print_status_change(f"Cancelled {count} task{'s' if count != 1 else ''}")
+            return True
+        if re.search(r"\bwhat('?s| is) the time\b|\bwhat time is it\b|\bcurrent time\b", lowered):
+            now = datetime.now().strftime("%A, %B %-d, %Y at %-I:%M %p")
+            print(f"  {CYAN}Eyra{NC} {now}")
+            return True
+        if self._requires_network(text) and not _settings_bool(self.settings, "NETWORK_TOOLS_ENABLED", False):
+            print(
+                "  Network tools are disabled. Enable NETWORK_TOOLS_ENABLED=true before asking Eyra to browse, "
+                "summarize websites, or check weather."
+            )
+            return True
+        if await self._handle_direct_filesystem_intent(text):
+            return True
+        return False
+
+    async def _handle_direct_filesystem_intent(self, text: str) -> bool:
+        """Handle common safe file requests deterministically before asking a model.
+
+        Local file operations should not depend on a small local model guessing the
+        right tool call. These patterns cover the common voice-friendly forms while
+        leaving ambiguous requests for the normal worker path.
+        """
+        stripped = " ".join(text.strip().split())
+        lowered = stripped.lower()
+
+        move_match = re.fullmatch(
+            r"move\s+(?P<name>.+?)\s+from\s+(?:my\s+)?(?P<src>desktop|documents|downloads|tmp|/tmp)"
+            r"\s+to\s+(?:my\s+)?(?P<dest>desktop|documents|downloads|tmp|/tmp)\.?",
+            stripped,
+            re.I,
+        )
+        if move_match:
+            name = move_match.group("name").strip().strip("'\"")
+            source = self._path_in_named_folder(move_match.group("src"), name)
+            destination = self._path_in_named_folder(move_match.group("dest"), name)
+            result = await self._tool_registry.execute(
+                "move_path",
+                json.dumps(
+                    {
+                        "source": source,
+                        "destination": destination,
+                        "overwrite": "overwrite" in lowered,
+                        "trusted_overwrite_token": self._trusted_overwrite_token if "overwrite" in lowered else "",
+                    }
+                ),
+            )
+            print(f"  {result.content}")
+            return True
+
+        copy_match = re.fullmatch(
+            r"copy\s+(?P<name>.+?)\s+from\s+(?:my\s+)?(?P<src>desktop|documents|downloads|tmp|/tmp)"
+            r"\s+to\s+(?:my\s+)?(?P<dest>desktop|documents|downloads|tmp|/tmp)\.?",
+            stripped,
+            re.I,
+        )
+        if copy_match:
+            name = copy_match.group("name").strip().strip("'\"")
+            source = self._path_in_named_folder(copy_match.group("src"), name)
+            destination = self._path_in_named_folder(copy_match.group("dest"), name)
+            result = await self._tool_registry.execute(
+                "copy_path",
+                json.dumps(
+                    {
+                        "source": source,
+                        "destination": destination,
+                        "overwrite": "overwrite" in lowered,
+                        "trusted_overwrite_token": self._trusted_overwrite_token if "overwrite" in lowered else "",
+                    }
+                ),
+            )
+            print(f"  {result.content}")
+            return True
+
+        write_match = re.fullmatch(
+            r"(?:create|write|save)\s+(?:another\s+)?(?:a\s+)?(?:text\s+)?file\s+"
+            r"(?:named|called)?\s*(?P<name>.+?)\s+in\s+(?:my\s+)?(?P<folder>desktop|documents|downloads|tmp|/tmp)"
+            r"\s+with\s+(?:the\s+)?content:?\s*(?P<content>.*)",
+            stripped,
+            re.I,
+        )
+        if write_match:
+            path = self._path_in_named_folder(
+                write_match.group("folder"),
+                write_match.group("name").strip().strip("'\""),
+            )
+            content = write_match.group("content")
+            overwrite = bool(
+                re.search(
+                    r"\b(overwrite|replace)\s+(?:it|that|the|existing|if)\b|\bwith\s+overwrite\b",
+                    lowered,
+                )
+            )
+            result = await self._tool_registry.execute(
+                "write_file",
+                json.dumps(
+                    {
+                        "path": path,
+                        "content": content,
+                        "overwrite": overwrite,
+                        "trusted_overwrite_token": self._trusted_overwrite_token if overwrite else "",
+                    }
+                ),
+            )
+            if result.content.startswith("File already exists:"):
+                self._pending_overwrite = {"path": path, "content": content}
+            print(f"  {result.content}")
+            return True
+
+        read_match = re.fullmatch(r"(?:read|open|show)\s+(?P<path>[/~][^\n]+)", stripped, re.I)
+        if read_match:
+            path = read_match.group("path").strip().strip("'\"")
+            result = await self._tool_registry.execute("read_file", json.dumps({"path": path}))
+            print(f"  {result.content}")
+            return True
+
+        return False
+
+    def _tool_actions_available(self) -> bool:
+        model = _settings_str(self.settings, "WORKER_MODEL", "") or _settings_str(self.settings, "MODEL", "")
+        checked = set(getattr(self.preflight, "tool_capability_checked_models", []))
+        capable = set(getattr(self.preflight, "tool_capable_models", []))
+        return model not in checked or model in capable
+
+    def _vision_available(self) -> bool:
+        model = _settings_str(self.settings, "VISION_MODEL", "") or _settings_str(self.settings, "MODEL", "")
+        checked = set(getattr(self.preflight, "vision_capability_checked_models", []))
+        capable = set(getattr(self.preflight, "vision_capable_models", []))
+        return model not in checked or model in capable
+
+    @staticmethod
+    def _print_model_without_tools() -> None:
+        print(
+            "  This open-ended local tool task requires a model with native tool calling. Text chat and recognized "
+            "controller-owned actions still work with the selected model."
+        )
+
+    @staticmethod
+    def _path_in_named_folder(folder: str, name: str) -> str:
+        folder_key = folder.strip().lower()
+        if folder_key in {"tmp", "/tmp"}:
+            return f"/tmp/{name}"
+        return f"~/{folder_key.title()}/{name}"
+
+    def _should_background_task(self, text: str) -> bool:
+        lowered = text.lower()
+        if self._needs_screen_context(text) or self._requires_filesystem(text) or self._requires_network(text):
+            return True
+        return bool(re.search(
+            r"\b(summarize|read|open|move|copy|create|write|edit|organize|inspect|translate|pdf|file|folder|website)\b",
+            lowered,
+        ))
+
+    def _requires_filesystem(self, text: str) -> bool:
+        return bool(re.search(r"\b(file|folder|pdf|desktop|documents|downloads|clipboard|move|copy|write|create|open|read)\b", text, re.I))
+
+    def _requires_network(self, text: str) -> bool:
+        return bool(re.search(r"https?://|\b(website|web page|webpage|weather|browse|search the web)\b", text, re.I))
+
+    def _requires_model_driven_tools(self, text: str) -> bool:
+        if self._needs_screen_context(text):
+            return False
+        if re.search(r"\bpdf\b", text, re.I) and re.search(r"(?:~|/)[^\s'\"<>]+?\.pdf\b", text, re.I):
+            return False
+        return self._requires_filesystem(text) or self._requires_network(text)
+
+    def _task_title(self, text: str) -> str:
+        title = " ".join(text.strip().split())
+        if len(title) > 48:
+            title = title[:45].rstrip() + "..."
+        return title or "Task"
+
+    async def _run_worker_task(
+        self,
+        task: BackgroundTask,
+        text_content: str,
+        quality_mode: QualityMode,
+        interaction_style: InteractionStyle,
+    ) -> str:
+        task.mark_progress("Working")
+        direct_screen_result = await self._run_direct_screen_task(task, text_content)
+        if direct_screen_result is not None:
+            return direct_screen_result
+        direct_pdf_result = await self._run_direct_pdf_task(task, text_content, quality_mode, interaction_style)
+        if direct_pdf_result is not None:
+            return direct_pdf_result
+
+        async with self._model_semaphore:
+            worker_settings = self.settings
+            worker_model = _settings_str(self.settings, "WORKER_MODEL", "")
+            if worker_model:
+                worker_settings = Settings(**{**self.settings.__dict__, "MODEL": worker_model})
+            result = ""
+            async for chunk in process_task_stream(
+                text_content=text_content,
+                complexity_scorer=self.scorer,
+                settings=worker_settings,
+                messages=list(task.related_context) or [{"role": "user", "content": text_content}],
+                quality_mode=quality_mode,
+                interaction_style=interaction_style,
+                tool_registry=self._tool_registry,
+                current_goal=self.state.current_goal,
+                require_tools=True,
+            ):
+                result += chunk
+                if len(result) > 120 and task.progress_summary == "Working":
+                    task.mark_progress("Preparing final answer")
+            return result
+
+    async def _run_direct_screen_task(self, task: BackgroundTask, text_content: str) -> str | None:
+        if not self._needs_screen_context(text_content):
+            return None
+        task.mark_progress("Capturing screenshot locally")
+        result = await analyze_screen(
+            settings=self.settings,
+            prompt=text_content,
+            conversation_messages=list(task.related_context) or list(self.state.conversation_messages[-6:]),
+            current_goal=self.state.current_goal,
+            model_semaphore=self._model_semaphore,
+            preflight=self.preflight,
+        )
+        task.mark_progress("Preparing final answer")
+        return result
+
+    async def _run_direct_pdf_task(
+        self,
+        task: BackgroundTask,
+        text_content: str,
+        quality_mode: QualityMode,
+        interaction_style: InteractionStyle,
+    ) -> str | None:
+        if not re.search(r"\bpdf\b", text_content, re.I):
+            return None
+        path_match = re.search(r"(?P<path>(?:~|/)[^\s'\"<>]+?\.pdf)\b", text_content, re.I)
+        if path_match is None:
+            return None
+
+        pdf_path = path_match.group("path").rstrip(".,;:")
+        task.mark_progress("Reading PDF locally")
+        extracted = await self._tool_registry.execute("read_pdf", json.dumps({"path": pdf_path, "max_chars": 50000}))
+        if "No extractable text found" in extracted.content or extracted.content.startswith(("Access denied:", "Not a file:", "Not a PDF file:", "Could not read PDF")):
+            return extracted.content
+
+        task.mark_progress("Summarizing extracted PDF text")
+        worker_settings = self.settings
+        worker_model = _settings_str(self.settings, "WORKER_MODEL", "")
+        if worker_model:
+            worker_settings = Settings(**{**self.settings.__dict__, "MODEL": worker_model})
+
+        prompt = (
+            "Summarize the PDF for the user's request. Be concise, factual, and do not ask for a follow-up. "
+            "If the user asked for a focus area, answer that focus directly.\n\n"
+            f"User request: {text_content}\n\n"
+            f"Extracted local PDF text:\n{extracted.content[:50000]}"
+        )
+        result = ""
+        async with self._model_semaphore:
+            async for chunk in process_task_stream(
+                text_content=prompt,
+                complexity_scorer=self.scorer,
+                settings=worker_settings,
+                messages=[{"role": "user", "content": prompt}],
+                quality_mode=quality_mode,
+                interaction_style=interaction_style,
+                tool_registry=None,
+                current_goal=self.state.current_goal,
+                require_tools=False,
+            ):
+                result += chunk
+                if len(result) > 120 and task.progress_summary == "Summarizing extracted PDF text":
+                    task.mark_progress("Preparing final answer")
+        if result.strip():
+            return result
+        return self._fallback_pdf_summary(extracted.content)
+
+    @staticmethod
+    def _fallback_pdf_summary(extracted_text: str) -> str:
+        lines = [line.strip() for line in extracted_text.splitlines() if line.strip()]
+        page_lines = [line for line in lines if line.startswith("[Page ")]
+        content_lines = [
+            line
+            for line in lines
+            if not line.startswith(("PDF:", "Pages:", "Showing first", "[Page "))
+        ]
+        seen: set[str] = set()
+        key_lines: list[str] = []
+        for line in content_lines:
+            normalized = line.lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            key_lines.append(line)
+            if len(key_lines) >= 8:
+                break
+        if not key_lines:
+            return "The PDF text was extracted locally, but there was not enough readable text to summarize."
+        pages = f"{len(page_lines)} page markers" if page_lines else "the extracted pages"
+        bullets = "\n".join(f"- {line}" for line in key_lines)
+        return f"Local PDF summary from {pages}:\n{bullets}"
 
     # ── Shared streaming ──────────────────────────────────────────────────
 
@@ -439,53 +960,56 @@ class LiveSession:
                     i += 1
                     await asyncio.sleep(0.08)
 
-            spinner = asyncio.create_task(spin())
+            async with self._model_semaphore:
+                async with self._render_lock:
+                    spinner = asyncio.create_task(spin())
 
-            try:
-                async for chunk in process_task_stream(
-                    text_content=text_content,
-                    complexity_scorer=self.scorer,
-                    settings=self.settings,
-                    messages=self.state.conversation_messages,
-                    quality_mode=quality_mode,
-                    interaction_style=interaction_style,
-                    tool_registry=self._tool_registry,
-                    current_goal=self.state.current_goal,
-                ):
+                    try:
+                        async for chunk in process_task_stream(
+                            text_content=text_content,
+                            complexity_scorer=self.scorer,
+                            settings=self.settings,
+                            messages=self.state.conversation_messages,
+                            quality_mode=quality_mode,
+                            interaction_style=interaction_style,
+                            tool_registry=self._tool_registry,
+                            current_goal=self.state.current_goal,
+                            require_tools=False,
+                        ):
+                            if not first_token:
+                                first_token = True
+                                spinner.cancel()
+                                try:
+                                    await spinner
+                                except asyncio.CancelledError:
+                                    pass
+                                await play_sound("respond")
+                                print(f"\r\033[2K\n  {CYAN}Eyra{NC} ", end="", flush=True)
+
+                            for segment in _THINK_SPLIT.split(chunk):
+                                if segment == THINK_START:
+                                    in_think = True
+                                    think_had_content = False
+                                    print(DIM_ITALIC, end="", flush=True)
+                                elif segment == THINK_END:
+                                    in_think = False
+                                    print(NC, end="", flush=True)
+                                    if think_had_content:
+                                        print("\n\n", end="", flush=True)
+                                elif segment:
+                                    print(segment, end="", flush=True)
+                                    if in_think:
+                                        think_had_content = True
+                                    else:
+                                        full_response += segment
+                    finally:
+                        if not spinner.done():
+                            spinner.cancel()
+
                     if not first_token:
-                        first_token = True
-                        spinner.cancel()
-                        try:
-                            await spinner
-                        except asyncio.CancelledError:
-                            pass
-                        await play_sound("respond")
-                        print(f"\r\033[2K\n  {CYAN}Eyra{NC} ", end="", flush=True)
-
-                    for segment in _THINK_SPLIT.split(chunk):
-                        if segment == THINK_START:
-                            in_think = True
-                            think_had_content = False
-                            print(DIM_ITALIC, end="", flush=True)
-                        elif segment == THINK_END:
-                            in_think = False
-                            print(NC, end="", flush=True)
-                            if think_had_content:
-                                print("\n\n", end="", flush=True)
-                        elif segment:
-                            print(segment, end="", flush=True)
-                            if in_think:
-                                think_had_content = True
-                            else:
-                                full_response += segment
-            finally:
-                if not spinner.done():
-                    spinner.cancel()
-
-            if not first_token:
-                print("\r\033[2K", end="")
-            else:
-                print("\n")
+                        print("\r\033[2K", end="")
+                    else:
+                        print("\n")
 
             if full_response.strip():
                 self.state.conversation_messages.append({"role": "assistant", "content": full_response})
@@ -496,3 +1020,33 @@ class LiveSession:
             self.state.current_status = RuntimeStatus.IDLE
         finally:
             self._busy.clear()
+
+    def _on_task_event(self, task: BackgroundTask, event: str) -> None:
+        if not _settings_bool(self.settings, "TASK_STATUS_UPDATES", True):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._render_task_event(task, event))
+
+    async def _render_task_event(self, task: BackgroundTask, event: str) -> None:
+        async with self._render_lock:
+            if event in {"accepted", "started"}:
+                return
+            print()
+            if task.status == TaskStatus.COMPLETED:
+                print(f"  {CYAN}Task {task.id} completed:{NC} {task.title}")
+                print(self._indent(task.final_result or "Done."))
+                await self.speech.speak((task.final_result or "Task completed.")[:200])
+            elif task.status == TaskStatus.FAILED:
+                print(f"  Task {task.id} failed: {task.error or 'Unknown error'}")
+            elif task.status == TaskStatus.CANCELLED:
+                print(f"  Task {task.id} cancelled: {task.title}")
+            elif task.status == TaskStatus.WAITING_FOR_USER:
+                print(f"  Task {task.id} is waiting: {task.progress_summary}")
+            print()
+
+    @staticmethod
+    def _indent(text: str) -> str:
+        return "\n".join(f"    {line}" if line else "" for line in text.splitlines())

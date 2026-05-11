@@ -29,6 +29,17 @@ class _RecordingClient:
         yield "ok"
 
 
+class _NoToolClient:
+    async def stream_with_tools(self, messages, **kwargs):
+        if kwargs.get("require_tools"):
+            yield "The selected model cannot use local tools."
+        else:
+            yield "plain fallback"
+
+    async def generate_completion_stream(self, messages, **kwargs):
+        yield "plain fallback"
+
+
 class TestProcessTaskStream:
     def test_current_goal_is_added_as_context(self, monkeypatch):
         client = _RecordingClient()
@@ -50,6 +61,21 @@ class TestProcessTaskStream:
         )
         assert "User-set session goal" in system_text
         assert "keep answers focused on release readiness" in system_text
+
+    def test_tool_required_task_reports_model_without_tools(self, monkeypatch):
+        client = _NoToolClient()
+        monkeypatch.setattr("chat.message_handler.get_ai_client", lambda *_, **__: client)
+
+        chunks = _run(_collect(process_task_stream(
+            "move a file",
+            complexity_scorer=ComplexityScorer(),
+            settings=Settings(USE_MOCK_CLIENT=True),
+            messages=[{"role": "user", "content": "move a file"}],
+            tool_registry=ToolRegistry(),
+            require_tools=True,
+        )))
+
+        assert "cannot use local tools" in "".join(chunks)
 
 
 async def _collect(stream):

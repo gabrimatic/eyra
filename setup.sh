@@ -148,8 +148,15 @@ cd "$EYRA_DIR" && exec uv run python src/main.py "\$@"
 LAUNCHER
 chmod +x "$BIN_DIR/eyra"
 
+cat > "$BIN_DIR/eyra-web" <<LAUNCHER
+#!/bin/bash
+cd "$EYRA_DIR" && exec uv run python -m web.server "\$@"
+LAUNCHER
+chmod +x "$BIN_DIR/eyra-web"
+
 EYRA_PATH_LINE='export PATH="$HOME/.local/bin:$PATH" # eyra'
 EYRA_ALIAS="alias eyra='$BIN_DIR/eyra' # eyra"
+EYRA_WEB_ALIAS="alias eyra-web='$BIN_DIR/eyra-web' # eyra"
 for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
     [[ -f "$rc" ]] || continue
     sed -i '' '/# eyra$/d' "$rc"
@@ -157,10 +164,11 @@ for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
         echo "$EYRA_PATH_LINE" >> "$rc"
     fi
     echo "$EYRA_ALIAS" >> "$rc"
+    echo "$EYRA_WEB_ALIAS" >> "$rc"
 done
 
 export PATH="$BIN_DIR:$PATH"
-log_ok "eyra command registered"
+log_ok "eyra and eyra-web commands registered"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 
@@ -169,4 +177,5 @@ echo -e "${GREEN}${BOLD}  Setup complete${NC}"
 echo ""
 echo -e "  ${BOLD}Run now:${NC} uv run python src/main.py"
 echo -e "  ${DIM}After opening a new terminal, run: eyra${NC}"
+echo -e "  ${DIM}For phone/browser access: WEB_UI_ENABLED=true uv run python -m web.server${NC}"
 echo ""

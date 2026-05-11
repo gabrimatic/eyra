@@ -10,6 +10,47 @@ from runtime import startup
 
 
 class TestStartupSelector:
+    def test_write_env_preserves_optional_capability_settings(self, monkeypatch, tmp_path):
+        env_path = tmp_path / ".env"
+        env_path.write_text(
+            "\n".join(
+                [
+                    "OS_TOOLS_ENABLED=true",
+                    "AGENT_TOOLS_ENABLED=true",
+                    "MCP_TOOLS_ENABLED=true",
+                    "MCP_CONFIG_PATH=~/mcp.json",
+                    "WEB_UI_ENABLED=true",
+                    "WEB_UI_HOST=0.0.0.0",
+                    "WEB_UI_PORT=9999",
+                    "WEB_UI_REQUIRE_TOKEN=auto",
+                    "WEB_UI_MAX_REQUEST_BYTES=1234",
+                    "REALTIME_VOICE_ENABLED=true",
+                    "REALTIME_MODEL=gpt-realtime",
+                    "REALTIME_VOICE=marin",
+                    "OPENAI_API_KEY=sk-test",
+                    "REALTIME_TOOLS_ENABLED=true",
+                    "REALTIME_ALLOWED_TOOLS=get_current_time",
+                    "VISION_MODEL=gemma3:4b",
+                    "",
+                ]
+            )
+        )
+        monkeypatch.setattr(startup, "_ENV", env_path)
+
+        startup._write_env("http://localhost:11434/v1", "ollama", "gemma3:4b")
+
+        content = env_path.read_text()
+        assert "OS_TOOLS_ENABLED=true" in content
+        assert "AGENT_TOOLS_ENABLED=true" in content
+        assert "MCP_TOOLS_ENABLED=true" in content
+        assert "WEB_UI_ENABLED=true" in content
+        assert "WEB_UI_REQUIRE_TOKEN=auto" in content
+        assert "REALTIME_TOOLS_ENABLED=true" in content
+        assert "REALTIME_ALLOWED_TOOLS=get_current_time" in content
+        assert "VISION_MODEL=gemma3:4b" in content
+        assert "REALTIME_VOICE_ENABLED=true" in content
+        assert "OPENAI_API_KEY=sk-test" in content
+
     def test_mock_client_env_skips_provider_setup(self, monkeypatch, tmp_path):
         env_path = tmp_path / ".env"
         env_path.write_text("USE_MOCK_CLIENT=true\n")

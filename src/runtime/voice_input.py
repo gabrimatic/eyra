@@ -20,6 +20,7 @@ import os
 import tempfile
 import threading
 import wave
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -103,9 +104,9 @@ class VoiceInput:
         """Cancel an in-progress recording. Thread-safe."""
         self._cancel.set()
 
-    async def listen(self) -> str | None:
+    async def listen(self, on_speech_start: Callable[[], None] | None = None) -> str | None:
         """Record until speech ends, transcribe, return text. None on silence/cancel."""
-        audio = await asyncio.to_thread(self._record)
+        audio = await asyncio.to_thread(self._record, on_speech_start)
         if audio is None or len(audio) == 0:
             return None
 
@@ -123,7 +124,7 @@ class VoiceInput:
 
     # ── Recording with Silero VAD ─────────────────────────────────────────
 
-    def _record(self) -> np.ndarray | None:
+    def _record(self, on_speech_start: Callable[[], None] | None = None) -> np.ndarray | None:
         """Synchronous mic recording with Silero neural voice activity detection.
 
         Driven by VADIterator events:
@@ -141,6 +142,7 @@ class VoiceInput:
 
         speech_started = False
         speech_frame_count = 0
+        speech_start_reported = False
 
         try:
             with sd.InputStream(
@@ -165,6 +167,12 @@ class VoiceInput:
                             speech_frames.extend(lookback)
                             lookback.clear()
                             logger.debug("Speech onset detected")
+                            if on_speech_start is not None and not speech_start_reported:
+                                speech_start_reported = True
+                                try:
+                                    on_speech_start()
+                                except Exception as e:
+                                    logger.debug("Speech-start callback failed: %s", e)
 
                     if speech_started:
                         speech_frames.append(frame.copy())
@@ -178,6 +186,7 @@ class VoiceInput:
                             speech_started = False
                             speech_frames.clear()
                             speech_frame_count = 0
+                            speech_start_reported = False
                             vad.reset_states()
                     else:
                         lookback.append(frame.copy())

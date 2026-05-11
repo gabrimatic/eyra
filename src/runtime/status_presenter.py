@@ -74,6 +74,19 @@ def render_header(state: LiveRuntimeState, settings=None):
         model_name = getattr(settings, "MODEL", None)
         if model_name:
             print(f"  {DIM}Model: {model_name}{NC}")
+        enabled = []
+        if getattr(settings, "WEB_UI_ENABLED", False):
+            enabled.append("web via eyra-web")
+        if getattr(settings, "OS_TOOLS_ENABLED", False):
+            enabled.append("os")
+        if getattr(settings, "MCP_TOOLS_ENABLED", False):
+            enabled.append("mcp")
+        if getattr(settings, "AGENT_TOOLS_ENABLED", False):
+            enabled.append("agents")
+        if getattr(settings, "REALTIME_VOICE_ENABLED", False):
+            enabled.append("realtime")
+        if enabled:
+            print(f"  {DIM}Enabled: {', '.join(enabled)}{NC}")
 
     if state.current_goal:
         print(f"  Goal: {state.current_goal}")
@@ -110,6 +123,8 @@ def render_status_card(
     tool_count: int,
     msg_count: int,
     model_name: str = "",
+    task_summary: str = "",
+    extra_rows: list[tuple[str, str]] | None = None,
 ):
     """Print a full status card."""
     voice = voice_status_label(state)
@@ -123,7 +138,11 @@ def render_status_card(
     print(_box_row_padded("Quality", quality_mode_value))
     print(_box_row_padded("Goal", goal))
     print(_box_row_padded("History", f"{msg_count} messages"))
+    if task_summary:
+        print(_box_row_padded("Tasks", task_summary))
     print(_box_row_padded("Tools", f"{tool_count} available"))
+    for label, value in extra_rows or []:
+        print(_box_row_padded(label, value))
     print(f"╰{'─' * _BOX_WIDTH}╯")
     print()
 
@@ -132,11 +151,18 @@ def render_help_card():
     """Print the /help command card."""
     cmds = [
         ("/voice     ", "on|off"),
+        ("/voice-test", "Manual interrupt test"),
         ("/mute      ", "Mute speech output"),
         ("/unmute    ", "Unmute speech"),
         ("/goal TEXT ", "Set a goal"),
         ("/mode MODE ", "fast|balanced|best"),
         ("/status    ", "Show session info"),
+        ("/tasks     ", "Show active and recent tasks"),
+        ("/task ID   ", "Show task details"),
+        ("/cancel ID ", "Cancel a task or all"),
+        ("/approvals ", "Show pending approvals"),
+        ("/approve ID", "Approve exact action"),
+        ("/reject ID ", "Reject approval"),
         ("/clear     ", "Reset conversation"),
         ("/help      ", "Show this help"),
         ("/quit      ", "Exit Eyra"),
@@ -148,4 +174,5 @@ def render_help_card():
         pad = _BOX_WIDTH - len(cmd) - len(desc) - 2
         print(f"│  {row}{' ' * max(pad, 0)}│")
     print(f"╰{'─' * _BOX_WIDTH}╯")
+    print(f"  {DIM}Web UI: run eyra-web when WEB_UI_ENABLED=true.{NC}")
     print()
