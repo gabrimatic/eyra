@@ -41,6 +41,9 @@ jobs:
       - name: Test
         run: uv run --frozen pytest -q
 
+      - name: Build wheel
+        run: uv build --wheel
+
   setup-check:
     name: setup.sh syntax check
     runs-on: macos-15

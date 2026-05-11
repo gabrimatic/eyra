@@ -14,7 +14,7 @@ from chat.message_handler import process_task_stream
 from chat.session_state import InteractionStyle, QualityMode
 from clients.ai_client import THINK_END, THINK_START
 from runtime.models import LiveRuntimeState, PreflightResult, RuntimeStatus
-from runtime.preflight import WH_INSTALL_HINT
+from runtime.preflight import PreflightManager
 from runtime.speech_controller import SpeechController
 from runtime.status_presenter import (
     print_status_change,
@@ -98,6 +98,7 @@ class LiveSession:
         self._busy = asyncio.Event()
         self._browser_session = BrowserSession()
         self._tool_registry = self._build_tool_registry()
+        self._voice_task: asyncio.Task | None = None
 
     def _build_tool_registry(self) -> ToolRegistry:
         registry = ToolRegistry()
@@ -129,7 +130,7 @@ class LiveSession:
             asyncio.create_task(self._input_loop(), name="input"),
         ]
         if self.state.listening_enabled:
-            tasks.append(asyncio.create_task(self._voice_input_loop(), name="voice"))
+            self._start_voice_task()
 
         try:
             await self._shutdown.wait()
@@ -138,10 +139,28 @@ class LiveSession:
         finally:
             for t in tasks:
                 t.cancel()
+            if self._voice_task is not None:
+                self._voice_task.cancel()
+                tasks.append(self._voice_task)
             await asyncio.gather(*tasks, return_exceptions=True)
             await self.speech.interrupt()
             await self._browser_session.close()
             print("\n  Goodbye.\n")
+
+    def _start_voice_task(self) -> None:
+        """Start the owned voice loop if it is not already running."""
+        if self._voice_task is None or self._voice_task.done():
+            self._voice_task = asyncio.create_task(self._voice_input_loop(), name="voice")
+
+    async def _stop_voice_task(self) -> None:
+        """Stop the owned voice loop without blocking on itself."""
+        self.speech.cancel_listen()
+        task = self._voice_task
+        if task is None or task.done() or task is asyncio.current_task():
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        self._voice_task = None
 
     # ── Input loop ────────────────────────────────────────────────────────
 
@@ -260,22 +279,18 @@ class LiveSession:
         if command == "/voice":
             arg = lower_parts[1] if len(lower_parts) > 1 else ""
             if arg == "on":
-                if not self.preflight.wh_available:
-                    print("  Local Whisper is not available.")
-                    print(f"  {DIM}Install: {WH_INSTALL_HINT}{NC}")
+                if not await self._ensure_voice_available():
+                    print_status_change("Voice not available")
                     return True
                 self.state.listening_enabled = True
                 self.state.speech_enabled = True
-                # Spawn voice loop if not already running
-                voice_task = next((t for t in asyncio.all_tasks() if t.get_name() == "voice"), None)
-                if voice_task is None or voice_task.done():
-                    asyncio.create_task(self._voice_input_loop(), name="voice")
+                self._start_voice_task()
                 print_status_change("Voice on (input + speech)")
             elif arg == "off":
                 self.state.listening_enabled = False
                 self.state.speech_enabled = False
                 await self.speech.interrupt()
-                self.speech.cancel_listen()
+                await self._stop_voice_task()
                 print_status_change("Voice off")
             else:
                 voice_status = "on" if self.state.listening_enabled else "off"
@@ -328,6 +343,23 @@ class LiveSession:
 
         print(f"  Unknown command: {command}")
         return True
+
+    async def _ensure_voice_available(self) -> bool:
+        """Recover Local Whisper at runtime when startup skipped or failed voice checks."""
+        if self.preflight.wh_available and self.state.wh_bin:
+            return True
+
+        result = PreflightResult(
+            backend_reachable=self.preflight.backend_reachable,
+            models_ready=list(self.preflight.models_ready),
+            models_missing=list(self.preflight.models_missing),
+            screen_capture_available=self.preflight.screen_capture_available,
+        )
+        available = await PreflightManager(self.settings).check_local_whisper(result)
+        self.preflight.wh_available = available
+        self.preflight.wh_bin = result.wh_bin
+        self.state.wh_bin = result.wh_bin
+        return available
 
     def _print_status(self):
         model_name = getattr(self.settings, "MODEL", "")
@@ -394,6 +426,7 @@ class LiveSession:
                     quality_mode=quality_mode,
                     interaction_style=interaction_style,
                     tool_registry=self._tool_registry,
+                    current_goal=self.state.current_goal,
                 ):
                     if not first_token:
                         first_token = True

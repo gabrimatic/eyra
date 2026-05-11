@@ -48,6 +48,7 @@ Eyra is now listening. Type or speak at any time.
 - Accepts typed or spoken input without leaving the session.
 - Routes requests to the appropriate model. Complexity routing is available as an experimental option.
 - Uses local tools on demand via function calling: screenshot, time, clipboard, system info, and sandboxed filesystem access.
+- Protects existing files from accidental tool overwrites unless replacement is explicit.
 - Offers optional network tools for weather and web browsing when `NETWORK_TOOLS_ENABLED=true`.
 - Speaks responses via local-whisper when available.
 - Works with any OpenAI-compatible provider (Ollama, LM Studio, vLLM, OpenRouter, etc.).
@@ -60,7 +61,7 @@ Eyra is now listening. Type or speak at any time.
 
 Eyra runs as one live session with several concurrent subsystems:
 
-- **Voice** is handled by [Local Whisper](https://github.com/gabrimatic/local-whisper) for both directions: input (ASR via Qwen3-ASR) and output (TTS via Kokoro). Eyra records the microphone via sounddevice and classifies each 32ms frame with Silero VAD. When the speaker pauses, the audio is transcribed through Local Whisper. Eyra will interrupt its own speech to hear you. Toggle with `/voice on|off`.
+- **Voice** is handled by [Local Whisper](https://github.com/gabrimatic/local-whisper) for both directions: input (ASR via Qwen3-ASR) and output (TTS via Kokoro). Eyra records the microphone via sounddevice and classifies each 32ms frame with Silero VAD. When the speaker pauses, the audio is transcribed through Local Whisper. Eyra will interrupt its own speech to hear you. Toggle with `/voice on|off`; if voice was disabled or unavailable at startup, `/voice on` rechecks Local Whisper and enables it without restarting the session.
 - **Typed input** is always available inline. Both channels feed the same conversation.
 - **Complexity routing** is experimental and off by default. When enabled, requests are scored deterministically and dispatched to a Simple, Moderate, or Complex tier. When disabled, all requests use a single configured model.
 - **Tool use** gives the model access to screenshot, time, clipboard, system info, and sandboxed filesystem actions. Weather and browser tools are opt-in because they contact remote sites. Tools are defined as OpenAI function-calling schemas and executed locally unless a network tool is explicitly enabled. With complexity routing enabled, Simple/Moderate tiers receive lightweight tools and Complex receives all tools including screenshot.
@@ -85,10 +86,10 @@ When `USE_MOCK_CLIENT=true`, backend and model checks are bypassed intentionally
 
 | Command | What it does |
 |---------|-------------|
-| `/voice on\|off` | Toggle voice input and speech output |
+| `/voice on\|off` | Toggle voice input and speech output, with runtime recovery |
 | `/mute` | Mute speech output only |
 | `/unmute` | Unmute speech |
-| `/goal <text>` | Set a conversational goal ("tell me when an error appears") |
+| `/goal <text>` | Set session context that guides future replies |
 | `/mode fast\|balanced\|best` | Set quality mode |
 | `/status` | Show current runtime state |
 | `/clear` | Reset conversation history |
@@ -162,6 +163,9 @@ VOICE_VAD_THRESHOLD=0.6        # Silero VAD sensitivity (0.0-1.0, higher = stric
 # Optional network tools. Keep false for fully local default behavior.
 NETWORK_TOOLS_ENABLED=false
 
+# Optional log location override. Defaults to ~/Library/Logs/Eyra/eyra.log on macOS.
+# EYRA_LOG_FILE=~/Library/Logs/Eyra/eyra.log
+
 # Experimental: complexity-based routing. When disabled, all requests use MODEL.
 COMPLEXITY_ROUTING_ENABLED=false
 
@@ -187,7 +191,7 @@ FILESYSTEM_DEFAULT_PATH=~/Documents
 | wh transcribe (local-whisper) | Subprocess, local |
 | wh whisper (local-whisper) | Subprocess, local |
 | Screenshots | In-memory; never written to disk |
-| Weather/browser tools | Disabled by default; contact remote sites only when `NETWORK_TOOLS_ENABLED=true` and a tool is used |
+| Weather/browser tools | Disabled by default; contact remote sites only when `NETWORK_TOOLS_ENABLED=true` and a tool is used. Weather requires an explicit location and does not use remote IP geolocation. |
 
 No telemetry. By default everything runs on your machine. If `API_BASE_URL` points at a remote provider, prompts and images will leave your machine to that provider. If optional network tools are enabled, those tools send the requested URL, search query, or weather location to the relevant remote service.
 
@@ -254,6 +258,12 @@ If using a different provider, verify `API_BASE_URL` and `API_KEY` in `.env` are
 
 </details>
 
+<details><summary><strong>Runtime logs</strong></summary>
+
+Runtime logs are written to `~/Library/Logs/Eyra/eyra.log` on macOS. Set `EYRA_LOG_FILE` if you want a different location.
+
+</details>
+
 <details><summary><strong>Tools are not being used</strong></summary>
 
 The selected model must support native tool calling. In Ollama, check:
@@ -276,7 +286,7 @@ brew tap gabrimatic/local-whisper && brew install local-whisper
 
 Eyra's preflight automatically detects the installation (even if `wh` is not on PATH) and starts the service if needed. If preflight reports it's installed but not running, start manually with `wh start`.
 
-You can also toggle voice at runtime with `/voice on|off`.
+You can also toggle voice at runtime with `/voice on|off`. If voice was disabled in `.env`, `/voice on` performs the Local Whisper check at runtime and enables voice when it becomes available.
 
 </details>
 
@@ -292,6 +302,7 @@ uv run pytest -q
 uv run ruff check src tests
 uv lock --check
 bash -n setup.sh
+uv build --wheel
 USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv run python src/main.py
 ```
 

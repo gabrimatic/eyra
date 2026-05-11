@@ -60,13 +60,19 @@ class PreflightManager:
 
         # Capabilities (sync/blocking — run off the event loop)
         if self.settings.LIVE_LISTENING_ENABLED or self.settings.LIVE_SPEECH_ENABLED:
-            result.wh_available = await asyncio.to_thread(self._check_wh, result)
+            result.wh_available = await self.check_local_whisper(result)
         else:
             _ok("Local Whisper: skipped (voice disabled)")
         result.screen_capture_available = self._check_screen_capture()
 
         print()
         return result
+
+    async def check_local_whisper(self, result: PreflightResult | None = None) -> bool:
+        """Check Local Whisper on demand and thread the resolved wh path into result."""
+        target = result or PreflightResult()
+        target.wh_available = await asyncio.to_thread(self._check_wh, target)
+        return target.wh_available
 
     async def _check_backend(self) -> bool:
         base = self.settings.API_BASE_URL.removesuffix("/v1").rstrip("/")

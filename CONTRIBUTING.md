@@ -14,7 +14,7 @@ Set `USE_MOCK_CLIENT=true` in `.env` to run without any backend during developme
 
 Voice input and speech output require [Local Whisper](https://github.com/gabrimatic/local-whisper). Install: `brew tap gabrimatic/local-whisper && brew install local-whisper`. Check with `wh status`.
 
-Network tools are disabled by default. Set `NETWORK_TOOLS_ENABLED=true` in `.env` only when testing weather or browser tools.
+Network tools are disabled by default. Set `NETWORK_TOOLS_ENABLED=true` in `.env` only when testing weather or browser tools. Weather requests require an explicit location so tests and runtime use never rely on remote IP geolocation.
 
 ## Architecture
 
@@ -80,6 +80,7 @@ Keep streaming behavior consistent with existing clients. Responses should yield
 
 Tools are invoked by the model on demand. Keep tool implementations stateless where possible. Any tool that contacts the network must be gated behind `NETWORK_TOOLS_ENABLED`.
 Relative filesystem paths resolve under `FILESYSTEM_DEFAULT_PATH` and are still checked against `FILESYSTEM_ALLOWED_PATHS`.
+`write_file` creates new files by default and requires `overwrite=true` before replacing an existing file.
 
 ## Testing
 
@@ -90,6 +91,7 @@ uv run pytest tests/test_runtime.py -k "test_name" -q  # Run a single test
 uv run ruff check src tests                # Lint
 uv lock --check                            # Verify uv.lock matches pyproject.toml
 bash -n setup.sh                           # Check setup script syntax
+uv build --wheel                           # Verify the distributable package
 ```
 
 Manual verification flow:
@@ -105,6 +107,8 @@ Manual verification flow:
 - Code follows the style of the surrounding file (indentation, naming, structure)
 - No new dependencies added without updating `pyproject.toml`
 - Mock client still works (`USE_MOCK_CLIENT=true`)
+- Voice toggling works when Local Whisper becomes available after startup
+- Existing files are not overwritten by `write_file` unless overwrite is explicit
 - No credentials, API keys, or personal data in any file
 - Manual verification flow passes
 - PR description explains what changed and why
@@ -116,9 +120,9 @@ Include:
 - macOS version
 - Python version (`python --version`)
 - AI backend version if relevant (e.g. `ollama --version`)
-- Relevant terminal output or logs
+- Relevant terminal output or logs (`~/Library/Logs/Eyra/eyra.log` by default on macOS)
 - Steps to reproduce
-- `.env` contents (no secrets)
+- Relevant sanitized `.env` keys (never paste `API_KEY` or other secrets)
 
 ## Vulnerability Reporting
 

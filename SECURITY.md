@@ -5,7 +5,7 @@
 Privacy is a core constraint, not a feature toggle.
 
 - **Default processing is local.** Screenshots and voice input are handled entirely on your Mac; remote AI providers are opt-in through `API_BASE_URL`.
-- **No silent network calls.** The configured AI backend is localhost by default. Weather and browser tools are disabled unless `NETWORK_TOOLS_ENABLED=true`.
+- **No silent network calls.** The configured AI backend is localhost by default. Weather and browser tools are disabled unless `NETWORK_TOOLS_ENABLED=true`; weather lookups require an explicit location.
 - **No telemetry and no analytics.** No tracking data ever leaves your machine.
 - **Screenshots** exist only in memory and are never written to disk.
 
@@ -26,10 +26,11 @@ All permissions are requested on demand. Nothing runs in the background between 
 |----------|-------------|-------|
 | AI backend at `API_BASE_URL` | User-controlled | Loopback by default; remote if configured |
 | wh (local-whisper) | Trusted | Subprocess, runs on localhost, no network |
-| Filesystem sandbox | Enforced | Paths restricted to `FILESYSTEM_ALLOWED_PATHS` (default `~/,/tmp`). Rejects empty paths and binary file edits. |
+| Filesystem sandbox | Enforced | Paths restricted to `FILESYSTEM_ALLOWED_PATHS` (default `~/,/tmp`). Rejects empty paths and binary file edits. `write_file` requires explicit overwrite for existing files. |
 | Filesystem default path | Enforced | Relative paths resolve under `FILESYSTEM_DEFAULT_PATH`, then pass through the same sandbox check. |
-| Weather/browser tools | Opt-in | Contact remote sites only when `NETWORK_TOOLS_ENABLED=true` and a tool is used. Browser uses headless Chromium, http/https only, 30s tool timeout. |
+| Weather/browser tools | Opt-in | Contact remote sites only when `NETWORK_TOOLS_ENABLED=true` and a tool is used. Weather requires an explicit location and does not use remote IP geolocation. Browser uses headless Chromium, http/https only, 30s tool timeout. |
 | `.env` file | User-controlled | Must not be committed |
+| Local logs | Local artifact | Stored under `~/Library/Logs/Eyra/eyra.log` by default on macOS. Tool-call logs record tool names and argument keys only, not argument values. |
 | User prompts | Untrusted input | Passed to AI backends, no shell execution |
 
 User input is passed to AI backends as message content only. No shell commands are constructed from user input.

@@ -1,6 +1,8 @@
 """Tests for the tool system: registry, base tool, screenshot tool, text-format recovery."""
 
 import asyncio
+import json
+import logging
 import os
 import sys
 from unittest.mock import AsyncMock, patch
@@ -8,13 +10,22 @@ from unittest.mock import AsyncMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from clients.ai_client import _is_tools_unsupported_error, _parse_text_tool_calls
-from tools.base import ToolResult
+from tools.base import BaseTool, ToolResult
 from tools.registry import ToolRegistry
 from tools.screenshot import ScreenshotTool
 
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+class _EchoTool(BaseTool):
+    name = "write_file"
+    description = "Test tool"
+    parameters = {"type": "object", "properties": {}, "required": []}
+
+    async def execute(self, **kwargs) -> ToolResult:
+        return ToolResult(content="ok")
 
 
 class TestToolResult:
@@ -61,6 +72,24 @@ class TestToolRegistry:
         registry.register(ScreenshotTool())
         result = _run(registry.execute("take_screenshot", "{bad json"))
         assert "Invalid JSON" in result.content
+
+    def test_execute_log_redacts_argument_values(self, caplog):
+        registry = ToolRegistry()
+        registry.register(_EchoTool())
+        caplog.set_level(logging.INFO, logger="tools.registry")
+
+        secret = "sk-test-secret-token"
+        result = _run(registry.execute("write_file", json.dumps({
+            "path": "~/private-note.txt",
+            "content": f"token={secret}",
+            "api_key": secret,
+        })))
+
+        assert result.content == "ok"
+        assert secret not in caplog.text
+        assert "~/private-note.txt" not in caplog.text
+        assert "write_file" in caplog.text
+        assert "content" in caplog.text
 
     def test_empty_registry(self):
         registry = ToolRegistry()
@@ -116,6 +145,19 @@ class TestTextToolCallParser:
         result = _parse_text_tool_calls(content)
         assert result is not None
         assert result[0]["name"] == "read_file"
+
+    def test_tool_call_format_with_nested_arguments(self):
+        content = (
+            '<tool_call>{"name": "write_file", "arguments": '
+            '{"path": "~/notes.json", "content": "{\\"enabled\\": true}"}}</tool_call>'
+        )
+        result = _parse_text_tool_calls(content)
+        assert result is not None
+        assert result[0]["name"] == "write_file"
+        assert json.loads(result[0]["arguments"]) == {
+            "path": "~/notes.json",
+            "content": '{"enabled": true}',
+        }
 
     def test_multiple_calls(self):
         content = (

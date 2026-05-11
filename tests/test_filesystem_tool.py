@@ -108,10 +108,22 @@ class TestWriteFileTool:
             with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
                 path = os.path.join(d, "test.txt")
                 await WriteFileTool().execute(path=path, content="first")
-                await WriteFileTool().execute(path=path, content="second")
+                r = await WriteFileTool().execute(path=path, content="second")
+                assert "already exists" in r.content
+                r = await ReadFileTool().execute(path=path)
+                assert "first" in r.content
+                assert "second" not in r.content
+                await WriteFileTool().execute(path=path, content="second", overwrite=True)
                 r = await ReadFileTool().execute(path=path)
                 assert "second" in r.content
                 assert "first" not in r.content
+        _run(run())
+
+    def test_write_refuses_existing_directory(self):
+        async def run():
+            with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
+                r = await WriteFileTool().execute(path=d, content="not a directory")
+                assert "not a file" in r.content
         _run(run())
 
     def test_relative_paths_use_default_path(self):
