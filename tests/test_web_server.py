@@ -18,6 +18,7 @@ from web.server import (
     create_realtime_session_payload,
     realtime_tools,
     render_index_html,
+    run_web_server,
     speak_local_text,
     validate_realtime_tool_token,
     validate_request_size,
@@ -48,6 +49,9 @@ class TestWebServerHelpers:
         assert "/api/local-speak" in html
         assert "RTCPeerConnection" in html
         assert "https://api.openai.com/v1/realtime/calls" in html
+        assert "EventSource" in html
+        assert "/api/events" in html
+        assert "setInterval" not in html
 
     def test_local_speak_uses_whisper_cli_when_available(self):
         with patch("web.server.resolve_wh_bin", return_value="/usr/bin/wh"):
@@ -179,6 +183,71 @@ class TestWebServerHelpers:
 
         runtime.close()
 
+    def test_web_runtime_publishes_task_events(self, tmp_path):
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+            FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+        )
+        pdf_path = tmp_path / "test.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4\n")
+        runtime = WebAssistantRuntime(settings)
+        subscriber = runtime.subscribe_task_events()
+
+        try:
+            result = runtime.run_sync(runtime.handle_message(f"Read this PDF and summarize it: {pdf_path}"))
+            event = subscriber.get(timeout=2)
+        finally:
+            runtime.unsubscribe_task_events(subscriber)
+            runtime.close()
+
+        assert event["event"] == "task"
+        assert event["task"]["id"] == result["taskId"]
+
+    def test_web_runtime_refuses_open_ended_tool_task_without_tool_capable_model(self, tmp_path):
+        from runtime.models import PreflightResult
+
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+            FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+        )
+        preflight = PreflightResult(
+            backend_reachable=True,
+            models_ready=[settings.MODEL],
+            tool_capability_checked_models=[settings.MODEL],
+        )
+        runtime = WebAssistantRuntime(settings, preflight=preflight)
+
+        result = runtime.run_sync(runtime.handle_message("Organize my Documents folder."))
+        tasks = runtime.run_sync(runtime.list_tasks())
+
+        assert "requires a model with native tool calling" in result["reply"]
+        assert tasks["tasks"] == []
+        runtime.close()
+
+    def test_web_runtime_refuses_screen_task_without_vision_capable_model(self):
+        from runtime.models import PreflightResult
+
+        settings = Settings(USE_MOCK_CLIENT=True, LIVE_LISTENING_ENABLED=False, LIVE_SPEECH_ENABLED=False)
+        preflight = PreflightResult(
+            backend_reachable=True,
+            models_ready=[settings.MODEL],
+            vision_capability_checked_models=[settings.MODEL],
+        )
+        runtime = WebAssistantRuntime(settings, preflight=preflight)
+
+        result = runtime.run_sync(runtime.handle_message("What is on the screen?"))
+        tasks = runtime.run_sync(runtime.list_tasks())
+
+        assert "vision-capable model" in result["reply"]
+        assert tasks["tasks"] == []
+        runtime.close()
+
     def test_web_runtime_can_cancel_task(self, tmp_path):
         settings = Settings(USE_MOCK_CLIENT=True, LIVE_LISTENING_ENABLED=False, LIVE_SPEECH_ENABLED=False)
         runtime = WebAssistantRuntime(settings)
@@ -278,6 +347,79 @@ class TestWebServerHelpers:
             server.shutdown()
             server.server_close()
             runtime.close()
+
+    def test_web_api_rejects_oversized_local_voice_uploads(self):
+        settings = Settings(
+            WEB_UI_HOST="127.0.0.1",
+            WEB_UI_REQUIRE_TOKEN="true",
+            WEB_UI_MAX_REQUEST_BYTES=4,
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+        )
+        runtime = WebAssistantRuntime(settings)
+        handler = type(
+            "TestEyraWebHandler",
+            (_EyraWebHandler,),
+            {
+                "settings": settings,
+                "runtime": runtime,
+                "web_session_token": "secret-token",
+                "realtime_tool_token": "rt-secret",
+            },
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            request = urllib.request.Request(
+                base + "/api/local-voice-turn",
+                method="POST",
+                data=b"12345",
+                headers={"X-Eyra-Web-Token": "secret-token", "Content-Type": "audio/webm"},
+            )
+            try:
+                urllib.request.urlopen(request, timeout=5)
+                raise AssertionError("oversized upload unexpectedly succeeded")
+            except urllib.error.HTTPError as e:
+                assert e.code == 413
+        finally:
+            server.shutdown()
+            server.server_close()
+            runtime.close()
+
+    def test_run_web_server_stops_when_preflight_fails(self, capsys):
+        from runtime.models import PreflightResult
+
+        settings = Settings(USE_MOCK_CLIENT=True, LIVE_LISTENING_ENABLED=False, LIVE_SPEECH_ENABLED=False)
+        preflight = PreflightResult(backend_reachable=False)
+
+        with patch("web.server.EyraThreadingHTTPServer") as server:
+            run_web_server(settings, preflight=preflight)
+
+        server.assert_not_called()
+        assert "Backend is not reachable" in capsys.readouterr().out
+
+    def test_run_web_server_reports_bind_failure_without_traceback(self, capsys):
+        from runtime.models import PreflightResult
+
+        settings = Settings(
+            WEB_UI_HOST="127.0.0.1",
+            WEB_UI_PORT=12345,
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+        )
+        preflight = PreflightResult(backend_reachable=True, models_ready=[settings.MODEL])
+
+        with patch("web.server.EyraThreadingHTTPServer", side_effect=OSError("Address already in use")):
+            run_web_server(settings, preflight=preflight)
+
+        out = capsys.readouterr().out
+        assert "Could not start Eyra web UI" in out
+        assert "Address already in use" in out
+        assert "Traceback" not in out
 
     def test_web_responses_include_security_headers(self):
         settings = Settings(USE_MOCK_CLIENT=True, LIVE_LISTENING_ENABLED=False, LIVE_SPEECH_ENABLED=False)
