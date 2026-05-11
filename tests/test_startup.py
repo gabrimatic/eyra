@@ -22,10 +22,15 @@ class TestStartupSelector:
                     "WEB_UI_ENABLED=true",
                     "WEB_UI_HOST=0.0.0.0",
                     "WEB_UI_PORT=9999",
+                    "WEB_UI_REQUIRE_TOKEN=auto",
+                    "WEB_UI_MAX_REQUEST_BYTES=1234",
                     "REALTIME_VOICE_ENABLED=true",
-                    "REALTIME_MODEL=gpt-realtime-2",
+                    "REALTIME_MODEL=gpt-realtime",
                     "REALTIME_VOICE=marin",
                     "OPENAI_API_KEY=sk-test",
+                    "REALTIME_TOOLS_ENABLED=true",
+                    "REALTIME_ALLOWED_TOOLS=get_current_time",
+                    "VISION_MODEL=gemma3:4b",
                     "",
                 ]
             )
@@ -39,6 +44,10 @@ class TestStartupSelector:
         assert "AGENT_TOOLS_ENABLED=true" in content
         assert "MCP_TOOLS_ENABLED=true" in content
         assert "WEB_UI_ENABLED=true" in content
+        assert "WEB_UI_REQUIRE_TOKEN=auto" in content
+        assert "REALTIME_TOOLS_ENABLED=true" in content
+        assert "REALTIME_ALLOWED_TOOLS=get_current_time" in content
+        assert "VISION_MODEL=gemma3:4b" in content
         assert "REALTIME_VOICE_ENABLED=true" in content
         assert "OPENAI_API_KEY=sk-test" in content
 

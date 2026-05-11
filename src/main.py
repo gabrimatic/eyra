@@ -95,6 +95,11 @@ async def main() -> None:
 
     # Build runtime state from preflight results
     state = LiveRuntimeState.from_preflight(preflight, settings=settings)
+    if settings.WEB_UI_ENABLED:
+        print(
+            f"  Web UI is enabled in config. Start it with: eyra-web "
+            f"(http://{settings.WEB_UI_HOST}:{settings.WEB_UI_PORT})"
+        )
 
     # Launch live session
     session = LiveSession(

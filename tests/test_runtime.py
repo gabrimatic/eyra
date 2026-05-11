@@ -225,6 +225,22 @@ class TestSpeechController:
         mock_proc.terminate.assert_called_once()
         assert ctrl._speaking_proc is None
 
+    def test_interrupt_kills_process_when_terminate_hangs(self):
+        ctrl, state = self._make_controller()
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = None
+        mock_proc.terminate = MagicMock()
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock(side_effect=asyncio.TimeoutError)
+        ctrl._speaking_proc = mock_proc
+
+        _run(ctrl.interrupt())
+
+        mock_proc.terminate.assert_called_once()
+        mock_proc.kill.assert_called_once()
+        assert ctrl._speaking_proc is None
+
     def test_listen_returns_none_when_disabled(self):
         ctrl, state = self._make_controller()
         state.listening_enabled = False
@@ -325,6 +341,17 @@ class TestLiveSessionCommands:
         session.state.speech_muted = True
         _run(session._handle_command("/unmute"))
         assert session.state.speech_muted is False
+
+    def test_voice_test_speaks_diagnostic_when_speech_enabled(self, capsys):
+        session = self._make_session()
+        session.state.speech_enabled = True
+        session.speech = MagicMock()
+        session.speech.speak = AsyncMock()
+
+        assert _run(session._handle_command("/voice-test")) is True
+
+        session.speech.speak.assert_called_once()
+        assert "Voice interruption test started" in capsys.readouterr().out
 
     def test_goal_command_sets_goal(self):
         session = self._make_session()

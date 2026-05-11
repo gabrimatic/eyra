@@ -57,7 +57,7 @@ WEB_UI_ENABLED=true uv run python -m web.server
 ```
 
 Then open `http://127.0.0.1:8765` on the same machine. Set `WEB_UI_HOST=0.0.0.0` only when you intentionally want access from other devices on your network.
-When the Web UI is exposed beyond localhost, Eyra prints a tokenized URL for privileged Realtime tool calls. Keep that URL private.
+When the Web UI is exposed beyond localhost, Eyra requires a token for every non-health endpoint and prints a tokenized URL. Keep that URL private.
 
 ---
 
@@ -72,7 +72,7 @@ When the Web UI is exposed beyond localhost, Eyra prints a tokenized URL for pri
 - Optional OS tools: command execution, URL fetch, process listing, system snapshots, file metadata/search, LaunchAgent status/management, app opening, notifications, and clipboard writes. These stay off until `OS_TOOLS_ENABLED=true` or `NETWORK_TOOLS_ENABLED=true` for URL/network work.
 - Optional MCP tools: list and call stdio MCP servers from `MCP_CONFIG_PATH`.
 - Optional agent delegation: inspect Codex/OpenClaw availability and sessions, read bounded redacted session content, use Codex/OpenClaw-compatible tool names, and hand complex work to terminal agents when `AGENT_TOOLS_ENABLED=true`.
-- Optional Web UI: a compact browser interface for text access, Local Whisper voice turns, and local voice feedback from a phone or another system.
+- Optional Web UI: a compact browser interface for text chat, task status, task cancellation, Local Whisper voice turns, and local voice feedback from a phone or another system.
 - Optional Realtime voice: online browser voice can use OpenAI Realtime when `REALTIME_VOICE_ENABLED=true` and an OpenAI key is configured.
 - Filesystem safety: common folders are available by default, access stays sandboxed, existing files are not overwritten unless `overwrite=true`, binary reads and edits return a clean message, and moves/copies check destination conflicts.
 - Network tools: weather and browser access stay disabled until `NETWORK_TOOLS_ENABLED=true`.
@@ -87,19 +87,20 @@ When the Web UI is exposed beyond localhost, Eyra prints a tokenized URL for pri
 Eyra runs one live session with a typed channel, a voice channel, a coordinator, and a background task manager.
 
 - Voice: [Local Whisper](https://github.com/gabrimatic/local-whisper) handles ASR through Qwen3-ASR and TTS through Kokoro. Eyra records microphone audio with sounddevice, classifies 32ms frames with Silero VAD, and transcribes after a pause.
-- Interruption: Eyra stops speaking when you start talking, then listens again.
+- Interruption: Eyra can stop speech output immediately through the shared interrupt path; run `/voice-test` for the physical microphone interruption check on your Mac.
 - Coordinator: quick local intents such as task status, cancellation, disabled-network refusals, time checks, and common file actions are handled immediately.
 - Background workers: long or tool-heavy requests are accepted as tasks and run through a worker pipeline. Each task keeps metadata: id, title, original request, state, progress, result, error, tool/network/filesystem/vision flags, and cancellation state.
 - Runtime recovery: `/voice on` rechecks Local Whisper and enables whichever side is ready. ASR and TTS are tracked separately, so speech can keep working while input is still loading.
 - Typed input: keyboard input is always available and feeds the same conversation as voice.
 - Tool use: the model can call local function tools for screenshot, time, clipboard, system info, macOS context, PDF extraction, and filesystem work. OS command tools, MCP bridges, agent session inspection, agent delegation, weather, URL fetch, and browser tools are available only after you opt in.
-- Web UI: `eyra-web` serves a small local UI with the same shared tool registry as the terminal session. It is meant for phone and browser access without replacing the terminal loop. Local voice turns transcribe through `wh transcribe` and speak replies through `wh whisper`.
-- Realtime voice: browser Realtime voice is an online option. Eyra mints server-side ephemeral client secrets and never puts the standard OpenAI API key in browser code.
+- Web UI: `eyra-web` serves a small local UI with its own task manager, task APIs, approval APIs, auth gate, and the same local tool registry shape as the terminal. Terminal `eyra` stays the main live loop; if `WEB_UI_ENABLED=true`, terminal status points you to the separate `eyra-web` process.
+- Realtime voice: browser Realtime voice is an online option. Eyra mints server-side ephemeral client secrets and never puts the standard OpenAI API key in browser code. Realtime tools are off by default and use a small allowlist when explicitly enabled.
 - Model routing: complexity routing is experimental and off by default. When enabled, `ComplexityScorer` dispatches requests to Simple, Moderate, or Complex tiers.
 - File actions: common move, copy, create, overwrite, and direct read requests use deterministic sandboxed tool calls before involving the model. Existing files are protected until you explicitly say to overwrite.
 - PDF handling: PDF workers extract text locally first, then summarize the extracted text. If no embedded text is available, Eyra reports that the PDF appears scanned or image-only.
-- Screen handling: screen requests require both local tool support and a vision-capable model. If the configured model lacks either capability, Eyra says so clearly.
-- Tool fallback: if a local model rejects native tool calling, text chat still works. Tool-required tasks report that the selected model cannot use local tools instead of pretending the work was done.
+- Screen handling: screen requests are controller-owned. Eyra captures the screenshot locally, keeps it in memory, then sends it to `VISION_MODEL` (or `MODEL` when `VISION_MODEL` is empty). The vision model does not need native tool calling.
+- Tool fallback: deterministic controller actions such as time checks, task commands, common file moves/copies/creates/reads, PDF extraction, and screen capture can run without native model tool calling. Open-ended model-driven tool loops still require a tool-capable model and fail clearly when the selected model cannot call tools.
+- Approvals: risky OS, LaunchAgent, clipboard, command, and agent-delegation actions use server-side, action-specific approvals. A model-provided `confirmed=true` value is ignored.
 
 ### Preflight
 
@@ -121,6 +122,7 @@ When `USE_MOCK_CLIENT=true`, backend and model checks are skipped on purpose so 
 | Command | What it does |
 |---------|-------------|
 | `/voice on\|off` | Toggle voice input and speech output, with runtime recovery |
+| `/voice-test` | Start the manual voice interruption diagnostic |
 | `/mute` | Mute speech output only |
 | `/unmute` | Unmute speech |
 | `/goal <text>` | Set session context that guides future replies |
@@ -130,6 +132,9 @@ When `USE_MOCK_CLIENT=true`, backend and model checks are skipped on purpose so 
 | `/task <id>` | Show detailed task state, progress, result, and error |
 | `/cancel <id>` | Cancel a queued or running task |
 | `/cancel all` | Cancel all queued or running tasks |
+| `/approvals` | Show pending risky-action approvals |
+| `/approve <id>` | Approve one exact pending action |
+| `/reject <id>` | Reject one pending action |
 | `/clear` | Reset conversation history |
 | `/quit` | Exit |
 
@@ -197,6 +202,8 @@ USE_MOCK_CLIENT=false
 
 # Default model for all requests when complexity routing is off.
 MODEL=gemma3:4b
+# Vision model for screen/image tasks. Empty means use MODEL.
+VISION_MODEL=
 
 # Tier models used only when COMPLEXITY_ROUTING_ENABLED=true.
 SIMPLE_MODEL=qwen3.5:2b
@@ -233,12 +240,17 @@ MCP_CONFIG_PATH=~/.config/eyra/mcp.json
 WEB_UI_ENABLED=false
 WEB_UI_HOST=127.0.0.1
 WEB_UI_PORT=8765
+WEB_UI_TOKEN=
+WEB_UI_REQUIRE_TOKEN=auto
+WEB_UI_MAX_REQUEST_BYTES=1000000
 
 # Optional online Realtime voice.
 REALTIME_VOICE_ENABLED=false
-REALTIME_MODEL=gpt-realtime-2
+REALTIME_MODEL=gpt-realtime
 REALTIME_VOICE=marin
 OPENAI_API_KEY=
+REALTIME_TOOLS_ENABLED=false
+REALTIME_ALLOWED_TOOLS=
 
 # Optional log path. Default: ~/Library/Logs/Eyra/eyra.log on macOS.
 # EYRA_LOG_FILE=~/Library/Logs/Eyra/eyra.log
@@ -253,6 +265,12 @@ FILESYSTEM_DEFAULT_PATH=~/Documents
 ```
 
 `API_BASE_URL` accepts any OpenAI-compatible endpoint: Ollama (default), LM Studio, vLLM, OpenRouter, Groq, or OpenAI itself. Local providers ignore `API_KEY`; cloud providers require it.
+
+`VISION_MODEL` lets you keep a tool-capable text model and a separate vision model. Example: `MODEL=qwen3:4b` for normal local tool work and `VISION_MODEL=gemma3:4b` for screen questions. If `API_BASE_URL` points to a remote provider, screenshots sent to `VISION_MODEL` leave the machine because you configured that provider.
+
+`WEB_UI_REQUIRE_TOKEN=auto` means localhost can run without a token, while `0.0.0.0` or any non-localhost bind requires one. `WEB_UI_TOKEN` can provide your own high-entropy token; if empty, Eyra generates a session token at startup.
+
+`REALTIME_VOICE_ENABLED=true` is an online mode. It requires `OPENAI_API_KEY` and uses server-minted ephemeral client secrets. `REALTIME_TOOLS_ENABLED=false` keeps local tools away from the remote Realtime model by default; if enabled, `REALTIME_ALLOWED_TOOLS` can expose specific low-risk tools by name.
 
 </details>
 
@@ -269,7 +287,7 @@ Default behavior: no telemetry, no analytics, no remote browsing, and no remote 
 | Voice recording | sounddevice (PortAudio), in-process, local |
 | wh transcribe (local-whisper) | Subprocess, local |
 | wh whisper (local-whisper) | Subprocess, local |
-| Screenshots | In-memory; never written to disk |
+| Screenshots | In-memory; never written to disk; sent only to the configured vision model for screen tasks |
 | macOS context | Frontmost app and sandbox-filtered Finder selection, local only |
 | PDF extraction | Local files under the filesystem sandbox; text extraction only, no online OCR |
 | Background task state | In-memory for the current session |
@@ -277,11 +295,11 @@ Default behavior: no telemetry, no analytics, no remote browsing, and no remote 
 | MCP stdio tools | Disabled by default; local server processes from `MCP_CONFIG_PATH` |
 | Agent session tools | Disabled by default; read bounded, redacted local Codex/OpenClaw session files when enabled |
 | Agent delegation | Disabled by default; local terminal agent commands when enabled |
-| Realtime voice | Disabled by default; contacts OpenAI only when enabled and used |
-| Web UI | Disabled by default; local HTTP server when enabled |
+| Realtime voice | Disabled by default; contacts OpenAI only when enabled and used; standard API key stays server-side |
+| Web UI | Disabled by default; localhost-only by default; token required for non-localhost binds |
 | Weather/browser tools | Disabled by default; contact remote sites only when `NETWORK_TOOLS_ENABLED=true` and a tool is used. Weather requires an explicit location and does not use remote IP geolocation. |
 
-Data leaves your machine only when you choose a remote AI provider, enable Realtime voice, or turn on network tools. A remote `API_BASE_URL` receives prompts, tool results, and images that are sent to the model because that provider was explicitly configured. Realtime voice sends browser audio/text to OpenAI only when explicitly enabled and used. Network tools send the requested URL, search query, or weather location to the relevant remote service.
+Data leaves your machine only when you choose a remote AI provider, enable Realtime voice, or turn on network tools. A remote `API_BASE_URL` receives prompts, tool results, PDF text summaries, and screenshots that are sent to the configured model because that provider was explicitly configured. Realtime voice sends browser audio/text to OpenAI only when explicitly enabled and used. Network tools send the requested URL, search query, or weather location to the relevant remote service.
 
 ---
 
@@ -296,6 +314,7 @@ eyra/
 │   ├── runtime/
 │   │   ├── live_session.py         # Unified orchestrator
 │   │   ├── tasks.py                # Background task lifecycle manager
+│   │   ├── vision.py               # Controller-owned screenshot + vision model flow
 │   │   ├── tooling.py              # Shared tool registry builder
 │   │   ├── models.py              # Runtime state and event dataclasses
 │   │   ├── preflight.py           # Backend, model, and capability validation
@@ -304,6 +323,7 @@ eyra/
 │   │   ├── status_presenter.py    # Terminal status header and updates
 │   │   └── startup.py             # First-run setup and .env management
 │   ├── tools/
+│   │   ├── approval.py             # Server-side approvals for risky local actions
 │   │   ├── base.py                # BaseTool abstract + ToolResult
 │   │   ├── registry.py            # Tool registry and dispatch
 │   │   ├── screenshot.py          # In-memory screenshot via mss
@@ -374,7 +394,16 @@ If the model does not list tools, text chat will still work. Tool-required tasks
 
 <details><summary><strong>Screen analysis says a model capability is missing</strong></summary>
 
-Screen analysis needs two capabilities: native tool calling to capture the screenshot, and vision support to read it. Some local models have only one side. `gemma3:4b` can be vision-capable without native tools; `qwen3:4b` can be tool-capable without vision. Use a configured model that supports both for screen understanding and translation.
+Screen analysis needs macOS screenshot permission and a vision-capable model. Native model tool calling is not required for screenshot capture.
+
+Use `VISION_MODEL` when your normal model is not vision-capable:
+
+```env
+MODEL=qwen3:4b
+VISION_MODEL=gemma3:4b
+```
+
+If no configured model can process images, Eyra says so clearly and does not pretend to inspect the screen.
 
 </details>
 
@@ -404,7 +433,21 @@ The Web UI binds to `127.0.0.1` by default. That is safest, but only the same ma
 WEB_UI_ENABLED=true WEB_UI_HOST=0.0.0.0 uv run python -m web.server
 ```
 
-Use a trusted network. Realtime voice also requires browser microphone support and an explicit `OPENAI_API_KEY` when `REALTIME_VOICE_ENABLED=true`. Eyra does not reuse `API_KEY` for Realtime because that may belong to another provider.
+Use a trusted network and open the tokenized URL printed by Eyra. All non-health API calls require the token when the server is not bound to localhost.
+
+Realtime voice also requires browser microphone support and an explicit `OPENAI_API_KEY` when `REALTIME_VOICE_ENABLED=true`. Eyra does not reuse `API_KEY` for Realtime because that may belong to another provider.
+
+</details>
+
+<details><summary><strong>Manual voice interruption test</strong></summary>
+
+Run:
+
+```text
+/voice-test
+```
+
+Eyra speaks a long diagnostic sentence. Start talking into the microphone while it is speaking. Passing behavior: TTS stops, your new input is processed, the session stays alive, and background tasks keep their state unless you cancel them.
 
 </details>
 
@@ -436,6 +479,7 @@ uv lock --check
 bash -n setup.sh
 uv build --wheel
 USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv run python src/main.py
+WEB_UI_ENABLED=true USE_MOCK_CLIENT=true uv run python -m web.server
 ```
 
 ---

@@ -8,6 +8,13 @@ from typing import Any
 from tools.base import BaseTool, ToolResult
 
 _DEFAULT_TIMEOUT = 20
+_OUTPUT_LIMIT = 4000
+
+
+def _clip(text: str, limit: int = _OUTPUT_LIMIT) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n...[truncated to {limit} chars]"
 
 
 def _load_config(path: Path) -> dict[str, Any]:
@@ -119,23 +126,26 @@ class ListMcpTools(BaseTool):
     }
     costly = True
 
-    def __init__(self, config_path: str | Path):
+    def __init__(self, config_path: str | Path, timeout: int | float = _DEFAULT_TIMEOUT):
         self.config_path = Path(config_path).expanduser()
+        self.timeout = timeout
 
     async def execute(self, server: str = "", **_) -> ToolResult:
         try:
             server_config = self._server_config(server)
-            async with _McpSession(server_config) as session:
+            async with _McpSession(server_config, timeout=self.timeout) as session:
                 result = await session.request("tools/list")
+        except asyncio.TimeoutError:
+            return ToolResult(content="MCP error: server timed out.")
         except Exception as e:
             return ToolResult(content=f"MCP error: {e}")
-        return ToolResult(content=json.dumps({"server": server, "tools": result.get("tools", [])}, indent=2, sort_keys=True))
+        return ToolResult(content=_clip(json.dumps({"server": server, "tools": result.get("tools", [])}, indent=2, sort_keys=True)))
 
     def _server_config(self, server: str) -> dict[str, Any]:
         config = _load_config(self.config_path)
         servers = config.get("servers", {})
         if server not in servers:
-            raise ValueError(f"MCP server not configured: {server}")
+            raise ValueError(f"MCP server is not configured: {server}")
         return servers[server]
 
 
@@ -156,12 +166,15 @@ class CallMcpTool(ListMcpTools):
     async def execute(self, server: str = "", tool: str = "", arguments: dict[str, Any] | None = None, **_) -> ToolResult:
         try:
             server_config = self._server_config(server)
-            async with _McpSession(server_config) as session:
+            async with _McpSession(server_config, timeout=self.timeout) as session:
                 result = await session.request("tools/call", {"name": tool, "arguments": arguments or {}})
+        except asyncio.TimeoutError:
+            return ToolResult(content="MCP error: server timed out.")
         except Exception as e:
             return ToolResult(content=f"MCP error: {e}")
         text_parts = []
         for item in result.get("content", []):
             if item.get("type") == "text":
                 text_parts.append(item.get("text", ""))
-        return ToolResult(content="\n".join(text_parts) if text_parts else json.dumps(result, indent=2, sort_keys=True))
+        content = "\n".join(text_parts) if text_parts else json.dumps(result, indent=2, sort_keys=True)
+        return ToolResult(content=_clip(content))

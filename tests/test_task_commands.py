@@ -32,7 +32,7 @@ def _session() -> LiveSession:
     return session
 
 
-def _session_with_fs(tmp_path: Path) -> LiveSession:
+def _session_with_fs(tmp_path: Path, *, model_tools: bool = True) -> LiveSession:
     desktop = tmp_path / "Desktop"
     downloads = tmp_path / "Downloads"
     documents = tmp_path / "Documents"
@@ -45,7 +45,12 @@ def _session_with_fs(tmp_path: Path) -> LiveSession:
         FILESYSTEM_ALLOWED_PATHS=",".join(str(p) for p in (desktop, downloads, documents, tmp_path)),
         FILESYSTEM_DEFAULT_PATH=str(documents),
     )
-    preflight = PreflightResult(backend_reachable=True, models_ready=[settings.MODEL])
+    preflight = PreflightResult(
+        backend_reachable=True,
+        models_ready=[settings.MODEL],
+        tool_capable_models=[settings.MODEL] if model_tools else [],
+        tool_capability_checked_models=[settings.MODEL],
+    )
     state = LiveRuntimeState.from_preflight(preflight, settings=settings)
     session = LiveSession(settings, preflight, state, ComplexityScorer())
     session.speech = MagicMock()
@@ -171,6 +176,30 @@ class TestTaskCommands:
         assert not source.exists()
         assert destination.read_text() == "move me"
         assert "Moved:" in capsys.readouterr().out
+
+    def test_direct_move_file_does_not_require_model_native_tools(self, tmp_path, capsys):
+        session = _session_with_fs(tmp_path, model_tools=False)
+        source = tmp_path / "Desktop" / "eyra-test-move.txt"
+        destination = tmp_path / "Downloads" / "eyra-test-move.txt"
+        source.write_text("move me")
+
+        _run(session._handle_user_input("Move eyra-test-move.txt from my Desktop to Downloads."))
+
+        assert not source.exists()
+        assert destination.read_text() == "move me"
+        assert "Moved:" in capsys.readouterr().out
+
+    def test_open_ended_tool_task_without_native_tools_fails_clearly(self, tmp_path, capsys):
+        async def run():
+            session = _session_with_fs(tmp_path, model_tools=False)
+            await session._handle_user_input("Organize my Downloads folder.")
+            await asyncio.sleep(0)
+            return session.task_manager.list_tasks(include_recent=True)
+
+        tasks = _run(run())
+        assert tasks == []
+        out = capsys.readouterr().out
+        assert "requires a model with native tool calling" in out
 
     def test_direct_create_file_protects_overwrite_then_allows_explicit_followup(self, tmp_path, capsys):
         session = _session_with_fs(tmp_path)
