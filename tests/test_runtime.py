@@ -471,7 +471,7 @@ class TestScreenContextDetection:
         assert session._needs_screen_context("what is this error on screen?") is True
         assert session._needs_screen_context("look at this") is True
         assert session._needs_screen_context("what is that button?") is True
-        assert session._needs_screen_context("read the text on the page") is True
+        assert session._needs_screen_context("read the text on the screen") is True
         assert session._needs_screen_context("what's on the screen?") is True
         assert session._needs_screen_context("show me the dialog") is True
 
@@ -515,6 +515,7 @@ class TestScreenContextDetection:
         assert session._needs_screen_context("look at how this algorithm behaves") is False
         assert session._needs_screen_context("read the article to me") is False
         assert session._needs_screen_context("show me an example of recursion") is False
+        assert session._needs_screen_context("produce a detailed page-by-page PDF summary") is False
 
     def test_action_verbs_with_visual_object_need_screen(self):
         """Phrases like 'show me the dialog' should trigger screen capture."""

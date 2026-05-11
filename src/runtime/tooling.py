@@ -5,13 +5,18 @@ from pathlib import Path
 from tools.browser import BrowserSession, ClickElementTool, OpenUrlTool, PageScreenshotTool, WebSearchTool
 from tools.clipboard import ClipboardTool
 from tools.filesystem import (
+    CopyPathTool,
     CreateDirectoryTool,
     EditFileTool,
     ListDirectoryTool,
+    MovePathTool,
+    OpenPathTool,
     ReadFileTool,
+    RevealPathTool,
     WriteFileTool,
     parse_allowed_roots,
 )
+from tools.macos_context import FinderSelectionTool, FrontmostAppTool
 from tools.mcp_stdio import CallMcpTool, ListMcpTools
 from tools.operator import (
     DiscoverCapabilitiesTool,
@@ -38,6 +43,7 @@ from tools.operator import (
     SetClipboardTool,
     ShowNotificationTool,
 )
+from tools.pdf import ReadPdfTool
 from tools.registry import ToolRegistry
 from tools.screenshot import ScreenshotTool
 from tools.system_info import SystemInfoTool
@@ -55,14 +61,21 @@ def build_tool_registry(settings: Settings, browser_session: BrowserSession | No
     registry.register(ClipboardTool())
     registry.register(SystemInfoTool())
     registry.register(ScreenshotTool())
+    registry.register(FrontmostAppTool())
 
     fs_roots = parse_allowed_roots(settings.FILESYSTEM_ALLOWED_PATHS)
     fs_default = Path(settings.FILESYSTEM_DEFAULT_PATH)
+    registry.register(FinderSelectionTool(allowed_roots=fs_roots, default_path=fs_default))
     registry.register(ReadFileTool(allowed_roots=fs_roots, default_path=fs_default))
     registry.register(WriteFileTool(allowed_roots=fs_roots, default_path=fs_default))
     registry.register(EditFileTool(allowed_roots=fs_roots, default_path=fs_default))
     registry.register(ListDirectoryTool(allowed_roots=fs_roots, default_path=fs_default))
     registry.register(CreateDirectoryTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(MovePathTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(CopyPathTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(OpenPathTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(RevealPathTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(ReadPdfTool(allowed_roots=fs_roots, default_path=fs_default))
 
     if settings.NETWORK_TOOLS_ENABLED:
         session = browser_session or BrowserSession()

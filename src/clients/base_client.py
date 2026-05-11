@@ -100,6 +100,9 @@ class BaseAIClient(ABC):
         tools: ToolRegistry | None = None,
         include_costly: bool = True,
         history: list[dict] | None = None,
+        tool_timeout_seconds: int = 30,
+        max_tool_rounds: int = 5,
+        require_tools: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Stream a completion with optional tool-calling support.

@@ -24,11 +24,20 @@ class Settings:
     # Voice input: Silero VAD threshold (0.0-1.0). Higher = stricter.
     VOICE_VAD_THRESHOLD: float = 0.6
     # Filesystem tool: comma-separated list of allowed root paths (~ expanded)
-    FILESYSTEM_ALLOWED_PATHS: str = "~/Documents,/tmp"
+    FILESYSTEM_ALLOWED_PATHS: str = "~/Documents,~/Desktop,~/Downloads,/tmp"
     # Filesystem tool: default working directory for the model (~ expanded)
     FILESYSTEM_DEFAULT_PATH: str = "~/Documents"
     # Network-backed tools (weather and browser) are opt-in so the default runtime stays local.
     NETWORK_TOOLS_ENABLED: bool = False
+    # Background task coordinator.
+    BACKGROUND_TASKS_ENABLED: bool = True
+    MAX_BACKGROUND_TASKS: int = 2
+    WORKER_MODEL: str = ""
+    TASK_TIMEOUT_SECONDS: int = 300
+    MAX_WORKER_TOOL_STEPS: int = 8
+    TOOL_TIMEOUT_SECONDS: int = 30
+    MODEL_CONCURRENCY: int = 1
+    TASK_STATUS_UPDATES: bool = True
     # OS/operator tools are powerful and therefore opt-in. They stay local.
     OS_TOOLS_ENABLED: bool = False
     # External agent bridges are opt-in and disabled by default.
@@ -90,9 +99,17 @@ class Settings:
             SPEECH_COOLDOWN_MS=_int("SPEECH_COOLDOWN_MS", "3000"),
             VOICE_SILENCE_MS=_int("VOICE_SILENCE_MS", "1500"),
             VOICE_VAD_THRESHOLD=_float_range("VOICE_VAD_THRESHOLD", "0.6", 0.0, 1.0),
-            FILESYSTEM_ALLOWED_PATHS=os.getenv("FILESYSTEM_ALLOWED_PATHS", "~/Documents,/tmp"),
+            FILESYSTEM_ALLOWED_PATHS=os.getenv("FILESYSTEM_ALLOWED_PATHS", "~/Documents,~/Desktop,~/Downloads,/tmp"),
             FILESYSTEM_DEFAULT_PATH=os.getenv("FILESYSTEM_DEFAULT_PATH", "~/Documents"),
             NETWORK_TOOLS_ENABLED=_bool("NETWORK_TOOLS_ENABLED", "false"),
+            BACKGROUND_TASKS_ENABLED=_bool("BACKGROUND_TASKS_ENABLED", "true"),
+            MAX_BACKGROUND_TASKS=_int("MAX_BACKGROUND_TASKS", "2"),
+            WORKER_MODEL=os.getenv("WORKER_MODEL", ""),
+            TASK_TIMEOUT_SECONDS=_int("TASK_TIMEOUT_SECONDS", "300"),
+            MAX_WORKER_TOOL_STEPS=_int("MAX_WORKER_TOOL_STEPS", "8"),
+            TOOL_TIMEOUT_SECONDS=_int("TOOL_TIMEOUT_SECONDS", "30"),
+            MODEL_CONCURRENCY=_int("MODEL_CONCURRENCY", "1"),
+            TASK_STATUS_UPDATES=_bool("TASK_STATUS_UPDATES", "true"),
             OS_TOOLS_ENABLED=_bool("OS_TOOLS_ENABLED", "false"),
             AGENT_TOOLS_ENABLED=_bool("AGENT_TOOLS_ENABLED", "false"),
             MCP_TOOLS_ENABLED=_bool("MCP_TOOLS_ENABLED", "false"),
@@ -111,9 +128,12 @@ class Settings:
     def all_model_names(self) -> list[str]:
         """Models that need to be available. Depends on whether routing is enabled."""
         if not self.COMPLEXITY_ROUTING_ENABLED:
-            return [self.MODEL]
+            names = [self.MODEL]
+            if self.WORKER_MODEL and self.WORKER_MODEL not in names:
+                names.append(self.WORKER_MODEL)
+            return names
         seen = []
-        for name in [self.SIMPLE_MODEL, self.MODERATE_MODEL, self.MODEL]:
-            if name not in seen:
+        for name in [self.SIMPLE_MODEL, self.MODERATE_MODEL, self.MODEL, self.WORKER_MODEL]:
+            if name and name not in seen:
                 seen.append(name)
         return seen

@@ -123,6 +123,7 @@ def render_status_card(
     tool_count: int,
     msg_count: int,
     model_name: str = "",
+    task_summary: str = "",
 ):
     """Print a full status card."""
     voice = voice_status_label(state)
@@ -136,6 +137,8 @@ def render_status_card(
     print(_box_row_padded("Quality", quality_mode_value))
     print(_box_row_padded("Goal", goal))
     print(_box_row_padded("History", f"{msg_count} messages"))
+    if task_summary:
+        print(_box_row_padded("Tasks", task_summary))
     print(_box_row_padded("Tools", f"{tool_count} available"))
     print(f"╰{'─' * _BOX_WIDTH}╯")
     print()
@@ -150,6 +153,9 @@ def render_help_card():
         ("/goal TEXT ", "Set a goal"),
         ("/mode MODE ", "fast|balanced|best"),
         ("/status    ", "Show session info"),
+        ("/tasks     ", "Show active and recent tasks"),
+        ("/task ID   ", "Show task details"),
+        ("/cancel ID ", "Cancel a task or all"),
         ("/clear     ", "Reset conversation"),
         ("/help      ", "Show this help"),
         ("/quit      ", "Exit Eyra"),
