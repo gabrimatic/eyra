@@ -1,5 +1,5 @@
-name: Feature Request
-description: Suggest a new feature or improvement
+name: Feature request
+description: Suggest a feature or improvement
 labels: ["enhancement"]
 body:
   - type: textarea
@@ -15,7 +15,7 @@ body:
     id: problem
     attributes:
       label: Problem to solve
-      description: What pain point or limitation does this address?
+      description: What limitation does this address?
     validations:
       required: true
 
@@ -23,7 +23,7 @@ body:
     id: solution
     attributes:
       label: Proposed solution
-      description: How would you like it to work? Be specific about behavior or API.
+      description: How should it work? Be specific about behavior or API.
     validations:
       required: true
 
@@ -39,6 +39,6 @@ body:
     id: additional
     attributes:
       label: Additional context
-      description: Screenshots, examples, prior art, or anything else relevant.
+      description: Screenshots, examples, prior art, or other useful context.
     validations:
       required: false

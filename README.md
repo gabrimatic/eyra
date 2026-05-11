@@ -4,17 +4,19 @@
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)]()
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)]()
 
-An on-device agent for the terminal.
+Eyra is a local-first voice agent for the macOS terminal.
 
-Eyra accepts voice or typed input, routes the request to the right model, and calls tools when needed. By default everything runs on your machine. No telemetry. Works with any OpenAI-compatible provider, local or remote.
+Speak or type. Eyra routes the request to an OpenAI-compatible model, calls local tools when needed, and speaks back through Local Whisper. The default path stays on your machine: Ollama at localhost, Silero VAD in process, screenshots in memory, no telemetry.
+
+Cloud providers and network-backed tools are opt-in.
 
 <p align="center"><img src="screenshot.png" width="800" alt="Eyra terminal screenshot"></p>
 
 ---
 
-## Quick Start
+## Quick start
 
-Requires an AI provider with an OpenAI-compatible API. Defaults to [Ollama](https://ollama.com) at `localhost:11434`. Point `API_BASE_URL` in `.env` at any other provider.
+Runtime: macOS on Apple Silicon, Python 3.11+, Homebrew, and an OpenAI-compatible AI provider. Default provider: [Ollama](https://ollama.com) at `localhost:11434`.
 
 ```bash
 git clone https://github.com/gabrimatic/eyra.git
@@ -22,10 +24,18 @@ cd eyra
 chmod +x setup.sh && ./setup.sh
 ```
 
-Setup creates `.env`, installs dependencies, verifies your backend and models, and registers the `eyra` command. Then run:
+Setup creates `.env`, installs dependencies, checks your backend and models, checks Local Whisper for voice, and registers the `eyra` command.
+
+Run from the repo:
 
 ```bash
 uv run python src/main.py
+```
+
+After your shell reloads `~/.local/bin`, the short command works too:
+
+```bash
+eyra
 ```
 
 Eyra runs preflight checks, then enters a live session:
@@ -38,47 +48,48 @@ Eyra
   Type anything or speak. /help for commands.
 ```
 
-Eyra is now listening. Type or speak at any time.
+Eyra is now listening. Type or speak without leaving the session.
 
 ---
 
 ## What it does
 
-- Launches into an always-on agent session.
-- Accepts typed or spoken input without leaving the session.
-- Routes requests to the appropriate model. Complexity routing is available as an experimental option.
-- Uses local tools on demand via function calling: screenshot, time, clipboard, system info, and sandboxed filesystem access.
-- Protects existing files from accidental tool overwrites unless replacement is explicit, and refuses binary file reads/edits with a clean message.
-- Offers optional network tools for weather and web browsing when `NETWORK_TOOLS_ENABLED=true`.
-- Speaks responses via local-whisper when available.
-- Works with any OpenAI-compatible provider (Ollama, LM Studio, vLLM, OpenRouter, etc.).
-- Image data is kept in memory; no disk I/O.
-- Mock mode (`USE_MOCK_CLIENT=true`) starts without a backend for development and smoke tests.
+- Live session: one terminal process stays open for typed and spoken input.
+- Voice: Local Whisper handles transcription and speech; Silero VAD decides when you finished speaking.
+- Model routing: one configured model by default, with experimental complexity routing when you turn it on.
+- Local tools: screenshot, time, clipboard, system info, and sandboxed filesystem access through function calling.
+- Filesystem safety: existing files are not overwritten unless `overwrite=true`; binary reads and edits return a clean message.
+- Network tools: weather and browser access stay disabled until `NETWORK_TOOLS_ENABLED=true`.
+- Provider support: Ollama, LM Studio, vLLM, OpenRouter, Groq, OpenAI, or any compatible `/v1/chat/completions` endpoint.
+- Image handling: screenshots stay in memory and are never written to disk.
+- Mock mode: `USE_MOCK_CLIENT=true` starts Eyra without a backend for development and smoke tests.
 
 ---
 
 ## How it works
 
-Eyra runs as one live session with several concurrent subsystems:
+Eyra runs one live session with a typed channel, a voice channel, and one streaming response path.
 
-- **Voice** is handled by [Local Whisper](https://github.com/gabrimatic/local-whisper) for both directions: input (ASR via Qwen3-ASR) and output (TTS via Kokoro). Eyra records the microphone via sounddevice and classifies each 32ms frame with Silero VAD. When the speaker pauses, the audio is transcribed through Local Whisper. Eyra will interrupt its own speech to hear you. Toggle with `/voice on|off`; if voice was disabled or unavailable at startup, `/voice on` rechecks Local Whisper and enables whatever is ready without restarting the session. If ASR is still loading but TTS is available, Eyra keeps speech on instead of disabling voice entirely.
-- **Typed input** is always available inline. Both channels feed the same conversation.
-- **Complexity routing** is experimental and off by default. When enabled, requests are scored deterministically and dispatched to a Simple, Moderate, or Complex tier. When disabled, all requests use a single configured model.
-- **Tool use** gives the model access to screenshot, time, clipboard, system info, and sandboxed filesystem actions. Weather and browser tools are opt-in because they contact remote sites. Tools are defined as OpenAI function-calling schemas and executed locally unless a network tool is explicitly enabled. With complexity routing enabled, Simple/Moderate tiers receive lightweight tools and Complex receives all tools including screenshot.
-- Some local models do not support native tool calling. Eyra detects that backend error and falls back to plain streaming so the session keeps working; choose a tool-capable model if you need local tools.
+- Voice: [Local Whisper](https://github.com/gabrimatic/local-whisper) handles ASR through Qwen3-ASR and TTS through Kokoro. Eyra records microphone audio with sounddevice, classifies 32ms frames with Silero VAD, and transcribes after a pause.
+- Interruption: Eyra stops speaking when you start talking, then listens again.
+- Runtime recovery: `/voice on` rechecks Local Whisper and enables whichever side is ready. ASR and TTS are tracked separately, so speech can keep working while input is still loading.
+- Typed input: keyboard input is always available and feeds the same conversation as voice.
+- Tool use: the model can call local function tools for screenshot, time, clipboard, system info, and filesystem work. Weather and browser tools are available only after you opt in.
+- Model routing: complexity routing is experimental and off by default. When enabled, `ComplexityScorer` dispatches requests to Simple, Moderate, or Complex tiers.
+- Tool fallback: if a local model rejects native tool calling, Eyra falls back to plain streaming so text chat keeps working. Choose a tool-capable model when you need local tools.
 
 ### Preflight
 
-On startup, Eyra validates:
+Startup checks:
 
 - Backend reachability (tries `/v1/models`, falls back to Ollama `/api/tags`)
 - Every configured model exists (auto-pulls via Ollama if needed)
 - Ollama model capabilities, with a warning when the selected model does not advertise native tool calling
-- [Local Whisper](https://github.com/gabrimatic/local-whisper) for voice input and speech output (`brew tap gabrimatic/local-whisper && brew install local-whisper`). Input and speech are tracked separately so one can keep working if the other is unavailable.
+- [Local Whisper](https://github.com/gabrimatic/local-whisper) for voice input and speech output (`brew tap gabrimatic/local-whisper && brew install local-whisper`). Input and speech are tracked separately so one side can keep working if the other is unavailable.
 - Screen capture (macOS built-in)
 
 The session does not start until the backend and models are confirmed ready.
-When `USE_MOCK_CLIENT=true`, backend and model checks are bypassed intentionally so the local session can be smoke-tested without a running provider.
+When `USE_MOCK_CLIENT=true`, backend and model checks are skipped on purpose so you can smoke-test the session without a running provider.
 
 ---
 
@@ -99,19 +110,19 @@ Unknown commands are caught locally and never sent to the model.
 
 ---
 
-## Quality Modes
+## Quality modes
 
-Control the speed/quality trade-off with `/mode`:
+Set the speed and quality trade-off with `/mode`:
 
 | Mode | Behavior |
 |------|----------|
-| `fast` | Uses the smallest model when complexity routing is enabled. If routing is off, Eyra explains that fast mode is unavailable instead of silently pretending to switch. |
-| `balanced` | Let the router decide (default) |
-| `best` | Always use the strongest model |
+| `fast` | Uses the smallest model when complexity routing is enabled. If routing is off, Eyra says fast mode is unavailable instead of pretending to switch. |
+| `balanced` | Lets the router decide (default) |
+| `best` | Uses the strongest model |
 
 ---
 
-## Complexity Routing
+## Complexity routing
 
 Complexity routing is **experimental and off by default**. When disabled (`COMPLEXITY_ROUTING_ENABLED=false`), all requests use the single `MODEL` setting with all tools available. `/mode fast` is available only when routing is enabled because the simple-tier model is validated only in routing mode.
 
@@ -130,7 +141,7 @@ Scoring factors:
 | Moderate | `MODERATE_MODEL` |
 | Complex | `MODEL` |
 
-All model names are set in `.env`. Any model supported by your provider works.
+Set model names in `.env`. Any model supported by your provider works.
 
 ---
 
@@ -139,49 +150,51 @@ All model names are set in `.env`. Any model supported by your provider works.
 <details><summary><strong>.env reference</strong></summary>
 
 ```env
-# Provider: any OpenAI-compatible endpoint
+# Provider: any OpenAI-compatible endpoint.
 API_BASE_URL=http://localhost:11434/v1
-API_KEY=ollama        # leave as-is for local; set your key for cloud providers
+API_KEY=ollama        # Keep this for local providers; set a real key for cloud providers.
 
 USE_MOCK_CLIENT=false
 
-# Default model for all requests (used when complexity routing is off)
+# Default model for all requests when complexity routing is off.
 MODEL=gemma3:4b
 
-# Tier models: only used when COMPLEXITY_ROUTING_ENABLED=true
+# Tier models used only when COMPLEXITY_ROUTING_ENABLED=true.
 SIMPLE_MODEL=qwen3.5:2b
 MODERATE_MODEL=gemma3:4b
 
-# Live runtime settings
+# Live runtime settings.
 AUTO_PULL_MODELS=true
 LIVE_LISTENING_ENABLED=true
 LIVE_SPEECH_ENABLED=true
 SPEECH_COOLDOWN_MS=3000
-VOICE_SILENCE_MS=1500          # silence after speech before processing (ms)
+VOICE_SILENCE_MS=1500          # Silence after speech before processing (ms).
 VOICE_VAD_THRESHOLD=0.6        # Silero VAD sensitivity (0.0-1.0, higher = stricter)
 
-# Optional network tools. Keep false for fully local default behavior.
+# Optional network tools. Keep false for the local-first default.
 NETWORK_TOOLS_ENABLED=false
 
-# Optional log location override. Defaults to ~/Library/Logs/Eyra/eyra.log on macOS.
+# Optional log path. Default: ~/Library/Logs/Eyra/eyra.log on macOS.
 # EYRA_LOG_FILE=~/Library/Logs/Eyra/eyra.log
 
-# Experimental: complexity-based routing. When disabled, all requests use MODEL.
+# Experimental model routing. When disabled, all requests use MODEL.
 COMPLEXITY_ROUTING_ENABLED=false
 
-# Filesystem sandbox: comma-separated list of allowed root paths
+# Filesystem sandbox: comma-separated allowed root paths.
 FILESYSTEM_ALLOWED_PATHS=~/Documents,/tmp
 # Relative file paths are resolved under this directory, then checked against the sandbox.
 FILESYSTEM_DEFAULT_PATH=~/Documents
 ```
 
-`API_BASE_URL` accepts any OpenAI-compatible endpoint. Point it at Ollama (default), LM Studio, vLLM, OpenRouter, Groq, or OpenAI itself. `API_KEY` is ignored by local providers but required for cloud ones.
+`API_BASE_URL` accepts any OpenAI-compatible endpoint: Ollama (default), LM Studio, vLLM, OpenRouter, Groq, or OpenAI itself. Local providers ignore `API_KEY`; cloud providers require it.
 
 </details>
 
 ---
 
 ## Privacy
+
+Default behavior: no telemetry, no analytics, no remote browsing, and no remote weather calls.
 
 | Component | Where it runs |
 |-----------|--------------|
@@ -193,7 +206,7 @@ FILESYSTEM_DEFAULT_PATH=~/Documents
 | Screenshots | In-memory; never written to disk |
 | Weather/browser tools | Disabled by default; contact remote sites only when `NETWORK_TOOLS_ENABLED=true` and a tool is used. Weather requires an explicit location and does not use remote IP geolocation. |
 
-No telemetry. By default everything runs on your machine. If `API_BASE_URL` points at a remote provider, prompts and images will leave your machine to that provider. If optional network tools are enabled, those tools send the requested URL, search query, or weather location to the relevant remote service.
+Data leaves your machine only when you choose a remote AI provider or turn on network tools. A remote `API_BASE_URL` receives prompts and images. Network tools send the requested URL, search query, or weather location to the relevant remote service.
 
 ---
 
@@ -211,7 +224,7 @@ eyra/
 │   │   ├── preflight.py           # Backend, model, and capability validation
 │   │   ├── speech_controller.py   # TTS output and STT input coordination
 │   │   ├── voice_input.py         # Silero VAD recording + local-whisper transcription
-│   │   ├── status_presenter.py    # User-facing status header and updates
+│   │   ├── status_presenter.py    # Terminal status header and updates
 │   │   └── startup.py             # First-run setup and .env management
 │   ├── tools/
 │   │   ├── base.py                # BaseTool abstract + ToolResult
@@ -319,7 +332,7 @@ USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv r
 
 "Ollama" is a trademark of its respective owner. All trademark names are used solely to describe compatibility with their respective technologies. This project is not affiliated with, endorsed by, or sponsored by any trademark holder.
 
-### Third-Party Licenses
+### Third-party licenses
 
 All dependencies use MIT, BSD, or Apache 2.0 licenses. See each package for details.
 

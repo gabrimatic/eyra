@@ -1,4 +1,4 @@
-name: Bug Report
+name: Bug report
 description: Report a bug or unexpected behavior
 labels: ["bug"]
 body:
@@ -6,7 +6,7 @@ body:
     id: summary
     attributes:
       label: Summary
-      description: A single sentence describing what's broken.
+      description: One sentence describing what broke.
       placeholder: "Voice input does not produce a spoken response after transcription."
     validations:
       required: true
@@ -36,7 +36,7 @@ body:
     id: actual
     attributes:
       label: Actual behavior
-      description: What actually happened, including any error messages or tracebacks.
+      description: What happened, including any error text.
     validations:
       required: true
 
@@ -86,7 +86,7 @@ body:
     id: logs
     attributes:
       label: Terminal output
-      description: Paste relevant terminal output or traceback. Redact any personal content.
+      description: Paste relevant terminal output. Redact personal content.
       render: shell
     validations:
       required: false
@@ -95,6 +95,6 @@ body:
     id: additional
     attributes:
       label: Additional context
-      description: Anything else that might help with triage.
+      description: Any detail that would help reproduce or narrow the issue.
     validations:
       required: false

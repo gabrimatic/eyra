@@ -3,7 +3,7 @@
 - **What changed:**
 - **Why:**
 
-## Change Type
+## Change type
 
 - [ ] Bug fix
 - [ ] New feature
@@ -11,13 +11,13 @@
 - [ ] Documentation
 - [ ] New backend or tool
 
-## Test Plan
+## Test plan
 
 1.
 2.
 3.
 
-## User Visible Changes
+## Visible changes
 
 _List any changes to behavior, config, or CLI. Write `None` if internal only._
 
@@ -28,6 +28,6 @@ _List any changes to behavior, config, or CLI. Write `None` if internal only._
 - [ ] No breaking `.env` changes (or migration notes below)
 - [ ] New backend follows `BaseAIClient` contract
 
-## Migration Notes
+## Migration notes
 
 _If this PR changes config format, CLI behavior, or default models, describe the upgrade path. Otherwise delete this section._

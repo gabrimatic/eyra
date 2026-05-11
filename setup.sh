@@ -27,7 +27,7 @@ command -v realpath &>/dev/null && EYRA_DIR="$(realpath "$EYRA_DIR")"
 echo ""
 echo -e "${BOLD}╭────────────────────────────────────────╮${NC}"
 echo -e "${BOLD}│${NC}  ${CYAN}Eyra${NC} · Setup                         ${BOLD}│${NC}"
-echo -e "${BOLD}│${NC}  ${DIM}Voice-first local agent${NC}                 ${BOLD}│${NC}"
+echo -e "${BOLD}│${NC}  ${DIM}Local-first voice agent${NC}                 ${BOLD}│${NC}"
 echo -e "${BOLD}╰────────────────────────────────────────╯${NC}"
 
 # ── System requirements ───────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ if command -v wh &>/dev/null; then
         fi
     fi
 else
-    log_warn "Local Whisper: not installed (voice features disabled)"
+    log_warn "Local Whisper: not installed (voice stays off)"
     log_info "Install: brew tap gabrimatic/local-whisper && brew install local-whisper"
 fi
 
@@ -165,8 +165,8 @@ log_ok "eyra command registered"
 # ── Done ──────────────────────────────────────────────────────────────────────
 
 echo ""
-echo -e "${GREEN}${BOLD}  Setup complete!${NC}"
+echo -e "${GREEN}${BOLD}  Setup complete${NC}"
 echo ""
-echo -e "  ${BOLD}Run:${NC} eyra"
-echo -e "  ${DIM}Provider, models, and command registration are ready.${NC}"
+echo -e "  ${BOLD}Run now:${NC} uv run python src/main.py"
+echo -e "  ${DIM}After opening a new terminal, run: eyra${NC}"
 echo ""
