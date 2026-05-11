@@ -15,6 +15,7 @@ from tools.filesystem import (
     ReadFileTool,
     WriteFileTool,
 )
+from utils.settings import Settings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -77,18 +78,34 @@ class TestSecurity:
             assert "Access denied" in r.content
         _run(run())
 
+    def test_settings_default_sandbox_is_documents_and_tmp(self):
+        assert Settings().FILESYSTEM_ALLOWED_PATHS == "~/Documents,/tmp"
+
 
 class TestReadFileTool:
     def test_read_file(self):
         async def run():
-            r = await ReadFileTool().execute(path=str(PROJECT_ROOT / "pyproject.toml"))
+            r = await ReadFileTool(allowed_roots=(PROJECT_ROOT,)).execute(path=str(PROJECT_ROOT / "pyproject.toml"))
             assert "eyra" in r.content
         _run(run())
 
     def test_read_nonexistent(self):
         async def run():
-            r = await ReadFileTool().execute(path="~/nonexistent_file_xyz.txt")
+            r = await ReadFileTool(
+                allowed_roots=(Path.home(),),
+                default_path=Path.home(),
+            ).execute(path="~/nonexistent_file_xyz.txt")
             assert "Not a file" in r.content
+        _run(run())
+
+    def test_read_binary_file_returns_clean_error(self):
+        async def run():
+            with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
+                path = Path(d) / "data.bin"
+                path.write_bytes(b"\x00\x01\x02not text")
+                r = await ReadFileTool(allowed_roots=(Path(d),)).execute(path=str(path))
+                assert "binary" in r.content.lower()
+                assert "\x00" not in r.content
         _run(run())
 
 
@@ -97,9 +114,10 @@ class TestWriteFileTool:
         async def run():
             with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
                 path = os.path.join(d, "test.txt")
-                r = await WriteFileTool().execute(path=path, content="test content")
+                root = Path(d)
+                r = await WriteFileTool(allowed_roots=(root,)).execute(path=path, content="test content")
                 assert "Created" in r.content
-                r = await ReadFileTool().execute(path=path)
+                r = await ReadFileTool(allowed_roots=(root,)).execute(path=path)
                 assert "test content" in r.content
         _run(run())
 
@@ -107,14 +125,17 @@ class TestWriteFileTool:
         async def run():
             with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
                 path = os.path.join(d, "test.txt")
-                await WriteFileTool().execute(path=path, content="first")
-                r = await WriteFileTool().execute(path=path, content="second")
+                root = Path(d)
+                writer = WriteFileTool(allowed_roots=(root,))
+                reader = ReadFileTool(allowed_roots=(root,))
+                await writer.execute(path=path, content="first")
+                r = await writer.execute(path=path, content="second")
                 assert "already exists" in r.content
-                r = await ReadFileTool().execute(path=path)
+                r = await reader.execute(path=path)
                 assert "first" in r.content
                 assert "second" not in r.content
-                await WriteFileTool().execute(path=path, content="second", overwrite=True)
-                r = await ReadFileTool().execute(path=path)
+                await writer.execute(path=path, content="second", overwrite=True)
+                r = await reader.execute(path=path)
                 assert "second" in r.content
                 assert "first" not in r.content
         _run(run())
@@ -122,7 +143,7 @@ class TestWriteFileTool:
     def test_write_refuses_existing_directory(self):
         async def run():
             with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
-                r = await WriteFileTool().execute(path=d, content="not a directory")
+                r = await WriteFileTool(allowed_roots=(Path(d),)).execute(path=d, content="not a directory")
                 assert "not a file" in r.content
         _run(run())
 
@@ -157,10 +178,11 @@ class TestEditFileTool:
         async def run():
             with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
                 path = os.path.join(d, "test.txt")
-                await WriteFileTool().execute(path=path, content="hello world hello")
-                r = await EditFileTool().execute(path=path, find="hello", replace="bye")
+                root = Path(d)
+                await WriteFileTool(allowed_roots=(root,)).execute(path=path, content="hello world hello")
+                r = await EditFileTool(allowed_roots=(root,)).execute(path=path, find="hello", replace="bye")
                 assert "2 occurrences" in r.content
-                r = await ReadFileTool().execute(path=path)
+                r = await ReadFileTool(allowed_roots=(root,)).execute(path=path)
                 assert "bye world bye" in r.content
         _run(run())
 
@@ -168,8 +190,9 @@ class TestEditFileTool:
         async def run():
             with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
                 path = os.path.join(d, "test.txt")
-                await WriteFileTool().execute(path=path, content="hello")
-                r = await EditFileTool().execute(path=path, find="MISSING", replace="x")
+                root = Path(d)
+                await WriteFileTool(allowed_roots=(root,)).execute(path=path, content="hello")
+                r = await EditFileTool(allowed_roots=(root,)).execute(path=path, find="MISSING", replace="x")
                 assert "not found" in r.content.lower()
         _run(run())
 
@@ -177,14 +200,14 @@ class TestEditFileTool:
 class TestListDirectoryTool:
     def test_list_directory(self):
         async def run():
-            r = await ListDirectoryTool().execute(path=str(PROJECT_ROOT / "src" / "tools"))
+            r = await ListDirectoryTool(allowed_roots=(PROJECT_ROOT,)).execute(path=str(PROJECT_ROOT / "src" / "tools"))
             assert "browser.py" in r.content
             assert "filesystem.py" in r.content
         _run(run())
 
     def test_list_not_a_directory(self):
         async def run():
-            r = await ListDirectoryTool().execute(path=str(PROJECT_ROOT / "pyproject.toml"))
+            r = await ListDirectoryTool(allowed_roots=(PROJECT_ROOT,)).execute(path=str(PROJECT_ROOT / "pyproject.toml"))
             assert "Not a directory" in r.content
         _run(run())
 
@@ -194,13 +217,13 @@ class TestCreateDirectoryTool:
         async def run():
             with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
                 path = os.path.join(d, "a", "b", "c")
-                r = await CreateDirectoryTool().execute(path=path)
+                r = await CreateDirectoryTool(allowed_roots=(Path(d),)).execute(path=path)
                 assert "Created" in r.content
                 assert os.path.isdir(path)
         _run(run())
 
     def test_mkdir_already_exists(self):
         async def run():
-            r = await CreateDirectoryTool().execute(path=str(PROJECT_ROOT))
+            r = await CreateDirectoryTool(allowed_roots=(PROJECT_ROOT,)).execute(path=str(PROJECT_ROOT))
             assert "Already exists" in r.content
         _run(run())

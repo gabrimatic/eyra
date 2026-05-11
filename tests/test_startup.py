@@ -30,3 +30,16 @@ class TestStartupSelector:
             assert startup.maybe_run_startup_selector() is False
 
         mock_input.assert_not_called()
+
+    def test_noninteractive_unreachable_backend_does_not_prompt(self, monkeypatch, tmp_path):
+        env_path = tmp_path / ".env"
+        env_path.write_text("API_BASE_URL=http://missing.local/v1\nMODEL=model-a\n")
+        monkeypatch.setattr(startup, "_ENV", env_path)
+        monkeypatch.delenv("USE_MOCK_CLIENT", raising=False)
+
+        with patch("runtime.startup.sys.stdin.isatty", return_value=False):
+            with patch("runtime.startup._is_reachable", return_value=False):
+                with patch("runtime.startup.input") as mock_input:
+                    assert startup.maybe_run_startup_selector() is False
+
+        mock_input.assert_not_called()

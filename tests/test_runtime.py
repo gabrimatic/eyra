@@ -27,6 +27,8 @@ class TestPreflightResult:
         assert r.models_ready == []
         assert r.models_missing == []
         assert r.wh_available is False
+        assert r.listening_available is None
+        assert r.speech_available is None
         assert r.wh_bin is None
         assert r.screen_capture_available is False
 
@@ -76,6 +78,34 @@ class TestPreflightResult:
         state = LiveRuntimeState.from_preflight(r)
         assert state.listening_enabled is True
         assert state.speech_enabled is True
+        assert state.wh_bin == "/opt/wh"
+
+    def test_from_preflight_speech_only_capability(self):
+        r = PreflightResult(
+            backend_reachable=True,
+            models_ready=["model-a"],
+            wh_available=True,
+            listening_available=False,
+            speech_available=True,
+            wh_bin="/opt/wh",
+        )
+        state = LiveRuntimeState.from_preflight(r)
+        assert state.listening_enabled is False
+        assert state.speech_enabled is True
+        assert state.wh_bin == "/opt/wh"
+
+    def test_from_preflight_listening_only_capability(self):
+        r = PreflightResult(
+            backend_reachable=True,
+            models_ready=["model-a"],
+            wh_available=True,
+            listening_available=True,
+            speech_available=False,
+            wh_bin="/opt/wh",
+        )
+        state = LiveRuntimeState.from_preflight(r)
+        assert state.listening_enabled is True
+        assert state.speech_enabled is False
         assert state.wh_bin == "/opt/wh"
 
 
@@ -270,6 +300,7 @@ class TestLiveSessionCommands:
         settings.VOICE_SILENCE_MS = 1500
         settings.VOICE_VAD_THRESHOLD = 0.6
         settings.FILESYSTEM_ALLOWED_PATHS = "~,/tmp"
+        settings.COMPLEXITY_ROUTING_ENABLED = False
         settings.NETWORK_TOOLS_ENABLED = False
 
         preflight = PreflightResult(backend_reachable=True, models_ready=["m"])
@@ -347,6 +378,13 @@ class TestLiveSessionCommands:
         assert "web_search" in names
         assert "open_url" in names
 
+    def test_fast_mode_explains_when_routing_is_disabled(self, capsys):
+        session = self._make_session()
+        _run(session._handle_command("/mode fast"))
+        out = capsys.readouterr().out
+        assert "complexity routing" in out.lower()
+        assert session.quality_mode.value == "balanced"
+
 
 # ---------------------------------------------------------------------------
 # Fix verification: config flags applied to runtime state
@@ -420,6 +458,7 @@ class TestScreenContextDetection:
         settings.VOICE_SILENCE_MS = 1500
         settings.VOICE_VAD_THRESHOLD = 0.6
         settings.FILESYSTEM_ALLOWED_PATHS = "~,/tmp"
+        settings.COMPLEXITY_ROUTING_ENABLED = False
 
         preflight = PreflightResult(backend_reachable=True, models_ready=["m"])
         state = LiveRuntimeState.from_preflight(preflight)
@@ -507,6 +546,8 @@ class TestInitialStatusAndHeader:
         preflight = PreflightResult(
             backend_reachable=True, models_ready=["m"],
             wh_available=listening or speech,
+            listening_available=listening,
+            speech_available=speech,
             wh_bin="/opt/wh" if (listening or speech) else None,
         )
         state = LiveRuntimeState.from_preflight(preflight, settings=settings)
@@ -533,6 +574,12 @@ class TestInitialStatusAndHeader:
         out = capsys.readouterr().out
         assert "Type anything or speak." in out
 
+    def test_voice_label_preserves_muted_speech_with_listening(self):
+        from runtime.status_presenter import voice_status_label
+        _, state = self._make_session(listening=True, speech=True)
+        state.speech_muted = True
+        assert voice_status_label(state) == "input + muted speech"
+
 
 # ---------------------------------------------------------------------------
 # /voice command
@@ -551,10 +598,13 @@ class TestVoiceCommand:
         settings.VOICE_SILENCE_MS = 1500
         settings.VOICE_VAD_THRESHOLD = 0.6
         settings.FILESYSTEM_ALLOWED_PATHS = "~,/tmp"
+        settings.COMPLEXITY_ROUTING_ENABLED = False
 
         preflight = PreflightResult(
             backend_reachable=True, models_ready=["m"],
             wh_available=wh_available,
+            listening_available=wh_available if listening else False,
+            speech_available=wh_available if speech else False,
             wh_bin="/opt/wh" if wh_available else None,
         )
         state = LiveRuntimeState.from_preflight(preflight, settings=settings)
@@ -586,8 +636,11 @@ class TestVoiceCommand:
 
             session._voice_input_loop = idle_voice_loop
 
-            async def check_local_whisper(_manager, result):
+            async def check_local_whisper(_manager, result, **_kwargs):
                 result.wh_bin = "/opt/wh"
+                result.wh_available = True
+                result.listening_available = True
+                result.speech_available = True
                 return True
 
             with patch("runtime.live_session.PreflightManager.check_local_whisper", check_local_whisper):
@@ -597,8 +650,29 @@ class TestVoiceCommand:
             assert state.speech_enabled is True
             assert state.wh_bin == "/opt/wh"
             assert session.preflight.wh_available is True
+            assert session.preflight.listening_available is True
+            assert session.preflight.speech_available is True
 
         _run(run())
+
+    def test_voice_on_enables_speech_only_when_asr_is_unavailable(self, capsys):
+        session, state = self._make_session(wh_available=False, listening=False, speech=False)
+
+        async def check_local_whisper(_manager, result, **_kwargs):
+            result.wh_bin = "/opt/wh"
+            result.wh_available = True
+            result.listening_available = False
+            result.speech_available = True
+            return True
+
+        with patch("runtime.live_session.PreflightManager.check_local_whisper", check_local_whisper):
+            _run(session._handle_command("/voice on"))
+
+        assert state.listening_enabled is False
+        assert state.speech_enabled is True
+        assert state.wh_bin == "/opt/wh"
+        out = capsys.readouterr().out
+        assert "speech only" in out.lower()
 
     def test_voice_off_cancels_owned_voice_task(self):
         async def run():
@@ -627,8 +701,11 @@ class TestVoiceCommand:
         session, state = self._make_session(wh_available=False, listening=False, speech=False)
         assert state.listening_enabled is False
 
-        async def check_local_whisper(_manager, result):
+        async def check_local_whisper(_manager, result, **_kwargs):
             result.wh_bin = None
+            result.wh_available = False
+            result.listening_available = False
+            result.speech_available = False
             return False
 
         with patch("runtime.live_session.PreflightManager.check_local_whisper", check_local_whisper):

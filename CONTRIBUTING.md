@@ -12,7 +12,7 @@ cd eyra
 
 Set `USE_MOCK_CLIENT=true` in `.env` to run without any backend during development. Mock mode bypasses provider and model preflight on purpose.
 
-Voice input and speech output require [Local Whisper](https://github.com/gabrimatic/local-whisper). Install: `brew tap gabrimatic/local-whisper && brew install local-whisper`. Check with `wh status`.
+Voice input and speech output require [Local Whisper](https://github.com/gabrimatic/local-whisper). Install: `brew tap gabrimatic/local-whisper && brew install local-whisper`. Check with `wh status`. Input and speech are tracked separately, so tests should cover speech-only and input-only states when touching voice preflight.
 
 Network tools are disabled by default. Set `NETWORK_TOOLS_ENABLED=true` in `.env` only when testing weather or browser tools. Weather requests require an explicit location so tests and runtime use never rely on remote IP geolocation.
 
@@ -81,6 +81,7 @@ Keep streaming behavior consistent with existing clients. Responses should yield
 Tools are invoked by the model on demand. Keep tool implementations stateless where possible. Any tool that contacts the network must be gated behind `NETWORK_TOOLS_ENABLED`.
 Relative filesystem paths resolve under `FILESYSTEM_DEFAULT_PATH` and are still checked against `FILESYSTEM_ALLOWED_PATHS`.
 `write_file` creates new files by default and requires `overwrite=true` before replacing an existing file.
+The default filesystem sandbox is `~/Documents,/tmp`; broaden it only when a workflow needs more access.
 
 ## Testing
 
@@ -108,6 +109,7 @@ Manual verification flow:
 - No new dependencies added without updating `pyproject.toml`
 - Mock client still works (`USE_MOCK_CLIENT=true`)
 - Voice toggling works when Local Whisper becomes available after startup
+- Speech-only and input-only voice states do not disable each other by accident
 - Existing files are not overwritten by `write_file` unless overwrite is explicit
 - No credentials, API keys, or personal data in any file
 - Manual verification flow passes

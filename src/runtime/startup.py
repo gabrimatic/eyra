@@ -169,7 +169,7 @@ def _write_env(base_url: str, api_key: str, model: str):
         f"NETWORK_TOOLS_ENABLED={existing.get('NETWORK_TOOLS_ENABLED', 'false')}",
         "",
         "# Filesystem sandbox",
-        f"FILESYSTEM_ALLOWED_PATHS={existing.get('FILESYSTEM_ALLOWED_PATHS', '~,/tmp')}",
+        f"FILESYSTEM_ALLOWED_PATHS={existing.get('FILESYSTEM_ALLOWED_PATHS', '~/Documents,/tmp')}",
         f"FILESYSTEM_DEFAULT_PATH={existing.get('FILESYSTEM_DEFAULT_PATH', '~/Documents')}",
         "",
         "# Experimental routing",
@@ -331,6 +331,13 @@ def maybe_run_startup_selector() -> bool:
         check = f"{env_url.rstrip('/').removesuffix('/v1')}/v1/models"
         if _is_reachable(check) or _is_reachable(f"{env_url.rstrip('/').removesuffix('/v1')}/api/tags"):
             return False
+
+    if not sys.stdin.isatty():
+        if env_url:
+            _info("Provider is not reachable. Start the backend or run ./setup.sh in a terminal.")
+        else:
+            _info("No provider configured. Run ./setup.sh in a terminal or set API_BASE_URL and MODEL.")
+        return False
 
     # Detect installed/running providers
     ollama_tag = ""

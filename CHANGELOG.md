@@ -15,14 +15,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - `/voice on` now rechecks Local Whisper at runtime and starts an owned voice loop when voice was disabled or unavailable at startup.
+- Voice readiness now tracks input and speech separately, so TTS can keep working while ASR is unavailable or still loading.
 - `/voice off` now cancels the owned voice task instead of relying on global task-name lookup.
+- `/mode fast` now explains when complexity routing is disabled instead of silently switching to an unused mode.
 - `write_file` now protects existing files unless `overwrite=true` is provided explicitly.
+- The default filesystem sandbox is now `~/Documents,/tmp` instead of the whole home directory.
 - Runtime logs now use a user-writable log path by default, with `EYRA_LOG_FILE` as an override.
 - `/goal` now reaches the response pipeline as session context for future replies.
 - Weather lookups require an explicit location and no longer use remote IP geolocation.
 - Tool-call logs now record tool names and argument keys without persisting argument values.
 - `.env.example` now includes `AUTO_PULL_MODELS`.
 - CI and contributor docs now include wheel-build verification.
+- `read_file` now refuses binary files with a clean message instead of streaming raw bytes into the terminal.
+- First-run provider setup now skips the interactive provider picker in non-interactive shells and lets preflight report the backend problem cleanly.
 
 ## [3.3.2] - 2026-05-11
 

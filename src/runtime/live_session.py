@@ -21,6 +21,7 @@ from runtime.status_presenter import (
     render_header,
     render_help_card,
     render_status_card,
+    voice_status_label,
 )
 from tools.browser import BrowserSession, ClickElementTool, OpenUrlTool, PageScreenshotTool, WebSearchTool
 from tools.clipboard import ClipboardTool
@@ -282,10 +283,14 @@ class LiveSession:
                 if not await self._ensure_voice_available():
                     print_status_change("Voice not available")
                     return True
-                self.state.listening_enabled = True
-                self.state.speech_enabled = True
-                self._start_voice_task()
-                print_status_change("Voice on (input + speech)")
+                self.state.listening_enabled = bool(self.preflight.listening_available)
+                self.state.speech_enabled = bool(self.preflight.speech_available)
+                if not (self.state.listening_enabled or self.state.speech_enabled):
+                    print_status_change("Voice not available")
+                    return True
+                if self.state.listening_enabled:
+                    self._start_voice_task()
+                print_status_change(f"Voice on ({voice_status_label(self.state)})")
             elif arg == "off":
                 self.state.listening_enabled = False
                 self.state.speech_enabled = False
@@ -293,7 +298,7 @@ class LiveSession:
                 await self._stop_voice_task()
                 print_status_change("Voice off")
             else:
-                voice_status = "on" if self.state.listening_enabled else "off"
+                voice_status = voice_status_label(self.state)
                 print(f"  Voice is {voice_status}. Usage: /voice on|off")
             return True
 
@@ -331,7 +336,12 @@ class LiveSession:
         if command == "/mode":
             mode_str = lower_parts[1] if len(lower_parts) > 1 else ""
             try:
-                self.quality_mode = QualityMode(mode_str)
+                requested = QualityMode(mode_str)
+                if requested == QualityMode.FAST and not self.settings.COMPLEXITY_ROUTING_ENABLED:
+                    print("  Fast mode needs complexity routing enabled. Staying in balanced mode.")
+                    self.quality_mode = QualityMode.BALANCED
+                    return True
+                self.quality_mode = requested
                 print_status_change(f"Quality: {self.quality_mode.value}")
             except ValueError:
                 print("  Usage: /mode fast|balanced|best")
@@ -346,7 +356,11 @@ class LiveSession:
 
     async def _ensure_voice_available(self) -> bool:
         """Recover Local Whisper at runtime when startup skipped or failed voice checks."""
-        if self.preflight.wh_available and self.state.wh_bin:
+        if (
+            self.preflight.listening_available is True
+            and self.preflight.speech_available is True
+            and self.state.wh_bin
+        ):
             return True
 
         result = PreflightResult(
@@ -355,8 +369,18 @@ class LiveSession:
             models_missing=list(self.preflight.models_missing),
             screen_capture_available=self.preflight.screen_capture_available,
         )
-        available = await PreflightManager(self.settings).check_local_whisper(result)
+        available = await PreflightManager(self.settings).check_local_whisper(
+            result,
+            listening_requested=True,
+            speech_requested=True,
+        )
         self.preflight.wh_available = available
+        self.preflight.listening_available = (
+            result.listening_available if result.listening_available is not None else available
+        )
+        self.preflight.speech_available = (
+            result.speech_available if result.speech_available is not None else available
+        )
         self.preflight.wh_bin = result.wh_bin
         self.state.wh_bin = result.wh_bin
         return available

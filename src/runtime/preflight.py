@@ -68,10 +68,20 @@ class PreflightManager:
         print()
         return result
 
-    async def check_local_whisper(self, result: PreflightResult | None = None) -> bool:
+    async def check_local_whisper(
+        self,
+        result: PreflightResult | None = None,
+        listening_requested: bool | None = None,
+        speech_requested: bool | None = None,
+    ) -> bool:
         """Check Local Whisper on demand and thread the resolved wh path into result."""
         target = result or PreflightResult()
-        target.wh_available = await asyncio.to_thread(self._check_wh, target)
+        target.wh_available = await asyncio.to_thread(
+            self._check_wh,
+            target,
+            self.settings.LIVE_LISTENING_ENABLED if listening_requested is None else listening_requested,
+            self.settings.LIVE_SPEECH_ENABLED if speech_requested is None else speech_requested,
+        )
         return target.wh_available
 
     async def _check_backend(self) -> bool:
@@ -204,20 +214,25 @@ class PreflightManager:
                 except Exception as e:
                     logger.debug("Could not unload %s: %s", model, e)
 
-    def _check_wh(self, result: PreflightResult) -> bool:
-        """Check that Local Whisper is installed, running, and ASR is ready.
+    def _check_wh(self, result: PreflightResult, listening_requested: bool, speech_requested: bool) -> bool:
+        """Check that Local Whisper is installed and the requested voice features are ready.
 
         Local Whisper powers both voice input (ASR) and speech output (TTS).
-        Installed via Homebrew, resolved from PATH. After confirming the process
-        is alive, probes ASR readiness (the model can take seconds to load).
+        Installed via Homebrew, resolved from PATH. Speech only needs the service
+        running; voice input additionally probes ASR readiness because that model
+        can take seconds to load.
         """
         wh_bin = self._resolve_wh()
         if wh_bin is None:
             _fail("Local Whisper: not installed (voice input + speech disabled)")
             print(f"    {DIM}Install: {WH_INSTALL_HINT}{NC}")
+            result.listening_available = False
+            result.speech_available = False
             return False
 
         result.wh_bin = wh_bin
+        result.listening_available = False
+        result.speech_available = False
 
         running = self._wh_is_running(wh_bin)
         if not running:
@@ -225,18 +240,33 @@ class PreflightManager:
                 _warn("Local Whisper: installed but not running (voice input + speech disabled)")
                 print(f"    {DIM}Start: wh start{NC}")
                 result.wh_bin = None
+                result.listening_available = False
+                result.speech_available = False
                 return False
 
-        # Process is alive — now wait for ASR to be ready
-        print(f"  {DIM}› Waiting for Local Whisper ASR...{NC}", end="", flush=True)
-        if self._wait_for_asr_ready(wh_bin, max_wait=15):
-            print(f"\r  {GREEN}✓{NC} Local Whisper: ready (voice input + speech)   ")
-            return True
+        if speech_requested:
+            result.speech_available = True
 
-        print(f"\r  {YELLOW}⚠{NC} Local Whisper: running but ASR not ready (voice disabled)   ")
-        print(f"    {DIM}ASR model may still be loading. Restart: wh restart{NC}")
-        result.wh_bin = None
-        return False
+        if listening_requested:
+            # Process is alive — now wait for ASR to be ready
+            print(f"  {DIM}› Waiting for Local Whisper ASR...{NC}", end="", flush=True)
+            if self._wait_for_asr_ready(wh_bin, max_wait=15):
+                result.listening_available = True
+                if speech_requested:
+                    print(f"\r  {GREEN}✓{NC} Local Whisper: ready (voice input + speech)   ")
+                else:
+                    print(f"\r  {GREEN}✓{NC} Local Whisper: ready (voice input)   ")
+            else:
+                print(f"\r  {YELLOW}⚠{NC} Local Whisper: running but ASR not ready   ")
+                print(f"    {DIM}ASR model may still be loading. Restart: wh restart{NC}")
+
+        if result.speech_available and not result.listening_available:
+            _ok("Local Whisper: ready (speech)")
+
+        available = bool(result.listening_available or result.speech_available)
+        if not available:
+            result.wh_bin = None
+        return available
 
     @staticmethod
     def _wait_for_asr_ready(wh_bin: str, max_wait: int = 15) -> bool:
