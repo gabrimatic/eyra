@@ -57,6 +57,7 @@ def build_tool_registry(
     settings: Settings,
     browser_session: BrowserSession | None = None,
     approval_manager: ApprovalManager | None = None,
+    trusted_overwrite_token: str = "",
 ) -> ToolRegistry:
     """Build Eyra's tool registry with optional bridges gated by settings."""
     registry = ToolRegistry()
@@ -72,12 +73,33 @@ def build_tool_registry(
     fs_default = Path(settings.FILESYSTEM_DEFAULT_PATH)
     registry.register(FinderSelectionTool(allowed_roots=fs_roots, default_path=fs_default))
     registry.register(ReadFileTool(allowed_roots=fs_roots, default_path=fs_default))
-    registry.register(WriteFileTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(
+        WriteFileTool(
+            allowed_roots=fs_roots,
+            default_path=fs_default,
+            approval_manager=approval_manager,
+            trusted_overwrite_token=trusted_overwrite_token,
+        )
+    )
     registry.register(EditFileTool(allowed_roots=fs_roots, default_path=fs_default))
     registry.register(ListDirectoryTool(allowed_roots=fs_roots, default_path=fs_default))
     registry.register(CreateDirectoryTool(allowed_roots=fs_roots, default_path=fs_default))
-    registry.register(MovePathTool(allowed_roots=fs_roots, default_path=fs_default))
-    registry.register(CopyPathTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(
+        MovePathTool(
+            allowed_roots=fs_roots,
+            default_path=fs_default,
+            approval_manager=approval_manager,
+            trusted_overwrite_token=trusted_overwrite_token,
+        )
+    )
+    registry.register(
+        CopyPathTool(
+            allowed_roots=fs_roots,
+            default_path=fs_default,
+            approval_manager=approval_manager,
+            trusted_overwrite_token=trusted_overwrite_token,
+        )
+    )
     registry.register(OpenPathTool(allowed_roots=fs_roots, default_path=fs_default))
     registry.register(RevealPathTool(allowed_roots=fs_roots, default_path=fs_default))
     registry.register(ReadPdfTool(allowed_roots=fs_roots, default_path=fs_default))
@@ -117,6 +139,6 @@ def build_tool_registry(
 
     if settings.MCP_TOOLS_ENABLED:
         registry.register(ListMcpTools(config_path=settings.MCP_CONFIG_PATH))
-        registry.register(CallMcpTool(config_path=settings.MCP_CONFIG_PATH))
+        registry.register(CallMcpTool(config_path=settings.MCP_CONFIG_PATH, approval_manager=approval_manager))
 
     return registry

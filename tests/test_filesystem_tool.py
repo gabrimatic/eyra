@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from tools.approval import ApprovalManager
 from tools.filesystem import (
     CopyPathTool,
     CreateDirectoryTool,
@@ -141,7 +142,8 @@ class TestWriteFileTool:
             with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
                 path = os.path.join(d, "test.txt")
                 root = Path(d)
-                writer = WriteFileTool(allowed_roots=(root,))
+                manager = ApprovalManager()
+                writer = WriteFileTool(allowed_roots=(root,), approval_manager=manager)
                 reader = ReadFileTool(allowed_roots=(root,))
                 await writer.execute(path=path, content="first")
                 r = await writer.execute(path=path, content="second")
@@ -149,10 +151,35 @@ class TestWriteFileTool:
                 r = await reader.execute(path=path)
                 assert "first" in r.content
                 assert "second" not in r.content
-                await writer.execute(path=path, content="second", overwrite=True)
+                r = await writer.execute(path=path, content="second", overwrite=True, confirmed=True)
+                assert "Approval required" in r.content
+                assert manager.list_pending()
+                approval_id = manager.list_pending()[0].id
+                assert manager.approve(approval_id) is True
+                await writer.execute(path=path, content="second", overwrite=True, approval_id=approval_id)
                 r = await reader.execute(path=path)
                 assert "second" in r.content
                 assert "first" not in r.content
+        _run(run())
+
+    def test_trusted_controller_token_can_overwrite_after_human_confirmation(self):
+        async def run():
+            with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
+                path = os.path.join(d, "test.txt")
+                root = Path(d)
+                writer = WriteFileTool(allowed_roots=(root,), trusted_overwrite_token="runtime-secret")
+                await writer.execute(path=path, content="first")
+
+                result = await writer.execute(
+                    path=path,
+                    content="second",
+                    overwrite=True,
+                    trusted_overwrite_token="runtime-secret",
+                )
+
+                assert "Updated" in result.content
+                assert Path(path).read_text() == "second"
+
         _run(run())
 
     def test_write_refuses_existing_directory(self):
@@ -278,6 +305,29 @@ class TestMoveAndCopyPathTools:
 
         _run(run())
 
+    def test_move_overwrite_requires_approval_even_if_model_sets_confirmed(self):
+        async def run():
+            with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
+                root = Path(d)
+                manager = ApprovalManager()
+                src = root / "a.txt"
+                dest = root / "b.txt"
+                src.write_text("source")
+                dest.write_text("dest")
+
+                r = await MovePathTool(allowed_roots=(root,), approval_manager=manager).execute(
+                    source=str(src),
+                    destination=str(dest),
+                    overwrite=True,
+                    confirmed=True,
+                )
+
+                assert "Approval required" in r.content
+                assert src.exists()
+                assert dest.read_text() == "dest"
+
+        _run(run())
+
     def test_copy_file_checks_sandbox_and_copies(self):
         async def run():
             with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
@@ -309,6 +359,29 @@ class TestMoveAndCopyPathTools:
 
                     assert "Access denied" in r.content
                     assert not dest.exists()
+
+        _run(run())
+
+    def test_copy_overwrite_requires_approval_even_if_model_sets_confirmed(self):
+        async def run():
+            with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:
+                root = Path(d)
+                manager = ApprovalManager()
+                src = root / "a.txt"
+                dest = root / "b.txt"
+                src.write_text("source")
+                dest.write_text("dest")
+
+                r = await CopyPathTool(allowed_roots=(root,), approval_manager=manager).execute(
+                    source=str(src),
+                    destination=str(dest),
+                    overwrite=True,
+                    confirmed=True,
+                )
+
+                assert "Approval required" in r.content
+                assert src.read_text() == "source"
+                assert dest.read_text() == "dest"
 
         _run(run())
 

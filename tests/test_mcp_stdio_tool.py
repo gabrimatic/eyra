@@ -9,6 +9,7 @@ import textwrap
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from tools.approval import ApprovalManager
 from tools.mcp_stdio import CallMcpTool, ListMcpTools
 
 
@@ -153,12 +154,71 @@ class TestMcpStdioTools:
         assert data["server"] == "fake"
         assert data["tools"][0]["name"] == "echo"
 
-    def test_calls_tool_on_configured_stdio_server(self, tmp_path):
+    def test_call_requires_server_side_approval(self, tmp_path):
         config = _config(tmp_path, _fake_mcp_server(tmp_path))
+        manager = ApprovalManager()
 
-        result = _run(CallMcpTool(config_path=config).execute(server="fake", tool="echo", arguments={"text": "hi"}))
+        result = _run(
+            CallMcpTool(config_path=config, approval_manager=manager).execute(
+                server="fake",
+                tool="echo",
+                arguments={"text": "hi"},
+                confirmed=True,
+            )
+        )
+
+        assert "Approval required" in result.content
+        assert "echo: hi" not in result.content
+
+    def test_calls_tool_after_exact_approval(self, tmp_path):
+        config = _config(tmp_path, _fake_mcp_server(tmp_path))
+        manager = ApprovalManager()
+        first = _run(
+            CallMcpTool(config_path=config, approval_manager=manager).execute(
+                server="fake",
+                tool="echo",
+                arguments={"text": "hi"},
+            )
+        )
+        approval_id = manager.list_pending()[0].id
+        assert "Approval required" in first.content
+        assert manager.approve(approval_id) is True
+
+        result = _run(
+            CallMcpTool(config_path=config, approval_manager=manager).execute(
+                server="fake",
+                tool="echo",
+                arguments={"text": "hi"},
+                approval_id=approval_id,
+            )
+        )
 
         assert "echo: hi" in result.content
+
+    def test_approval_cannot_be_reused_for_different_mcp_arguments(self, tmp_path):
+        config = _config(tmp_path, _fake_mcp_server(tmp_path))
+        manager = ApprovalManager()
+        _run(
+            CallMcpTool(config_path=config, approval_manager=manager).execute(
+                server="fake",
+                tool="echo",
+                arguments={"text": "hi"},
+            )
+        )
+        approval_id = manager.list_pending()[0].id
+        assert manager.approve(approval_id) is True
+
+        result = _run(
+            CallMcpTool(config_path=config, approval_manager=manager).execute(
+                server="fake",
+                tool="echo",
+                arguments={"text": "changed"},
+                approval_id=approval_id,
+            )
+        )
+
+        assert "Approval required" in result.content
+        assert "echo: changed" not in result.content
 
     def test_server_timeout_is_clean(self, tmp_path):
         config = _config(tmp_path, _hanging_mcp_server(tmp_path))
@@ -169,8 +229,19 @@ class TestMcpStdioTools:
 
     def test_tool_output_is_capped(self, tmp_path):
         config = _config(tmp_path, _large_output_mcp_server(tmp_path))
+        manager = ApprovalManager()
+        _run(CallMcpTool(config_path=config, approval_manager=manager).execute(server="fake", tool="large", arguments={}))
+        approval_id = manager.list_pending()[0].id
+        manager.approve(approval_id)
 
-        result = _run(CallMcpTool(config_path=config).execute(server="fake", tool="large", arguments={}))
+        result = _run(
+            CallMcpTool(config_path=config, approval_manager=manager).execute(
+                server="fake",
+                tool="large",
+                arguments={},
+                approval_id=approval_id,
+            )
+        )
 
         assert len(result.content) < 5000
         assert "truncated" in result.content.lower()

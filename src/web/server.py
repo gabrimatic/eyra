@@ -76,13 +76,13 @@ def build_health_payload(settings: Settings) -> dict[str, Any]:
 
 def web_auth_required(settings: Settings) -> bool:
     mode = settings.WEB_UI_REQUIRE_TOKEN.strip().lower()
-    if settings.WEB_UI_HOST not in _LOCAL_HOSTS:
-        return True
     if mode == "true":
         return True
     if mode == "false":
+        if settings.WEB_UI_HOST not in _LOCAL_HOSTS:
+            return True
         return False
-    return False
+    return True
 
 
 def validate_request_size(settings: Settings, length: int) -> bool:
@@ -876,6 +876,9 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
         self._send_json(405, {"error": "Method not allowed."})
 
     def _authorized(self) -> bool:
+        if not self._origin_allowed():
+            self._send_json(403, {"error": "Cross-origin Web UI request refused."})
+            return False
         if not web_auth_required(self.settings):
             return True
         provided = self.headers.get("X-Eyra-Web-Token", "")
@@ -883,6 +886,17 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             return True
         self._send_json(401, {"error": "Web UI session token is required."})
         return False
+
+    def _origin_allowed(self) -> bool:
+        origin = self.headers.get("Origin", "")
+        if not origin:
+            return True
+        parsed = urllib.parse.urlparse(origin)
+        origin_host = (parsed.hostname or "").lower()
+        host_header = self.headers.get("Host", "").split(":", 1)[0].strip("[]").lower()
+        configured_host = self.settings.WEB_UI_HOST.strip("[]").lower()
+        allowed_hosts = {host for host in _LOCAL_HOSTS | {configured_host, host_header} if host}
+        return parsed.scheme in {"http", "https"} and origin_host in allowed_hosts
 
     def _read_json(self) -> dict[str, Any]:
         raw = self._read_bytes()
@@ -909,6 +923,22 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
         self.send_header("content-type", content_type)
         self.send_header("content-length", str(len(raw)))
         self.send_header("cache-control", "no-store")
+        self.send_header("referrer-policy", "no-referrer")
+        self.send_header("x-content-type-options", "nosniff")
+        self.send_header("x-frame-options", "DENY")
+        self.send_header("permissions-policy", "geolocation=(), camera=(), microphone=(self)")
+        self.send_header(
+            "content-security-policy",
+            "default-src 'self'; "
+            "base-uri 'none'; "
+            "object-src 'none'; "
+            "frame-ancestors 'none'; "
+            "img-src 'self' data: blob:; "
+            "media-src 'self' blob:; "
+            "connect-src 'self' https://api.openai.com; "
+            "style-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline'",
+        )
         self.end_headers()
         self.wfile.write(raw)
 
@@ -974,7 +1004,7 @@ def realtime_tools(settings: Settings) -> list[dict[str, Any]]:
     if not settings.REALTIME_TOOLS_ENABLED:
         return []
     configured = {name.strip() for name in settings.REALTIME_ALLOWED_TOOLS.split(",") if name.strip()}
-    allowed = configured or _SAFE_REALTIME_TOOLS
+    allowed = (configured or _SAFE_REALTIME_TOOLS) & _SAFE_REALTIME_TOOLS
     tools = []
     for tool in build_tool_registry(settings).to_openai_tools(include_costly=False):
         fn = tool.get("function", {})

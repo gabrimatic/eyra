@@ -23,7 +23,7 @@ No unreleased changes.
 - Optional terminal-agent status, session listing, bounded redacted session reading, and delegation bridges for Codex and OpenClaw.
 - Built-in `eyra-web` browser UI for phone or browser access, with text chat, Local Whisper browser voice turns, and optional OpenAI Realtime WebRTC voice.
 - Web UI task APIs for creating long work, listing tasks, viewing task detail, and cancelling tasks without blocking the browser request.
-- Web UI auth controls: `WEB_UI_TOKEN`, `WEB_UI_REQUIRE_TOKEN=auto`, request size limits, and token-required non-health endpoints when bound beyond localhost.
+- Web UI auth controls: `WEB_UI_TOKEN`, `WEB_UI_REQUIRE_TOKEN=auto`, request size limits, and token-required non-health endpoints by default.
 - Local Web UI voice replies through `wh whisper` after Local Whisper browser voice turns.
 - Realtime voice session endpoint that mints server-side ephemeral client secrets and can expose allowlisted low-risk tools to Realtime sessions.
 - Realtime tool safety controls: `REALTIME_TOOLS_ENABLED=false` by default and `REALTIME_ALLOWED_TOOLS` for explicit low-risk allowlists.
@@ -45,8 +45,13 @@ No unreleased changes.
 - Realtime web tool calls now require both Realtime mode and unguessable Web UI/tool-call tokens.
 - Realtime now uses `gpt-realtime` as the default model name for the current OpenAI Realtime API.
 - Realtime tools are no longer exposed by default; risky local tools are not available to Realtime unless explicitly allowlisted.
-- Web UI now requires token auth automatically when bound beyond localhost.
+- Realtime tool allowlists are restricted to Eyra's built-in low-risk Realtime tool set; local clipboard, filesystem, screen, OS, MCP, browser, and agent tools are not exposed to Realtime.
+- Web UI now requires token auth automatically for all non-health endpoints, including localhost, and refuses cross-origin API requests from other origins.
+- Web UI responses now include local-app security headers: content security policy, no-referrer policy, no-sniff, no-store, and frame denial.
+- Voice input now stays active during TTS so a real VAD speech onset can interrupt active speech output and continue recording the user's utterance.
+- MCP tool calls now require server-side action-specific approval before execution.
 - Risky OS, LaunchAgent, clipboard, shell-command, and agent-delegation tools now require server-side action-specific approval. Model-supplied `confirmed=true` no longer executes those actions.
+- Model-driven file overwrites now require server-side action-specific approval. Controller-owned overwrite confirmations still work only after the user explicitly says to overwrite the pending file action.
 - Delegated Codex/OpenClaw subprocesses now run under the normal tool timeout and are killed on timeout or cancellation.
 - The terminal runtime now uses the shared tool-registry builder instead of constructing tools inside `LiveSession`.
 - First-run `.env` writing now preserves and documents Web UI, Realtime, OS tools, MCP, and agent delegation settings.

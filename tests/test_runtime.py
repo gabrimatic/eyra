@@ -194,23 +194,76 @@ class TestSpeechController:
         mock_proc.wait.assert_called_once()
         assert ctrl._speaking_proc is None
 
-    def test_listen_waits_for_speech_first(self):
-        """listen() should wait for ongoing speech before recording."""
+    def test_listen_does_not_wait_for_speech_before_recording(self):
+        """listen() keeps the microphone path active while TTS is speaking."""
         ctrl, state = self._make_controller()
         state.listening_enabled = True
 
-        # Simulate a finished speech process
         mock_speech_proc = MagicMock()
-        mock_speech_proc.returncode = 0
+        mock_speech_proc.returncode = None
         mock_speech_proc.wait = AsyncMock(return_value=0)
         ctrl._speaking_proc = mock_speech_proc
 
+        async def fake_listen(on_speech_start=None):
+            mock_speech_proc.wait.assert_not_called()
+            return "hello world"
+
         voice_input = MagicMock()
-        voice_input.listen = AsyncMock(return_value="hello world")
+        voice_input.listen = fake_listen
         with patch.object(ctrl, "_get_voice_input", return_value=voice_input):
             result = _run(ctrl.listen())
             assert result == "hello world"
-            mock_speech_proc.wait.assert_called_once()
+
+    def test_listen_interrupts_speech_when_user_starts_talking(self):
+        """Voice onset during TTS schedules an immediate speech interrupt."""
+        ctrl, state = self._make_controller()
+        state.listening_enabled = True
+
+        mock_speech_proc = MagicMock()
+        mock_speech_proc.returncode = None
+        mock_speech_proc.terminate = MagicMock()
+        mock_speech_proc.wait = AsyncMock(return_value=0)
+        ctrl._speaking_proc = mock_speech_proc
+
+        async def fake_listen(on_speech_start=None):
+            assert on_speech_start is not None
+            on_speech_start()
+            await asyncio.sleep(0)
+            return "stop please"
+
+        voice_input = MagicMock()
+        voice_input.listen = fake_listen
+
+        with patch.object(ctrl, "_get_voice_input", return_value=voice_input):
+            result = _run(ctrl.listen())
+
+        assert result == "stop please"
+        mock_speech_proc.terminate.assert_called_once()
+        assert ctrl._speaking_proc is None
+
+    def test_listen_does_not_interrupt_speech_on_silence(self):
+        ctrl, state = self._make_controller()
+        state.listening_enabled = True
+
+        mock_speech_proc = MagicMock()
+        mock_speech_proc.returncode = None
+        mock_speech_proc.terminate = MagicMock()
+        mock_speech_proc.wait = AsyncMock(return_value=0)
+        ctrl._speaking_proc = mock_speech_proc
+
+        async def fake_listen(on_speech_start=None):
+            assert on_speech_start is not None
+            return None
+
+        voice_input = MagicMock()
+        voice_input.listen = fake_listen
+
+        with patch.object(ctrl, "_get_voice_input", return_value=voice_input):
+            result = _run(ctrl.listen())
+
+        assert result is None
+        mock_speech_proc.terminate.assert_not_called()
+        assert ctrl._speaking_proc is mock_speech_proc
 
     def test_interrupt_terminates_process(self):
         ctrl, state = self._make_controller()
