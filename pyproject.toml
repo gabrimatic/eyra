@@ -36,7 +36,7 @@ dependencies = [
     "silero-vad>=5.1",
     "sounddevice>=0.5.5",
     "onnxruntime>=1.17.0",
-    "playwright>=1.58.0",
+    "playwright>=1.59.0",
     "pypdf>=6.4.0",
 ]
 
