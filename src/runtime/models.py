@@ -24,7 +24,11 @@ class PreflightResult:
     backend_reachable: bool = False
     models_ready: list[str] = field(default_factory=list)
     models_missing: list[str] = field(default_factory=list)
+    # Legacy coarse flag: true when at least one Local Whisper-backed feature is usable.
     wh_available: bool = False
+    # Split capabilities: None means an older caller only populated wh_available.
+    listening_available: bool | None = None
+    speech_available: bool | None = None
     wh_bin: str | None = None
     screen_capture_available: bool = False
 
@@ -45,10 +49,20 @@ class LiveRuntimeState:
 
     @classmethod
     def from_preflight(cls, result: PreflightResult, settings=None) -> "LiveRuntimeState":
+        listening_available = (
+            result.listening_available
+            if result.listening_available is not None
+            else result.wh_available
+        )
+        speech_available = (
+            result.speech_available
+            if result.speech_available is not None
+            else result.wh_available
+        )
         state = cls(
             backend_ready=result.backend_reachable and len(result.models_missing) == 0,
-            listening_enabled=result.wh_available,
-            speech_enabled=result.wh_available,
+            listening_enabled=bool(listening_available),
+            speech_enabled=bool(speech_available),
             wh_bin=result.wh_bin,
         )
         # Apply user config flags (disable capabilities the user turned off)

@@ -24,7 +24,7 @@ class Settings:
     # Voice input: Silero VAD threshold (0.0-1.0). Higher = stricter.
     VOICE_VAD_THRESHOLD: float = 0.6
     # Filesystem tool: comma-separated list of allowed root paths (~ expanded)
-    FILESYSTEM_ALLOWED_PATHS: str = "~,/tmp"
+    FILESYSTEM_ALLOWED_PATHS: str = "~/Documents,/tmp"
     # Filesystem tool: default working directory for the model (~ expanded)
     FILESYSTEM_DEFAULT_PATH: str = "~/Documents"
     # Network-backed tools (weather and browser) are opt-in so the default runtime stays local.
@@ -74,7 +74,7 @@ class Settings:
             SPEECH_COOLDOWN_MS=_int("SPEECH_COOLDOWN_MS", "3000"),
             VOICE_SILENCE_MS=_int("VOICE_SILENCE_MS", "1500"),
             VOICE_VAD_THRESHOLD=_float_range("VOICE_VAD_THRESHOLD", "0.6", 0.0, 1.0),
-            FILESYSTEM_ALLOWED_PATHS=os.getenv("FILESYSTEM_ALLOWED_PATHS", "~,/tmp"),
+            FILESYSTEM_ALLOWED_PATHS=os.getenv("FILESYSTEM_ALLOWED_PATHS", "~/Documents,/tmp"),
             FILESYSTEM_DEFAULT_PATH=os.getenv("FILESYSTEM_DEFAULT_PATH", "~/Documents"),
             NETWORK_TOOLS_ENABLED=_bool("NETWORK_TOOLS_ENABLED", "false"),
             COMPLEXITY_ROUTING_ENABLED=_bool("COMPLEXITY_ROUTING_ENABLED", "false"),

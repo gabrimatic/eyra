@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_READ_BYTES = 64_000  # ~64 KB text read limit
 _MAX_LIST_ENTRIES = 200
+_DEFAULT_ALLOWED_ROOTS = (Path.home() / "Documents", Path("/tmp").resolve())
 
 
 def parse_allowed_roots(paths_str: str) -> tuple[Path, ...]:
@@ -19,7 +20,7 @@ def parse_allowed_roots(paths_str: str) -> tuple[Path, ...]:
         p = p.strip()
         if p:
             roots.append(Path(p).expanduser().resolve())
-    return tuple(roots) if roots else (Path.home(),)
+    return tuple(roots) if roots else _DEFAULT_ALLOWED_ROOTS
 
 
 def _resolve(path_str: str, allowed_roots: tuple[Path, ...], default_path: Path | None = None) -> Path:
@@ -67,7 +68,7 @@ class ReadFileTool(BaseTool):
     costly = False
 
     def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
-        self._roots = allowed_roots or (Path.home(), Path("/tmp").resolve())
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
         self._default_path = default_path.expanduser().resolve() if default_path else None
 
     async def execute(self, path: str = "", **_) -> ToolResult:
@@ -85,8 +86,14 @@ class ReadFileTool(BaseTool):
             return ToolResult(content=f"Not a file: {p}")
         size = p.stat().st_size
         truncated = size > _MAX_READ_BYTES
-        with open(p, "r", errors="replace") as f:
-            text = f.read(_MAX_READ_BYTES)
+        with open(p, "rb") as f:
+            data = f.read(_MAX_READ_BYTES)
+        if b"\x00" in data:
+            return ToolResult(content=f"Cannot read {p.name}: file appears to be binary, not text.")
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return ToolResult(content=f"Cannot read {p.name}: file appears to be binary, not text.")
         header = f"File: {p} ({_human_size(size)})"
         if truncated:
             header += f" (showing first {_MAX_READ_BYTES // 1000}KB)"
@@ -122,7 +129,7 @@ class WriteFileTool(BaseTool):
     costly = False
 
     def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
-        self._roots = allowed_roots or (Path.home(), Path("/tmp").resolve())
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
         self._default_path = default_path.expanduser().resolve() if default_path else None
 
     async def execute(self, path: str = "", content: str = "", overwrite: bool = False, **_) -> ToolResult:
@@ -180,7 +187,7 @@ class EditFileTool(BaseTool):
     costly = False
 
     def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
-        self._roots = allowed_roots or (Path.home(), Path("/tmp").resolve())
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
         self._default_path = default_path.expanduser().resolve() if default_path else None
 
     async def execute(self, path: str = "", find: str = "", replace: str = "", **_) -> ToolResult:
@@ -230,7 +237,7 @@ class ListDirectoryTool(BaseTool):
     costly = False
 
     def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
-        self._roots = allowed_roots or (Path.home(), Path("/tmp").resolve())
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
         self._default_path = default_path.expanduser().resolve() if default_path else None
 
     async def execute(self, path: str = "", **_) -> ToolResult:
@@ -290,7 +297,7 @@ class CreateDirectoryTool(BaseTool):
     costly = False
 
     def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
-        self._roots = allowed_roots or (Path.home(), Path("/tmp").resolve())
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
         self._default_path = default_path.expanduser().resolve() if default_path else None
 
     async def execute(self, path: str = "", **_) -> ToolResult:

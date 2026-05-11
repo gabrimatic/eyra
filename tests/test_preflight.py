@@ -121,6 +121,54 @@ class TestPreflightBackend:
             with patch("runtime.preflight.pathlib.Path.home", return_value=tmp_path):
                 assert PreflightManager._resolve_wh() == str(wh)
 
+    def test_speech_only_preflight_skips_asr_probe(self):
+        settings = Settings(LIVE_LISTENING_ENABLED=False, LIVE_SPEECH_ENABLED=True)
+        manager = PreflightManager(settings)
+        from runtime.models import PreflightResult
+
+        result = PreflightResult()
+        with patch("runtime.preflight.PreflightManager._resolve_wh", return_value="/opt/wh"):
+            with patch("runtime.preflight.PreflightManager._wh_is_running", return_value=True):
+                with patch("runtime.preflight.PreflightManager._start_wh_service", return_value=True):
+                    with patch("runtime.preflight.PreflightManager._wait_for_asr_ready") as asr_probe:
+                        _run(manager.check_local_whisper(result))
+
+        assert result.wh_available is True
+        assert result.speech_available is True
+        assert result.listening_available is False
+        assert result.wh_bin == "/opt/wh"
+        asr_probe.assert_not_called()
+
+    def test_listening_only_preflight_disables_voice_when_asr_is_not_ready(self):
+        settings = Settings(LIVE_LISTENING_ENABLED=True, LIVE_SPEECH_ENABLED=False)
+        manager = PreflightManager(settings)
+        result = _run(_check_wh_with(
+            manager,
+            resolve="/opt/wh",
+            running=True,
+            asr_ready=False,
+        ))
+
+        assert result.wh_available is False
+        assert result.speech_available is False
+        assert result.listening_available is False
+        assert result.wh_bin is None
+
+    def test_combined_voice_keeps_speech_when_asr_is_not_ready(self):
+        settings = Settings(LIVE_LISTENING_ENABLED=True, LIVE_SPEECH_ENABLED=True)
+        manager = PreflightManager(settings)
+        result = _run(_check_wh_with(
+            manager,
+            resolve="/opt/wh",
+            running=True,
+            asr_ready=False,
+        ))
+
+        assert result.wh_available is True
+        assert result.speech_available is True
+        assert result.listening_available is False
+        assert result.wh_bin == "/opt/wh"
+
 
 class TestModelPull:
     def test_pull_model_times_out_and_kills_process(self):
@@ -133,3 +181,15 @@ class TestModelPull:
                     assert _run(manager._pull_model("missing:model")) is False
 
         assert proc.killed is True
+
+
+async def _check_wh_with(manager: PreflightManager, resolve: str | None, running: bool, asr_ready: bool):
+    from runtime.models import PreflightResult
+
+    result = PreflightResult()
+    with patch("runtime.preflight.PreflightManager._resolve_wh", return_value=resolve):
+        with patch("runtime.preflight.PreflightManager._wh_is_running", return_value=running):
+            with patch("runtime.preflight.PreflightManager._start_wh_service", return_value=True):
+                with patch("runtime.preflight.PreflightManager._wait_for_asr_ready", return_value=asr_ready):
+                    await manager.check_local_whisper(result)
+    return result

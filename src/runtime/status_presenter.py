@@ -20,6 +20,17 @@ _STATUS_LABELS = {
 }
 
 
+def voice_status_label(state: LiveRuntimeState) -> str:
+    """Human-readable voice capability state."""
+    if state.listening_enabled and state.speech_enabled:
+        return "input + muted speech" if state.speech_muted else "input + speech"
+    if state.listening_enabled:
+        return "input only"
+    if state.speech_enabled:
+        return "speech only" if not state.speech_muted else "speech muted"
+    return "off"
+
+
 def _box_top(label: str = "") -> str:
     if label:
         inner = f"─ {label} "
@@ -47,11 +58,13 @@ def render_header(state: LiveRuntimeState, settings=None):
     print(f"╰{'─' * _BOX_WIDTH}╯")
     print()
 
-    voice = (
-        f"{DIM}off{NC}" if not (state.listening_enabled or state.speech_enabled)
-        else f"{YELLOW}muted{NC}" if state.speech_muted
-        else f"{GREEN}on{NC}"
-    )
+    voice_label = voice_status_label(state)
+    if voice_label == "off":
+        voice = f"{DIM}off{NC}"
+    elif "muted" in voice_label:
+        voice = f"{YELLOW}{voice_label}{NC}"
+    else:
+        voice = f"{GREEN}{voice_label}{NC}"
     backend = f"{GREEN}ready{NC}" if state.backend_ready else f"{RED}unavailable{NC}"
 
     cap_line = f"  Voice: {voice}    Backend: {backend}"
@@ -99,7 +112,7 @@ def render_status_card(
     model_name: str = "",
 ):
     """Print a full status card."""
-    voice = "off" if not (state.listening_enabled or state.speech_enabled) else "muted" if state.speech_muted else "on"
+    voice = voice_status_label(state)
     goal = state.current_goal or "none"
 
     print()

@@ -33,7 +33,7 @@ Eyra runs preflight checks, then enters a live session:
 ```
 Eyra
 
-  Voice: on    Backend: ready
+  Voice: input + speech    Backend: ready
 
   Type anything or speak. /help for commands.
 ```
@@ -48,7 +48,7 @@ Eyra is now listening. Type or speak at any time.
 - Accepts typed or spoken input without leaving the session.
 - Routes requests to the appropriate model. Complexity routing is available as an experimental option.
 - Uses local tools on demand via function calling: screenshot, time, clipboard, system info, and sandboxed filesystem access.
-- Protects existing files from accidental tool overwrites unless replacement is explicit.
+- Protects existing files from accidental tool overwrites unless replacement is explicit, and refuses binary file reads/edits with a clean message.
 - Offers optional network tools for weather and web browsing when `NETWORK_TOOLS_ENABLED=true`.
 - Speaks responses via local-whisper when available.
 - Works with any OpenAI-compatible provider (Ollama, LM Studio, vLLM, OpenRouter, etc.).
@@ -61,7 +61,7 @@ Eyra is now listening. Type or speak at any time.
 
 Eyra runs as one live session with several concurrent subsystems:
 
-- **Voice** is handled by [Local Whisper](https://github.com/gabrimatic/local-whisper) for both directions: input (ASR via Qwen3-ASR) and output (TTS via Kokoro). Eyra records the microphone via sounddevice and classifies each 32ms frame with Silero VAD. When the speaker pauses, the audio is transcribed through Local Whisper. Eyra will interrupt its own speech to hear you. Toggle with `/voice on|off`; if voice was disabled or unavailable at startup, `/voice on` rechecks Local Whisper and enables it without restarting the session.
+- **Voice** is handled by [Local Whisper](https://github.com/gabrimatic/local-whisper) for both directions: input (ASR via Qwen3-ASR) and output (TTS via Kokoro). Eyra records the microphone via sounddevice and classifies each 32ms frame with Silero VAD. When the speaker pauses, the audio is transcribed through Local Whisper. Eyra will interrupt its own speech to hear you. Toggle with `/voice on|off`; if voice was disabled or unavailable at startup, `/voice on` rechecks Local Whisper and enables whatever is ready without restarting the session. If ASR is still loading but TTS is available, Eyra keeps speech on instead of disabling voice entirely.
 - **Typed input** is always available inline. Both channels feed the same conversation.
 - **Complexity routing** is experimental and off by default. When enabled, requests are scored deterministically and dispatched to a Simple, Moderate, or Complex tier. When disabled, all requests use a single configured model.
 - **Tool use** gives the model access to screenshot, time, clipboard, system info, and sandboxed filesystem actions. Weather and browser tools are opt-in because they contact remote sites. Tools are defined as OpenAI function-calling schemas and executed locally unless a network tool is explicitly enabled. With complexity routing enabled, Simple/Moderate tiers receive lightweight tools and Complex receives all tools including screenshot.
@@ -74,7 +74,7 @@ On startup, Eyra validates:
 - Backend reachability (tries `/v1/models`, falls back to Ollama `/api/tags`)
 - Every configured model exists (auto-pulls via Ollama if needed)
 - Ollama model capabilities, with a warning when the selected model does not advertise native tool calling
-- [Local Whisper](https://github.com/gabrimatic/local-whisper) for voice input and speech output (`brew tap gabrimatic/local-whisper && brew install local-whisper`)
+- [Local Whisper](https://github.com/gabrimatic/local-whisper) for voice input and speech output (`brew tap gabrimatic/local-whisper && brew install local-whisper`). Input and speech are tracked separately so one can keep working if the other is unavailable.
 - Screen capture (macOS built-in)
 
 The session does not start until the backend and models are confirmed ready.
@@ -105,7 +105,7 @@ Control the speed/quality trade-off with `/mode`:
 
 | Mode | Behavior |
 |------|----------|
-| `fast` | Always use the smallest model |
+| `fast` | Uses the smallest model when complexity routing is enabled. If routing is off, Eyra explains that fast mode is unavailable instead of silently pretending to switch. |
 | `balanced` | Let the router decide (default) |
 | `best` | Always use the strongest model |
 
@@ -113,7 +113,7 @@ Control the speed/quality trade-off with `/mode`:
 
 ## Complexity Routing
 
-Complexity routing is **experimental and off by default**. When disabled (`COMPLEXITY_ROUTING_ENABLED=false`), all requests use the single `MODEL` setting with all tools available.
+Complexity routing is **experimental and off by default**. When disabled (`COMPLEXITY_ROUTING_ENABLED=false`), all requests use the single `MODEL` setting with all tools available. `/mode fast` is available only when routing is enabled because the simple-tier model is validated only in routing mode.
 
 When enabled (`COMPLEXITY_ROUTING_ENABLED=true`), every request in `balanced` mode is scored by `ComplexityScorer` before dispatch.
 
@@ -170,7 +170,7 @@ NETWORK_TOOLS_ENABLED=false
 COMPLEXITY_ROUTING_ENABLED=false
 
 # Filesystem sandbox: comma-separated list of allowed root paths
-FILESYSTEM_ALLOWED_PATHS=~,/tmp
+FILESYSTEM_ALLOWED_PATHS=~/Documents,/tmp
 # Relative file paths are resolved under this directory, then checked against the sandbox.
 FILESYSTEM_DEFAULT_PATH=~/Documents
 ```
@@ -278,7 +278,7 @@ If the model does not list tools, text chat will still work, but local tool call
 
 <details><summary><strong>Voice not working</strong></summary>
 
-Voice requires [Local Whisper](https://github.com/gabrimatic/local-whisper), which powers both input (ASR) and output (TTS). Install it:
+Voice requires [Local Whisper](https://github.com/gabrimatic/local-whisper), which powers input (ASR) and output (TTS). Install it:
 
 ```bash
 brew tap gabrimatic/local-whisper && brew install local-whisper
@@ -286,7 +286,7 @@ brew tap gabrimatic/local-whisper && brew install local-whisper
 
 Eyra's preflight automatically detects the installation (even if `wh` is not on PATH) and starts the service if needed. If preflight reports it's installed but not running, start manually with `wh start`.
 
-You can also toggle voice at runtime with `/voice on|off`. If voice was disabled in `.env`, `/voice on` performs the Local Whisper check at runtime and enables voice when it becomes available.
+You can also toggle voice at runtime with `/voice on|off`. If voice was disabled in `.env`, `/voice on` performs the Local Whisper check at runtime and enables whichever voice features are ready. If ASR is not ready yet, speech can still remain on.
 
 </details>
 
