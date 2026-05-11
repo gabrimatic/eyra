@@ -8,7 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
-No unreleased changes.
+### Added
+
+- Shared intent detection for terminal and Web UI requests, so screen, filesystem, network, PDF, and background-task decisions stay aligned across both surfaces.
+- Event-driven Web UI task updates through a local event stream, replacing the browser-side task polling loop.
+
+### Changed
+
+- `eyra-web` now runs startup/provider setup and full preflight before serving, then passes real model, tool, vision, and screen capability results into the Web UI runtime.
+- Web UI local PDF tasks now use the same controller-owned local extraction path before asking the model to summarize.
+
+### Fixed
+
+- Web UI open-ended local tool requests now fail clearly when the selected model cannot call tools, instead of starting a task that cannot complete correctly.
+- Web UI screen requests now fail clearly when the configured vision model is not vision-capable.
+- `WEB_UI_MAX_REQUEST_BYTES` now applies to browser audio uploads as well as JSON API requests.
+- `eyra-web` now reports host/port bind failures cleanly instead of showing a traceback.
 
 ## [4.0.0] - 2026-05-11
 
@@ -43,7 +58,7 @@ No unreleased changes.
 
 - Realtime voice now requires `OPENAI_API_KEY` explicitly and no longer falls back to provider `API_KEY`.
 - Realtime web tool calls now require both Realtime mode and unguessable Web UI/tool-call tokens.
-- Realtime now uses `gpt-realtime` as the default model name for the current OpenAI Realtime API.
+- Realtime now uses `gpt-realtime` as its default model name.
 - Realtime tools are no longer exposed by default; risky local tools are not available to Realtime unless explicitly allowlisted.
 - Realtime tool allowlists are restricted to Eyra's built-in low-risk Realtime tool set; local clipboard, filesystem, screen, OS, MCP, browser, and agent tools are not exposed to Realtime.
 - Web UI now requires token auth automatically for all non-health endpoints, including localhost, and refuses cross-origin API requests from other origins.
