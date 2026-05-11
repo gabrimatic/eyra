@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Packaged installs expose the `eyra` console command and include the runtime entry module in the wheel.
 - Shared tool-registry construction for terminal and web sessions.
+- `pypdf` dependency for local PDF text extraction.
 - Optional OS operator tools for bounded command execution, process listing, file metadata, file search, LaunchAgent status, app opening, notifications, and clipboard writes.
 - Voice-codex-style operator aliases for voice context, system snapshots, URL fetches, LaunchAgent management, Codex/OpenClaw session lookup, and Codex/OpenClaw task delegation.
 - Optional stdio MCP bridge for listing and calling configured MCP server tools.
@@ -19,6 +20,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Built-in `eyra-web` browser UI for phone or browser access, with text chat, Local Whisper browser voice turns, and optional OpenAI Realtime WebRTC voice.
 - Local Web UI voice replies through `wh whisper` after Local Whisper browser voice turns.
 - Realtime voice session endpoint that mints server-side ephemeral client secrets and exposes Eyra tools to Realtime sessions.
+- Background task manager with task ids, lifecycle states, progress, final results, failures, timeouts, and cancellation.
+- Task commands: `/tasks`, `/task <id>`, `/cancel <id>`, and `/cancel all`.
+- Non-blocking coordinator behavior so typed and voice input remain available while background tasks run.
+- Local PDF text extraction tool for sandboxed PDFs, including scanned/image-only reporting without online OCR.
+- Sandboxed filesystem move, copy, open, and reveal tools.
+- Deterministic local handlers for common move, copy, create, overwrite, and direct-read file requests.
+- Local macOS context tools for frontmost app and sandbox-filtered Finder selection.
+- Task and tool safety settings for background concurrency, worker model override, task timeout, tool timeout, model concurrency, and task status updates.
 
 ### Changed
 
@@ -34,11 +43,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/voice off` now cancels the owned voice task instead of relying on global task-name lookup.
 - `/mode fast` now explains when complexity routing is disabled instead of silently switching to an unused mode.
 - `write_file` now protects existing files unless `overwrite=true` is provided explicitly.
-- The default filesystem sandbox is now `~/Documents,/tmp` instead of the whole home directory.
+- The default filesystem sandbox is now `~/Documents,~/Desktop,~/Downloads,/tmp` instead of the whole home directory.
 - Runtime logs now use a writable log path by default, with `EYRA_LOG_FILE` as an override.
 - `/goal` now reaches the response pipeline as session context for future replies.
+- `/status` now includes task state.
 - Weather lookups require an explicit location and no longer use remote IP geolocation.
 - Tool-call logs now record tool names and argument keys without persisting argument values.
+- Tool-required background tasks now report clearly when the selected model cannot use local tools.
+- PDF summary workers now extract local PDF text before asking the model to summarize, with a bounded local fallback if the model returns no text.
+- Screen requests now check for both native tool support and vision support before starting a worker.
+- Document requests such as page-by-page PDF summaries no longer trigger screen capture intent detection.
 - `.env.example` now includes `AUTO_PULL_MODELS`.
 - CI and contributor docs now include wheel-build verification.
 - `read_file` now refuses binary files with a clean message instead of streaming raw bytes into the terminal.
