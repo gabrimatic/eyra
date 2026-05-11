@@ -76,7 +76,7 @@ def render_header(state: LiveRuntimeState, settings=None):
             print(f"  {DIM}Model: {model_name}{NC}")
         enabled = []
         if getattr(settings, "WEB_UI_ENABLED", False):
-            enabled.append(f"web http://{settings.WEB_UI_HOST}:{settings.WEB_UI_PORT}")
+            enabled.append("web via eyra-web")
         if getattr(settings, "OS_TOOLS_ENABLED", False):
             enabled.append("os")
         if getattr(settings, "MCP_TOOLS_ENABLED", False):
@@ -124,6 +124,7 @@ def render_status_card(
     msg_count: int,
     model_name: str = "",
     task_summary: str = "",
+    extra_rows: list[tuple[str, str]] | None = None,
 ):
     """Print a full status card."""
     voice = voice_status_label(state)
@@ -140,6 +141,8 @@ def render_status_card(
     if task_summary:
         print(_box_row_padded("Tasks", task_summary))
     print(_box_row_padded("Tools", f"{tool_count} available"))
+    for label, value in extra_rows or []:
+        print(_box_row_padded(label, value))
     print(f"╰{'─' * _BOX_WIDTH}╯")
     print()
 
@@ -148,6 +151,7 @@ def render_help_card():
     """Print the /help command card."""
     cmds = [
         ("/voice     ", "on|off"),
+        ("/voice-test", "Manual interrupt test"),
         ("/mute      ", "Mute speech output"),
         ("/unmute    ", "Unmute speech"),
         ("/goal TEXT ", "Set a goal"),
@@ -156,6 +160,9 @@ def render_help_card():
         ("/tasks     ", "Show active and recent tasks"),
         ("/task ID   ", "Show task details"),
         ("/cancel ID ", "Cancel a task or all"),
+        ("/approvals ", "Show pending approvals"),
+        ("/approve ID", "Approve exact action"),
+        ("/reject ID ", "Reject approval"),
         ("/clear     ", "Reset conversation"),
         ("/help      ", "Show this help"),
         ("/quit      ", "Exit Eyra"),

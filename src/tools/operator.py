@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from tools.approval import GLOBAL_APPROVAL_MANAGER, ApprovalManager, approval_required_message
 from tools.base import BaseTool, ToolResult
 from tools.filesystem import _resolve
 from utils.settings import Settings
@@ -62,6 +63,20 @@ def _redact(text: str) -> str:
     for pattern in patterns:
         redacted = re.sub(pattern, lambda m: m.group(1) + m.group(2) + "[redacted]" if m.lastindex else "[redacted]", redacted, flags=re.I)
     return redacted
+
+
+def _approval_or_result(
+    manager: ApprovalManager,
+    *,
+    tool_name: str,
+    title: str,
+    details: dict[str, object],
+    approval_id: str = "",
+) -> ToolResult | None:
+    if approval_id and manager.consume(approval_id, tool_name, title, details):
+        return None
+    approval = manager.request(tool_name, title, details)
+    return ToolResult(content=approval_required_message(approval))
 
 
 class DiscoverCapabilitiesTool(BaseTool):
@@ -144,23 +159,30 @@ class RunCommandTool(BaseTool):
     name = "run_command"
     description = (
         "Run a bounded local command inside an allowed filesystem root. Prefer argv. "
-        "Shell strings and risky commands require confirmed=true from the user."
+        "Shell strings and risky commands require server-side user approval."
     )
     parameters = {
         "type": "object",
         "properties": {
             "argv": {"type": "array", "items": {"type": "string"}, "description": "Command argv, e.g. ['pwd']."},
-            "command": {"type": "string", "description": "Shell command string. Requires confirmed=true."},
+            "command": {"type": "string", "description": "Shell command string. Requires approval."},
             "cwd": {"type": "string", "description": "Working directory under an allowed root."},
             "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": _MAX_TIMEOUT},
-            "confirmed": {"type": "boolean", "description": "True only after the user approves the exact command."},
+            "approval_id": {"type": "string", "description": "Server-issued approval id for this exact action."},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve risky actions."},
         },
     }
     costly = True
 
-    def __init__(self, allowed_roots: tuple[Path, ...], default_path: Path):
+    def __init__(
+        self,
+        allowed_roots: tuple[Path, ...],
+        default_path: Path,
+        approval_manager: ApprovalManager | None = None,
+    ):
         self._roots = tuple(_as_default_path(root) for root in allowed_roots)
         self._default_path = _as_default_path(default_path)
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
 
     async def execute(
         self,
@@ -169,6 +191,7 @@ class RunCommandTool(BaseTool):
         cwd: str = "",
         timeout_seconds: int = 30,
         confirmed: bool = False,
+        approval_id: str = "",
         **_,
     ) -> ToolResult:
         try:
@@ -180,15 +203,30 @@ class RunCommandTool(BaseTool):
 
         timeout = max(1, min(int(timeout_seconds or 30), _MAX_TIMEOUT))
         if command:
-            if not confirmed:
-                return ToolResult(content="Approval required for shell commands. Ask the user, then call again with confirmed=true.")
+            approval = _approval_or_result(
+                self._approvals,
+                tool_name=self.name,
+                title="shell command",
+                details={"command": command, "cwd": str(workdir), "timeout_seconds": timeout},
+                approval_id=approval_id,
+            )
+            if approval is not None:
+                return approval
             return await asyncio.to_thread(self._run_shell, command, workdir, timeout)
 
         if not argv:
             return ToolResult(content="Missing argv or command.")
         argv = [str(part) for part in argv]
-        if self._requires_confirmation(argv) and not confirmed:
-            return ToolResult(content="Approval required for this command. Ask the user, then call again with confirmed=true.")
+        if self._requires_confirmation(argv):
+            approval = _approval_or_result(
+                self._approvals,
+                tool_name=self.name,
+                title="risky command",
+                details={"argv": argv, "cwd": str(workdir), "timeout_seconds": timeout},
+                approval_id=approval_id,
+            )
+            if approval is not None:
+                return approval
         return await asyncio.to_thread(self._run_argv, argv, workdir, timeout)
 
     def _requires_confirmation(self, argv: list[str]) -> bool:
@@ -378,23 +416,41 @@ class GetLaunchAgentStatusTool(BaseTool):
 
 class ManageLaunchAgentTool(BaseTool):
     name = "manage_launch_agent"
-    description = "Start, stop, or restart a macOS LaunchAgent by label. Requires confirmed=true."
+    description = "Start, stop, or restart a macOS LaunchAgent by label. Requires server-side user approval."
     parameters = {
         "type": "object",
         "properties": {
             "label": {"type": "string"},
             "action": {"type": "string", "enum": ["start", "stop", "restart"]},
-            "confirmed": {"type": "boolean"},
+            "approval_id": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve this action."},
         },
         "required": ["label", "action"],
     }
     costly = True
 
-    async def execute(self, label: str = "", action: str = "", confirmed: bool = False, **_) -> ToolResult:
+    def __init__(self, approval_manager: ApprovalManager | None = None):
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(
+        self,
+        label: str = "",
+        action: str = "",
+        confirmed: bool = False,
+        approval_id: str = "",
+        **_,
+    ) -> ToolResult:
         if not label.strip() or action not in {"start", "stop", "restart"}:
             return ToolResult(content="Provide label and action=start|stop|restart.")
-        if not confirmed:
-            return ToolResult(content="Approval required before changing a LaunchAgent. Ask the user, then call again with confirmed=true.")
+        approval = _approval_or_result(
+            self._approvals,
+            tool_name=self.name,
+            title="LaunchAgent change",
+            details={"label": label, "action": action},
+            approval_id=approval_id,
+        )
+        if approval is not None:
+            return approval
         actions = ["stop", "start"] if action == "restart" else [action]
         outputs = []
         for item in actions:
@@ -452,22 +508,33 @@ class FetchUrlTool(BaseTool):
 
 class OpenAppTool(BaseTool):
     name = "open_app"
-    description = "Open a macOS application by name. Requires confirmed=true."
+    description = "Open a macOS application by name. Requires server-side user approval."
     parameters = {
         "type": "object",
         "properties": {
             "name": {"type": "string", "description": "Application name, e.g. Calculator."},
-            "confirmed": {"type": "boolean"},
+            "approval_id": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve this action."},
         },
         "required": ["name"],
     }
     costly = True
 
-    async def execute(self, name: str = "", confirmed: bool = False, **_) -> ToolResult:
+    def __init__(self, approval_manager: ApprovalManager | None = None):
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(self, name: str = "", confirmed: bool = False, approval_id: str = "", **_) -> ToolResult:
         if not name.strip():
             return ToolResult(content="Missing application name.")
-        if not confirmed:
-            return ToolResult(content="Approval required before opening an app. Ask the user, then call again with confirmed=true.")
+        approval = _approval_or_result(
+            self._approvals,
+            tool_name=self.name,
+            title="open application",
+            details={"name": name},
+            approval_id=approval_id,
+        )
+        if approval is not None:
+            return approval
         completed = await asyncio.to_thread(
             subprocess.run,
             ["open", "-a", name],
@@ -512,19 +579,30 @@ class ShowNotificationTool(BaseTool):
 
 class SetClipboardTool(BaseTool):
     name = "set_clipboard_text"
-    description = "Replace the macOS clipboard text. Requires confirmed=true."
+    description = "Replace the macOS clipboard text. Requires server-side user approval."
     parameters = {
         "type": "object",
         "properties": {
             "text": {"type": "string"},
-            "confirmed": {"type": "boolean"},
+            "approval_id": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve this action."},
         },
         "required": ["text"],
     }
 
-    async def execute(self, text: str = "", confirmed: bool = False, **_) -> ToolResult:
-        if not confirmed:
-            return ToolResult(content="Approval required before changing the clipboard. Ask the user, then call again with confirmed=true.")
+    def __init__(self, approval_manager: ApprovalManager | None = None):
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(self, text: str = "", confirmed: bool = False, approval_id: str = "", **_) -> ToolResult:
+        approval = _approval_or_result(
+            self._approvals,
+            tool_name=self.name,
+            title="clipboard change",
+            details={"text_length": len(text), "text_preview": text[:80]},
+            approval_id=approval_id,
+        )
+        if approval is not None:
+            return approval
         completed = await asyncio.to_thread(
             subprocess.run,
             ["pbcopy"],
@@ -721,7 +799,7 @@ class RunAgentTaskTool(BaseTool):
     name = "run_agent_task"
     description = (
         "Hand a complex task to a configured terminal agent such as Codex or OpenClaw. "
-        "This bridge is opt-in and requires confirmed=true for execution."
+        "This bridge is opt-in and requires server-side user approval for execution."
     )
     parameters = {
         "type": "object",
@@ -729,25 +807,47 @@ class RunAgentTaskTool(BaseTool):
             "agent": {"type": "string", "enum": ["codex", "openclaw"]},
             "task": {"type": "string"},
             "cwd": {"type": "string"},
-            "confirmed": {"type": "boolean"},
+            "approval_id": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve this action."},
         },
         "required": ["agent", "task"],
     }
     costly = True
 
-    def __init__(self, allowed_roots: tuple[Path, ...], default_path: Path):
+    def __init__(
+        self,
+        allowed_roots: tuple[Path, ...],
+        default_path: Path,
+        approval_manager: ApprovalManager | None = None,
+    ):
         self._roots = tuple(_as_default_path(root) for root in allowed_roots)
         self._default_path = _as_default_path(default_path)
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
 
-    async def execute(self, agent: str = "codex", task: str = "", cwd: str = "", confirmed: bool = False, **_) -> ToolResult:
-        if not confirmed:
-            return ToolResult(content="Approval required before delegating to a terminal agent. Ask the user, then call again with confirmed=true.")
+    async def execute(
+        self,
+        agent: str = "codex",
+        task: str = "",
+        cwd: str = "",
+        confirmed: bool = False,
+        approval_id: str = "",
+        **_,
+    ) -> ToolResult:
         if not task.strip():
             return ToolResult(content="Missing task.")
         try:
             workdir = _resolve(cwd or str(self._default_path), self._roots, self._default_path)
         except (PermissionError, ValueError) as e:
             return ToolResult(content=str(e))
+        approval = _approval_or_result(
+            self._approvals,
+            tool_name=self.name,
+            title="agent delegation",
+            details={"agent": agent, "task": task, "cwd": str(workdir)},
+            approval_id=approval_id,
+        )
+        if approval is not None:
+            return approval
         binary = shutil.which(agent)
         if not binary:
             return ToolResult(content=f"{agent} is not installed or not on PATH.")
@@ -782,15 +882,29 @@ class RunAgentTaskTool(BaseTool):
 
 class RunCodexTaskTool(RunAgentTaskTool):
     name = "run_codex_task"
-    description = "Delegate a complex task to Codex. Requires confirmed=true."
+    description = "Delegate a complex task to Codex. Requires server-side user approval."
 
-    async def execute(self, task: str = "", cwd: str = "", confirmed: bool = False, **_) -> ToolResult:
-        return await super().execute(agent="codex", task=task, cwd=cwd, confirmed=confirmed)
+    async def execute(
+        self,
+        task: str = "",
+        cwd: str = "",
+        confirmed: bool = False,
+        approval_id: str = "",
+        **_,
+    ) -> ToolResult:
+        return await super().execute(agent="codex", task=task, cwd=cwd, confirmed=confirmed, approval_id=approval_id)
 
 
 class RunOpenClawAgentTool(RunAgentTaskTool):
     name = "run_openclaw_agent"
-    description = "Delegate a complex task to OpenClaw. Requires confirmed=true."
+    description = "Delegate a complex task to OpenClaw. Requires server-side user approval."
 
-    async def execute(self, task: str = "", cwd: str = "", confirmed: bool = False, **_) -> ToolResult:
-        return await super().execute(agent="openclaw", task=task, cwd=cwd, confirmed=confirmed)
+    async def execute(
+        self,
+        task: str = "",
+        cwd: str = "",
+        confirmed: bool = False,
+        approval_id: str = "",
+        **_,
+    ) -> ToolResult:
+        return await super().execute(agent="openclaw", task=task, cwd=cwd, confirmed=confirmed, approval_id=approval_id)

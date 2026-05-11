@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from tools.approval import ApprovalManager
 from tools.operator import (
     DiscoverCapabilitiesTool,
     FetchUrlTool,
@@ -87,13 +88,49 @@ class TestRunCommandTool:
         result = _run(tool.execute(command="echo hello", cwd=str(tmp_path)))
 
         assert "Approval required" in result.content
-        assert "confirmed=true" in result.content
+        assert "/approve" in result.content
 
     def test_dangerous_argv_requires_confirmation(self, tmp_path):
         tool = RunCommandTool(allowed_roots=(tmp_path,), default_path=tmp_path)
 
         result = _run(tool.execute(argv=["rm", "-rf", "x"], cwd=str(tmp_path)))
 
+        assert "Approval required" in result.content
+
+    def test_confirmed_true_does_not_bypass_command_approval(self, tmp_path):
+        tool = RunCommandTool(allowed_roots=(tmp_path,), default_path=tmp_path)
+
+        result = _run(tool.execute(command="echo bypass", cwd=str(tmp_path), confirmed=True))
+
+        assert "Approval required" in result.content
+        assert "exit_code=0" not in result.content
+
+    def test_approval_id_is_action_specific_and_consumed(self, tmp_path):
+        manager = ApprovalManager(ttl_seconds=60)
+        tool = RunCommandTool(allowed_roots=(tmp_path,), default_path=tmp_path, approval_manager=manager)
+
+        pending = _run(tool.execute(command="echo approved", cwd=str(tmp_path)))
+        approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+        assert manager.approve(approval_id) is True
+
+        result = _run(tool.execute(command="echo approved", cwd=str(tmp_path), approval_id=approval_id))
+        reused = _run(tool.execute(command="echo approved", cwd=str(tmp_path), approval_id=approval_id))
+
+        assert "exit_code=0" in result.content
+        assert "approved" in result.content
+        assert "Approval required" in reused.content
+
+    def test_approval_expires(self, tmp_path):
+        now = {"value": 1000.0}
+        manager = ApprovalManager(ttl_seconds=1, clock=lambda: now["value"])
+        tool = RunCommandTool(allowed_roots=(tmp_path,), default_path=tmp_path, approval_manager=manager)
+
+        pending = _run(tool.execute(command="echo late", cwd=str(tmp_path)))
+        approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+        now["value"] = 1002.0
+
+        assert manager.approve(approval_id) is False
+        result = _run(tool.execute(command="echo late", cwd=str(tmp_path), approval_id=approval_id))
         assert "Approval required" in result.content
 
 
@@ -134,11 +171,17 @@ class TestMacOperatorTools:
         assert "Approval required" in result.content
 
     def test_set_clipboard_writes_with_confirmation(self):
+        manager = ApprovalManager(ttl_seconds=60)
+        tool = SetClipboardTool(approval_manager=manager)
+        pending = _run(tool.execute(text="hello"))
+        approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+        assert manager.approve(approval_id) is True
+
         with patch("tools.operator.subprocess.run") as run:
             run.return_value.returncode = 0
             run.return_value.stderr = ""
 
-            result = _run(SetClipboardTool().execute(text="hello", confirmed=True))
+            result = _run(tool.execute(text="hello", approval_id=approval_id))
 
         assert "Clipboard updated" in result.content
         run.assert_called_once()
@@ -260,12 +303,17 @@ class TestRunAgentTaskTool:
 
         with patch("tools.operator.shutil.which", return_value="/usr/bin/codex"):
             with patch("tools.operator.asyncio.create_subprocess_exec", fake_create_subprocess_exec):
+                manager = ApprovalManager(ttl_seconds=60)
+                tool = RunAgentTaskTool(allowed_roots=(tmp_path,), default_path=tmp_path, approval_manager=manager)
+                pending = _run(tool.execute(agent="codex", task="do work", cwd=str(tmp_path)))
+                approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+                assert manager.approve(approval_id) is True
                 result = _run(
-                    RunAgentTaskTool(allowed_roots=(tmp_path,), default_path=tmp_path).execute(
+                    tool.execute(
                         agent="codex",
                         task="do work",
                         cwd=str(tmp_path),
-                        confirmed=True,
+                        approval_id=approval_id,
                     )
                 )
 
@@ -295,12 +343,17 @@ class TestRunAgentTaskTool:
         with patch("tools.operator.shutil.which", return_value="/usr/bin/codex"):
             with patch("tools.operator.asyncio.create_subprocess_exec", fake_create_subprocess_exec):
                 with patch("tools.operator._AGENT_TIMEOUT_SECONDS", 0.01):
+                    manager = ApprovalManager(ttl_seconds=60)
+                    tool = RunAgentTaskTool(allowed_roots=(tmp_path,), default_path=tmp_path, approval_manager=manager)
+                    pending = _run(tool.execute(agent="codex", task="slow", cwd=str(tmp_path)))
+                    approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+                    assert manager.approve(approval_id) is True
                     result = _run(
-                        RunAgentTaskTool(allowed_roots=(tmp_path,), default_path=tmp_path).execute(
+                        tool.execute(
                             agent="codex",
                             task="slow",
                             cwd=str(tmp_path),
-                            confirmed=True,
+                            approval_id=approval_id,
                         )
                     )
 

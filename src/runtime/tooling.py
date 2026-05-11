@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from tools.approval import ApprovalManager
 from tools.browser import BrowserSession, ClickElementTool, OpenUrlTool, PageScreenshotTool, WebSearchTool
 from tools.clipboard import ClipboardTool
 from tools.filesystem import (
@@ -52,7 +53,11 @@ from tools.weather import WeatherTool
 from utils.settings import Settings
 
 
-def build_tool_registry(settings: Settings, browser_session: BrowserSession | None = None) -> ToolRegistry:
+def build_tool_registry(
+    settings: Settings,
+    browser_session: BrowserSession | None = None,
+    approval_manager: ApprovalManager | None = None,
+) -> ToolRegistry:
     """Build Eyra's tool registry with optional bridges gated by settings."""
     registry = ToolRegistry()
     registry.register(DiscoverCapabilitiesTool(settings))
@@ -87,16 +92,16 @@ def build_tool_registry(settings: Settings, browser_session: BrowserSession | No
         registry.register(PageScreenshotTool(session=session))
 
     if settings.OS_TOOLS_ENABLED:
-        registry.register(RunCommandTool(allowed_roots=fs_roots, default_path=fs_default))
+        registry.register(RunCommandTool(allowed_roots=fs_roots, default_path=fs_default, approval_manager=approval_manager))
         registry.register(FileInfoTool(allowed_roots=fs_roots, default_path=fs_default))
         registry.register(SearchFilesTool(allowed_roots=fs_roots, default_path=fs_default))
         registry.register(ListProcessesTool())
         registry.register(GetSystemSnapshotTool())
         registry.register(GetLaunchAgentStatusTool())
-        registry.register(ManageLaunchAgentTool())
-        registry.register(OpenAppTool())
+        registry.register(ManageLaunchAgentTool(approval_manager=approval_manager))
+        registry.register(OpenAppTool(approval_manager=approval_manager))
         registry.register(ShowNotificationTool())
-        registry.register(SetClipboardTool())
+        registry.register(SetClipboardTool(approval_manager=approval_manager))
 
     if settings.AGENT_TOOLS_ENABLED:
         registry.register(GetAgentStatusTool())
@@ -106,9 +111,9 @@ def build_tool_registry(settings: Settings, browser_session: BrowserSession | No
         registry.register(ListOpenClawSessionsTool())
         registry.register(GetCodexSessionContentTool())
         registry.register(GetOpenClawStatusTool())
-        registry.register(RunAgentTaskTool(allowed_roots=fs_roots, default_path=fs_default))
-        registry.register(RunCodexTaskTool(allowed_roots=fs_roots, default_path=fs_default))
-        registry.register(RunOpenClawAgentTool(allowed_roots=fs_roots, default_path=fs_default))
+        registry.register(RunAgentTaskTool(allowed_roots=fs_roots, default_path=fs_default, approval_manager=approval_manager))
+        registry.register(RunCodexTaskTool(allowed_roots=fs_roots, default_path=fs_default, approval_manager=approval_manager))
+        registry.register(RunOpenClawAgentTool(allowed_roots=fs_roots, default_path=fs_default, approval_manager=approval_manager))
 
     if settings.MCP_TOOLS_ENABLED:
         registry.register(ListMcpTools(config_path=settings.MCP_CONFIG_PATH))

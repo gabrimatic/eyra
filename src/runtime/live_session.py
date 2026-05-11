@@ -26,6 +26,8 @@ from runtime.status_presenter import (
 )
 from runtime.tasks import BackgroundTask, BackgroundTaskManager, TaskStatus
 from runtime.tooling import build_tool_registry
+from runtime.vision import analyze_screen
+from tools.approval import ApprovalManager
 from tools.browser import BrowserSession
 from tools.registry import ToolRegistry
 from utils.settings import Settings
@@ -35,9 +37,10 @@ from utils.theme import CYAN, DIM, DIM_ITALIC, NC, YELLOW
 logger = logging.getLogger(__name__)
 
 _COMMANDS = {
-    "/voice", "/mute", "/unmute",
+    "/voice", "/voice-test", "/mute", "/unmute",
     "/goal", "/status", "/quit", "/clear",
     "/mode", "/help", "/tasks", "/task", "/cancel",
+    "/approvals", "/approve", "/reject",
 }
 
 _QUIT_WORDS = {"quit", "exit", "bye", "goodbye", "q"}
@@ -55,7 +58,9 @@ _UI_NOUNS = (
 _SCREEN_CUES = re.compile(
     rf"\b({_UI_NOUNS})\b"
     r"|"
-    rf"\b(look\s+at|show\s+me|read\s+the|text\s+on|code\s+on|what'?s\s+on)\s+(the\s+)?({_UI_NOUNS}|this|that|it|here)\b"
+    rf"\b(look(?:ing)?\s+at|show\s+me|read\s+the|text\s+on|code\s+on|what'?s\s+on)\s+(the\s+)?({_UI_NOUNS}|this|that|it|here)\b"
+    r"|"
+    r"\bwhat\s+(?:i'?m|i am)\s+looking\s+at\b"
     r"|"
     r"\b(what\s+is\s+(this|that)|what'?s\s+(this|that)|see\s+(this|that|here)|explain\s+(this|that))\b",
     re.I,
@@ -103,6 +108,7 @@ class LiveSession:
         # Voice loop yields when this is set.
         self._busy = asyncio.Event()
         self._browser_session = BrowserSession()
+        self.approvals = ApprovalManager()
         self._tool_registry = self._build_tool_registry()
         self._voice_task: asyncio.Task | None = None
         self._input_tasks: set[asyncio.Task] = set()
@@ -116,7 +122,11 @@ class LiveSession:
         )
 
     def _build_tool_registry(self) -> ToolRegistry:
-        return build_tool_registry(self.settings, browser_session=self._browser_session)
+        return build_tool_registry(
+            self.settings,
+            browser_session=self._browser_session,
+            approval_manager=self.approvals,
+        )
 
     async def run(self):
         """Main entry point. Runs until quit."""
@@ -310,6 +320,17 @@ class LiveSession:
                 print(f"  Voice is {voice_status}. Usage: /voice on|off")
             return True
 
+        if command == "/voice-test":
+            if not self.state.speech_enabled:
+                print("  Speech output is off. Run /voice on or /unmute after Local Whisper is available.")
+                return True
+            print("  Voice interruption test started. Speak over Eyra now; TTS should stop and your next input should process.")
+            await self.speech.speak(
+                "This is Eyra's voice interruption test. Start speaking now. "
+                "If interruption is working, this spoken sentence should stop and your new input should be processed."
+            )
+            return True
+
         if command == "/mute":
             self.state.speech_muted = True
             print_status_change("Speech muted")
@@ -357,6 +378,33 @@ class LiveSession:
                     print(f"  No cancellable task found for: {arg}")
             else:
                 print("  Usage: /cancel <id>|all")
+            return True
+
+        if command == "/approvals":
+            pending = self.approvals.list_pending()
+            print()
+            print("  Pending approvals")
+            if not pending:
+                print("  None.")
+            for approval in pending:
+                print(f"  {approval.id}  {approval.tool_name}  {approval.title}")
+            print()
+            return True
+
+        if command == "/approve":
+            approval_id = lower_parts[1] if len(lower_parts) > 1 else ""
+            if approval_id and self.approvals.approve(approval_id):
+                print_status_change(f"Approved {approval_id}")
+            else:
+                print(f"  No pending approval found for: {approval_id}")
+            return True
+
+        if command == "/reject":
+            approval_id = lower_parts[1] if len(lower_parts) > 1 else ""
+            if approval_id and self.approvals.reject(approval_id):
+                print_status_change(f"Rejected {approval_id}")
+            else:
+                print(f"  No pending approval found for: {approval_id}")
             return True
 
         if command == "/clear":
@@ -418,6 +466,8 @@ class LiveSession:
 
     def _print_status(self):
         model_name = getattr(self.settings, "MODEL", "")
+        worker_model = _settings_str(self.settings, "WORKER_MODEL", "") or model_name
+        vision_model = _settings_str(self.settings, "VISION_MODEL", "") or model_name
         render_status_card(
             state=self.state,
             quality_mode_value=self.quality_mode.value,
@@ -425,12 +475,38 @@ class LiveSession:
             msg_count=len(self.state.conversation_messages),
             model_name=model_name or "",
             task_summary=self._task_summary(),
+            extra_rows=[
+                ("Worker", worker_model or "default"),
+                ("Vision", vision_model or "default"),
+                ("Model tools", self._capability_label(worker_model, "tool")),
+                ("Vision img", self._capability_label(vision_model, "vision")),
+                ("Web UI", "eyra-web" if _settings_bool(self.settings, "WEB_UI_ENABLED", False) else "off"),
+                ("Network", "on" if _settings_bool(self.settings, "NETWORK_TOOLS_ENABLED", False) else "off"),
+                ("OS tools", "on" if _settings_bool(self.settings, "OS_TOOLS_ENABLED", False) else "off"),
+                ("MCP", "on" if _settings_bool(self.settings, "MCP_TOOLS_ENABLED", False) else "off"),
+                ("Agents", "on" if _settings_bool(self.settings, "AGENT_TOOLS_ENABLED", False) else "off"),
+                ("Realtime", "on" if _settings_bool(self.settings, "REALTIME_VOICE_ENABLED", False) else "off"),
+                ("Sandbox", _settings_str(self.settings, "FILESYSTEM_ALLOWED_PATHS", "")),
+            ],
         )
 
     def _task_summary(self) -> str:
         active = len(self.task_manager.active_tasks())
         recent = len(self.task_manager.list_tasks(include_recent=True))
         return f"{active} active, {recent} recent"
+
+    def _capability_label(self, model: str, capability: str) -> str:
+        if not model:
+            return "unknown"
+        if capability == "tool":
+            checked = set(getattr(self.preflight, "tool_capability_checked_models", []))
+            capable = set(getattr(self.preflight, "tool_capable_models", []))
+        else:
+            checked = set(getattr(self.preflight, "vision_capability_checked_models", []))
+            capable = set(getattr(self.preflight, "vision_capable_models", []))
+        if model not in checked:
+            return "unknown"
+        return "yes" if model in capable else "no"
 
     def _print_tasks(self):
         rows = self.task_manager.list_tasks(include_recent=True)
@@ -490,17 +566,17 @@ class LiveSession:
 
         quality = self.quality_mode
         if self._needs_screen_context(text):
-            if not self._tool_actions_available():
+            if not self._vision_available():
                 print(
-                    "  Screen analysis needs local tools to capture the screen. "
-                    "The selected model cannot use local tools."
+                    "  Screen analysis needs a vision-capable model. Set VISION_MODEL to a model that can process "
+                    "images, or use a main MODEL with vision support."
                 )
                 return
-            if not self._vision_available():
-                print("  Screen analysis needs a vision-capable model. The selected model cannot process images.")
-                return
-            quality = QualityMode.BEST  # force Complex tier so tools are available
+            quality = QualityMode.BEST
         if _settings_bool(self.settings, "BACKGROUND_TASKS_ENABLED", True) and self._should_background_task(text):
+            if self._requires_model_driven_tools(text) and not self._tool_actions_available():
+                self._print_model_without_tools()
+                return
             title = self._task_title(text)
             task = self.task_manager.create_task(
                 title=title,
@@ -526,9 +602,6 @@ class LiveSession:
         lowered = text.strip().lower()
         lowered_clean = lowered.rstrip(".!?")
         if lowered_clean in {"overwrite it", "overwrite that", "overwrite that file", "replace it", "replace that file"}:
-            if not self._tool_actions_available():
-                self._print_model_without_tools()
-                return True
             if self._pending_overwrite is None:
                 print("  I do not have a pending file overwrite. Please name the file to replace.")
                 return True
@@ -585,9 +658,6 @@ class LiveSession:
             re.I,
         )
         if move_match:
-            if not self._tool_actions_available():
-                self._print_model_without_tools()
-                return True
             name = move_match.group("name").strip().strip("'\"")
             source = self._path_in_named_folder(move_match.group("src"), name)
             destination = self._path_in_named_folder(move_match.group("dest"), name)
@@ -605,9 +675,6 @@ class LiveSession:
             re.I,
         )
         if copy_match:
-            if not self._tool_actions_available():
-                self._print_model_without_tools()
-                return True
             name = copy_match.group("name").strip().strip("'\"")
             source = self._path_in_named_folder(copy_match.group("src"), name)
             destination = self._path_in_named_folder(copy_match.group("dest"), name)
@@ -626,9 +693,6 @@ class LiveSession:
             re.I,
         )
         if write_match:
-            if not self._tool_actions_available():
-                self._print_model_without_tools()
-                return True
             path = self._path_in_named_folder(
                 write_match.group("folder"),
                 write_match.group("name").strip().strip("'\""),
@@ -651,9 +715,6 @@ class LiveSession:
 
         read_match = re.fullmatch(r"(?:read|open|show)\s+(?P<path>[/~][^\n]+)", stripped, re.I)
         if read_match:
-            if not self._tool_actions_available():
-                self._print_model_without_tools()
-                return True
             path = read_match.group("path").strip().strip("'\"")
             result = await self._tool_registry.execute("read_file", json.dumps({"path": path}))
             print(f"  {result.content}")
@@ -668,7 +729,7 @@ class LiveSession:
         return model not in checked or model in capable
 
     def _vision_available(self) -> bool:
-        model = _settings_str(self.settings, "WORKER_MODEL", "") or _settings_str(self.settings, "MODEL", "")
+        model = _settings_str(self.settings, "VISION_MODEL", "") or _settings_str(self.settings, "MODEL", "")
         checked = set(getattr(self.preflight, "vision_capability_checked_models", []))
         capable = set(getattr(self.preflight, "vision_capable_models", []))
         return model not in checked or model in capable
@@ -676,7 +737,8 @@ class LiveSession:
     @staticmethod
     def _print_model_without_tools() -> None:
         print(
-            "  The selected model cannot use local tools. Text chat still works, but this task needs a tool-capable model."
+            "  This open-ended local tool task requires a model with native tool calling. Text chat and recognized "
+            "controller-owned actions still work with the selected model."
         )
 
     @staticmethod
@@ -701,6 +763,13 @@ class LiveSession:
     def _requires_network(self, text: str) -> bool:
         return bool(re.search(r"https?://|\b(website|web page|webpage|weather|browse|search the web)\b", text, re.I))
 
+    def _requires_model_driven_tools(self, text: str) -> bool:
+        if self._needs_screen_context(text):
+            return False
+        if re.search(r"\bpdf\b", text, re.I) and re.search(r"(?:~|/)[^\s'\"<>]+?\.pdf\b", text, re.I):
+            return False
+        return self._requires_filesystem(text) or self._requires_network(text)
+
     def _task_title(self, text: str) -> str:
         title = " ".join(text.strip().split())
         if len(title) > 48:
@@ -715,6 +784,9 @@ class LiveSession:
         interaction_style: InteractionStyle,
     ) -> str:
         task.mark_progress("Working")
+        direct_screen_result = await self._run_direct_screen_task(task, text_content)
+        if direct_screen_result is not None:
+            return direct_screen_result
         direct_pdf_result = await self._run_direct_pdf_task(task, text_content, quality_mode, interaction_style)
         if direct_pdf_result is not None:
             return direct_pdf_result
@@ -740,6 +812,21 @@ class LiveSession:
                 if len(result) > 120 and task.progress_summary == "Working":
                     task.mark_progress("Preparing final answer")
             return result
+
+    async def _run_direct_screen_task(self, task: BackgroundTask, text_content: str) -> str | None:
+        if not self._needs_screen_context(text_content):
+            return None
+        task.mark_progress("Capturing screenshot locally")
+        result = await analyze_screen(
+            settings=self.settings,
+            prompt=text_content,
+            conversation_messages=list(task.related_context) or list(self.state.conversation_messages[-6:]),
+            current_goal=self.state.current_goal,
+            model_semaphore=self._model_semaphore,
+            preflight=self.preflight,
+        )
+        task.mark_progress("Preparing final answer")
+        return result
 
     async def _run_direct_pdf_task(
         self,

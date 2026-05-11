@@ -11,6 +11,8 @@ class Settings:
     API_KEY: str = "ollama"
     # Default model for all requests (used when complexity routing is off)
     MODEL: str = "gemma3:4b"
+    # Vision model for deterministic screen/image understanding. Empty means MODEL.
+    VISION_MODEL: str = ""
     # Tier models (only used when COMPLEXITY_ROUTING_ENABLED=true)
     SIMPLE_MODEL: str = "qwen3.5:2b"
     MODERATE_MODEL: str = "gemma3:4b"
@@ -49,11 +51,16 @@ class Settings:
     WEB_UI_ENABLED: bool = False
     WEB_UI_HOST: str = "127.0.0.1"
     WEB_UI_PORT: int = 8765
+    WEB_UI_TOKEN: str = ""
+    WEB_UI_REQUIRE_TOKEN: str = "auto"
+    WEB_UI_MAX_REQUEST_BYTES: int = 1_000_000
     # Realtime voice is online and explicit opt-in. Local Whisper remains the local voice path.
     REALTIME_VOICE_ENABLED: bool = False
-    REALTIME_MODEL: str = "gpt-realtime-2"
+    REALTIME_MODEL: str = "gpt-realtime"
     REALTIME_VOICE: str = "marin"
     OPENAI_API_KEY: str = ""
+    REALTIME_TOOLS_ENABLED: bool = False
+    REALTIME_ALLOWED_TOOLS: str = ""
     # Experimental: complexity-based routing. When disabled, all requests use MODEL.
     COMPLEXITY_ROUTING_ENABLED: bool = False
 
@@ -91,6 +98,7 @@ class Settings:
             API_BASE_URL=os.getenv("API_BASE_URL", "http://localhost:11434/v1"),
             API_KEY=os.getenv("API_KEY", "ollama"),
             MODEL=os.getenv("MODEL", "gemma3:4b"),
+            VISION_MODEL=os.getenv("VISION_MODEL", ""),
             SIMPLE_MODEL=os.getenv("SIMPLE_MODEL", "qwen3.5:2b"),
             MODERATE_MODEL=os.getenv("MODERATE_MODEL", "gemma3:4b"),
             AUTO_PULL_MODELS=_bool("AUTO_PULL_MODELS"),
@@ -117,10 +125,15 @@ class Settings:
             WEB_UI_ENABLED=_bool("WEB_UI_ENABLED", "false"),
             WEB_UI_HOST=os.getenv("WEB_UI_HOST", "127.0.0.1"),
             WEB_UI_PORT=_int("WEB_UI_PORT", "8765"),
+            WEB_UI_TOKEN=os.getenv("WEB_UI_TOKEN", ""),
+            WEB_UI_REQUIRE_TOKEN=os.getenv("WEB_UI_REQUIRE_TOKEN", "auto").strip().lower(),
+            WEB_UI_MAX_REQUEST_BYTES=_int("WEB_UI_MAX_REQUEST_BYTES", "1000000"),
             REALTIME_VOICE_ENABLED=_bool("REALTIME_VOICE_ENABLED", "false"),
-            REALTIME_MODEL=os.getenv("REALTIME_MODEL", "gpt-realtime-2"),
+            REALTIME_MODEL=os.getenv("REALTIME_MODEL", "gpt-realtime"),
             REALTIME_VOICE=os.getenv("REALTIME_VOICE", "marin"),
             OPENAI_API_KEY=os.getenv("OPENAI_API_KEY", ""),
+            REALTIME_TOOLS_ENABLED=_bool("REALTIME_TOOLS_ENABLED", "false"),
+            REALTIME_ALLOWED_TOOLS=os.getenv("REALTIME_ALLOWED_TOOLS", ""),
             COMPLEXITY_ROUTING_ENABLED=_bool("COMPLEXITY_ROUTING_ENABLED", "false"),
         )
 
@@ -131,9 +144,12 @@ class Settings:
             names = [self.MODEL]
             if self.WORKER_MODEL and self.WORKER_MODEL not in names:
                 names.append(self.WORKER_MODEL)
+            vision_model = self.VISION_MODEL or self.MODEL
+            if vision_model and vision_model not in names:
+                names.append(vision_model)
             return names
         seen = []
-        for name in [self.SIMPLE_MODEL, self.MODERATE_MODEL, self.MODEL, self.WORKER_MODEL]:
+        for name in [self.SIMPLE_MODEL, self.MODERATE_MODEL, self.MODEL, self.WORKER_MODEL, self.VISION_MODEL]:
             if name and name not in seen:
                 seen.append(name)
         return seen

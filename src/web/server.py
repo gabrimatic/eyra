@@ -7,9 +7,12 @@ import hmac
 import json
 import secrets
 import shutil
+import socketserver
 import subprocess
 import tempfile
+import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,19 +22,48 @@ from typing import Any
 from chat.complexity_scorer import ComplexityScorer
 from chat.message_handler import process_task_stream
 from chat.session_state import InteractionStyle, QualityMode
+from runtime.models import PreflightResult
+from runtime.tasks import BackgroundTask, BackgroundTaskManager, TaskStatus
 from runtime.tooling import build_tool_registry
+from runtime.vision import analyze_screen, vision_model_name
+from tools.approval import ApprovalManager
+from tools.browser import BrowserSession
 from utils.settings import Settings
+
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+_SAFE_REALTIME_TOOLS = {"get_current_time", "discover_capabilities"}
+
+
+class EyraThreadingHTTPServer(ThreadingHTTPServer):
+    """HTTP server that avoids reverse-DNS lookup on 0.0.0.0 binds."""
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = int(port)
 
 
 def build_health_payload(settings: Settings) -> dict[str, Any]:
     return {
         "status": "ok",
         "offlineByDefault": True,
-        "web": {"enabled": settings.WEB_UI_ENABLED, "host": settings.WEB_UI_HOST, "port": settings.WEB_UI_PORT},
+        "web": {
+            "enabled": settings.WEB_UI_ENABLED,
+            "host": settings.WEB_UI_HOST,
+            "port": settings.WEB_UI_PORT,
+            "authRequired": web_auth_required(settings),
+        },
+        "model": {
+            "main": settings.MODEL,
+            "worker": settings.WORKER_MODEL or settings.MODEL,
+            "vision": vision_model_name(settings),
+        },
         "voice": {
             "localWhisper": settings.LIVE_LISTENING_ENABLED or settings.LIVE_SPEECH_ENABLED,
             "realtime": settings.REALTIME_VOICE_ENABLED,
             "realtimeModel": settings.REALTIME_MODEL,
+            "realtimeTools": settings.REALTIME_TOOLS_ENABLED,
         },
         "tools": {
             "network": settings.NETWORK_TOOLS_ENABLED,
@@ -40,6 +72,216 @@ def build_health_payload(settings: Settings) -> dict[str, Any]:
             "mcp": settings.MCP_TOOLS_ENABLED,
         },
     }
+
+
+def web_auth_required(settings: Settings) -> bool:
+    mode = settings.WEB_UI_REQUIRE_TOKEN.strip().lower()
+    if settings.WEB_UI_HOST not in _LOCAL_HOSTS:
+        return True
+    if mode == "true":
+        return True
+    if mode == "false":
+        return False
+    return False
+
+
+def validate_request_size(settings: Settings, length: int) -> bool:
+    return 0 <= length <= max(1, int(settings.WEB_UI_MAX_REQUEST_BYTES))
+
+
+def _network_request(text: str) -> bool:
+    lowered = text.lower()
+    return "http://" in lowered or "https://" in lowered or any(
+        phrase in lowered for phrase in ("website", "web page", "webpage", "weather", "browse", "search the web")
+    )
+
+
+def _background_request(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        "pdf" in lowered
+        or any(word in lowered for word in ("summarize", "organize", "inspect", "translate", "website", "folder"))
+    )
+
+
+def _task_payload(task: BackgroundTask) -> dict[str, Any]:
+    return {
+        "id": task.id,
+        "title": task.title,
+        "request": task.original_request,
+        "status": task.status.value,
+        "progress": task.progress_summary,
+        "result": task.final_result,
+        "error": task.error,
+        "createdAt": task.created_at,
+        "updatedAt": task.updated_at,
+        "needsUserInput": task.needs_user_input,
+        "requiredNetwork": task.required_network,
+        "requiredFilesystem": task.required_filesystem,
+        "requiredVision": task.required_vision,
+    }
+
+
+class WebAssistantRuntime:
+    """Standalone assistant runtime for the built-in Web UI."""
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.scorer = ComplexityScorer()
+        self.conversation: list[dict[str, str]] = []
+        self.browser_session = BrowserSession()
+        self.approvals = ApprovalManager()
+        self.registry = build_tool_registry(
+            settings,
+            browser_session=self.browser_session,
+            approval_manager=self.approvals,
+        )
+        self.model_semaphore = asyncio.Semaphore(max(1, int(settings.MODEL_CONCURRENCY)))
+        self.task_manager = BackgroundTaskManager(
+            max_concurrent=max(1, int(settings.MAX_BACKGROUND_TASKS)),
+            task_timeout_seconds=max(1, int(settings.TASK_TIMEOUT_SECONDS)),
+        )
+        self.preflight = PreflightResult(
+            backend_reachable=True,
+            models_ready=settings.all_model_names,
+            screen_capture_available=bool(shutil.which("screencapture")),
+        )
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._run_loop, name="eyra-web-runtime", daemon=True)
+        self._thread.start()
+
+    def _run_loop(self) -> None:
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
+
+    def run_sync(self, coro, timeout: float = 30.0):
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result(timeout=timeout)
+
+    async def handle_message(self, text: str, voice_mode: str = "text") -> dict[str, Any]:
+        text = " ".join(text.strip().split())
+        if not text:
+            return {"reply": "Message is empty."}
+        if _network_request(text) and not self.settings.NETWORK_TOOLS_ENABLED:
+            return {
+                "reply": (
+                    "Network tools are disabled. Enable NETWORK_TOOLS_ENABLED=true before asking Eyra to browse, "
+                    "summarize websites, or check weather."
+                )
+            }
+        self.conversation.append({"role": "user", "content": text})
+        if _background_request(text):
+            task = self.task_manager.create_task(
+                title=text[:48] or "Task",
+                original_request=text,
+                worker=lambda task: self._run_worker_task(task, text, voice_mode),
+                related_context=list(self.conversation[-6:]),
+                used_tools=True,
+                required_network=_network_request(text),
+                required_filesystem=any(word in text.lower() for word in ("pdf", "file", "folder")),
+                required_vision="screen" in text.lower() or "looking at" in text.lower(),
+            )
+            return {"reply": f"Task {task.id} accepted: {task.title}", "taskId": task.id}
+        reply = await self._chat(text, voice_mode)
+        return {"reply": reply}
+
+    async def _chat(self, text: str, voice_mode: str = "text") -> str:
+        interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
+        chunks: list[str] = []
+        async with self.model_semaphore:
+            async for chunk in process_task_stream(
+                text_content=text,
+                complexity_scorer=self.scorer,
+                settings=self.settings,
+                messages=self.conversation,
+                quality_mode=QualityMode.BALANCED,
+                interaction_style=interaction,
+                tool_registry=self.registry,
+            ):
+                chunks.append(chunk)
+        reply = "".join(chunks).strip() or "No response."
+        self.conversation.append({"role": "assistant", "content": reply})
+        return reply
+
+    async def _run_worker_task(self, task: BackgroundTask, text: str, voice_mode: str) -> str:
+        task.mark_progress("Working")
+        if "screen" in text.lower() or "looking at" in text.lower():
+            task.mark_progress("Capturing screenshot locally")
+            return await analyze_screen(
+                settings=self.settings,
+                prompt=text,
+                conversation_messages=list(task.related_context),
+                current_goal=None,
+                model_semaphore=self.model_semaphore,
+                preflight=self.preflight,
+            )
+        chunks: list[str] = []
+        interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
+        async with self.model_semaphore:
+            async for chunk in process_task_stream(
+                text_content=text,
+                complexity_scorer=self.scorer,
+                settings=self.settings,
+                messages=list(task.related_context) or [{"role": "user", "content": text}],
+                quality_mode=QualityMode.BALANCED,
+                interaction_style=interaction,
+                tool_registry=self.registry,
+                require_tools=True,
+            ):
+                chunks.append(chunk)
+                if len("".join(chunks)) > 120 and task.progress_summary == "Working":
+                    task.mark_progress("Preparing final answer")
+        return "".join(chunks).strip() or "Task finished."
+
+    async def list_tasks(self) -> dict[str, Any]:
+        return {"tasks": [_task_payload(task) for task in self.task_manager.list_tasks(include_recent=True)]}
+
+    async def task_detail(self, task_id: str) -> dict[str, Any]:
+        task = self.task_manager.get_task(task_id)
+        if task is None:
+            return {"error": "No task found."}
+        return {"task": _task_payload(task)}
+
+    async def cancel_task(self, task_id: str) -> dict[str, Any]:
+        task = self.task_manager.get_task(task_id)
+        if task is None:
+            return {"error": "No task found.", "status": "missing"}
+        if task.status in {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}:
+            return {"status": task.status.value}
+        self.task_manager.cancel_task(task_id)
+        await self.task_manager.wait_for_task(task_id)
+        return {"status": task.status.value}
+
+    async def list_approvals(self) -> dict[str, Any]:
+        return {
+            "approvals": [
+                {
+                    "id": approval.id,
+                    "tool": approval.tool_name,
+                    "title": approval.title,
+                    "details": approval.details,
+                    "expiresAt": approval.expires_at,
+                }
+                for approval in self.approvals.list_pending()
+            ]
+        }
+
+    async def approve(self, approval_id: str) -> dict[str, Any]:
+        return {"approved": self.approvals.approve(approval_id)}
+
+    async def reject(self, approval_id: str) -> dict[str, Any]:
+        return {"rejected": self.approvals.reject(approval_id)}
+
+    async def shutdown(self) -> None:
+        await self.task_manager.shutdown()
+        await self.browser_session.close()
+
+    def close(self) -> None:
+        try:
+            self.run_sync(self.shutdown(), timeout=10)
+        finally:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            self._thread.join(timeout=2)
 
 
 def render_index_html(settings: Settings) -> str:
@@ -140,6 +382,28 @@ def render_index_html(settings: Settings) -> str:
       border-color: rgba(242, 132, 130, 0.65);
       color: #ffd7d7;
     }}
+    #tasks {{
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+      display: grid;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    .task {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: rgba(16, 24, 32, 0.74);
+    }}
+    .task button {{
+      min-height: 34px;
+      padding: 0 10px;
+    }}
     form {{
       display: grid;
       grid-template-columns: 154px minmax(0, 1fr) 56px 92px;
@@ -203,9 +467,13 @@ def render_index_html(settings: Settings) -> str:
       <div class="status">
         <span class="pill">{escape(local_label)}</span>
         <span class="pill">{escape(realtime_label)}</span>
+        <span class="pill">Network {'on' if settings.NETWORK_TOOLS_ENABLED else 'off'}</span>
+        <span class="pill">OS tools {'on' if settings.OS_TOOLS_ENABLED else 'off'}</span>
+        <span class="pill">MCP {'on' if settings.MCP_TOOLS_ENABLED else 'off'}</span>
       </div>
     </header>
     <section id="messages" aria-live="polite"></section>
+    <section id="tasks" aria-live="polite"></section>
     <form id="chatForm">
       <select id="voiceMode" aria-label="Voice mode">
         <option value="text">Text</option>
@@ -223,6 +491,7 @@ def render_index_html(settings: Settings) -> str:
     const prompt = document.getElementById('prompt');
     const micButton = document.getElementById('micButton');
     const voiceMode = document.getElementById('voiceMode');
+    const tasks = document.getElementById('tasks');
 
     function addMessage(role, text, extraClass = '') {{
       const el = document.createElement('div');
@@ -239,16 +508,47 @@ def render_index_html(settings: Settings) -> str:
       try {{
         const response = await fetch('/api/chat', {{
           method: 'POST',
-          headers: {{ 'Content-Type': 'application/json' }},
+          headers: {{ 'Content-Type': 'application/json', 'X-Eyra-Web-Token': webToken }},
           body: JSON.stringify({{ text, voiceMode: voiceMode.value }}),
         }});
         const data = await response.json();
         reply.textContent = data.reply || data.error || '';
         if (!response.ok) reply.classList.add('error');
+        loadTasks();
       }} catch (error) {{
         reply.textContent = 'Could not reach Eyra on this machine.';
         reply.classList.add('error');
       }}
+    }}
+
+    async function loadTasks() {{
+      try {{
+        const response = await fetch('/api/tasks', {{ headers: {{ 'X-Eyra-Web-Token': webToken }} }});
+        if (!response.ok) return;
+        const data = await response.json();
+        tasks.replaceChildren();
+        for (const task of (data.tasks || []).slice(0, 8)) {{
+          const row = document.createElement('div');
+          row.className = 'task';
+          const label = document.createElement('div');
+          label.textContent = `${{task.id}} · ${{task.status}} · ${{task.title}}`;
+          row.appendChild(label);
+          if (['queued', 'running'].includes(task.status)) {{
+            const button = document.createElement('button');
+            button.textContent = 'Cancel';
+            button.onclick = async () => {{
+              await fetch('/api/cancel', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json', 'X-Eyra-Web-Token': webToken }},
+                body: JSON.stringify({{ taskId: task.id }}),
+              }});
+              loadTasks();
+            }};
+            row.appendChild(button);
+          }}
+          tasks.appendChild(row);
+        }}
+      }} catch (_) {{}}
     }}
 
     form.addEventListener('submit', (event) => {{
@@ -270,7 +570,7 @@ def render_index_html(settings: Settings) -> str:
       try {{
         const response = await fetch('/api/local-voice-turn', {{
           method: 'POST',
-          headers: {{ 'Content-Type': blob.type || 'application/octet-stream' }},
+          headers: {{ 'Content-Type': blob.type || 'application/octet-stream', 'X-Eyra-Web-Token': webToken }},
           body: blob,
         }});
         const data = await response.json();
@@ -288,7 +588,7 @@ def render_index_html(settings: Settings) -> str:
       try {{
         await fetch('/api/local-speak', {{
           method: 'POST',
-          headers: {{ 'Content-Type': 'application/json' }},
+          headers: {{ 'Content-Type': 'application/json', 'X-Eyra-Web-Token': webToken }},
           body: JSON.stringify({{ text }}),
         }});
       }} catch (_) {{}}
@@ -420,6 +720,8 @@ def render_index_html(settings: Settings) -> str:
         addMessage('eyra', 'Local voice failed to start.', 'error');
       }}
     }});
+    loadTasks();
+    setInterval(loadTasks, 3000);
   </script>
 </body>
 </html>"""
@@ -427,8 +729,7 @@ def render_index_html(settings: Settings) -> str:
 
 class _EyraWebHandler(BaseHTTPRequestHandler):
     settings: Settings
-    scorer: ComplexityScorer
-    conversation: list[dict[str, str]]
+    runtime: WebAssistantRuntime
     web_session_token: str
     realtime_tool_token: str
 
@@ -436,32 +737,90 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
         return
 
     def do_GET(self):
-        if self.path == "/" or self.path.startswith("/?"):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/":
             self._send(200, render_index_html(self.settings), "text/html; charset=utf-8")
             return
-        if self.path == "/api/health":
+        if parsed.path == "/api/health":
             self._send_json(200, build_health_payload(self.settings))
             return
-        if self.path == "/favicon.ico":
+        if parsed.path == "/favicon.ico":
             self._send(204, "", "image/x-icon")
+            return
+        if parsed.path == "/api/tasks":
+            if not self._authorized():
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.list_tasks()))
+            return
+        if parsed.path == "/api/approvals":
+            if not self._authorized():
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.list_approvals()))
+            return
+        if parsed.path.startswith("/api/task/"):
+            if not self._authorized():
+                return
+            task_id = parsed.path.rsplit("/", 1)[-1]
+            payload = self.runtime.run_sync(self.runtime.task_detail(task_id))
+            self._send_json(200 if "task" in payload else 404, payload)
             return
         self._send_json(404, {"error": "Not found."})
 
     def do_POST(self):
-        if self.path == "/api/chat":
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in {
+            "/api/chat",
+            "/api/local-voice-turn",
+            "/api/local-speak",
+            "/api/realtime-session",
+            "/api/realtime-tool-call",
+            "/api/cancel",
+            "/api/approve",
+            "/api/reject",
+        } and not self._authorized():
+            return
+        if parsed.path == "/api/chat":
             payload = self._read_json()
             text = str(payload.get("text", "")).strip()
             if not text:
                 self._send_json(400, {"error": "Message is empty."})
                 return
             try:
-                reply = asyncio.run(self._chat(text, payload))
+                result = self.runtime.run_sync(
+                    self.runtime.handle_message(text, str(payload.get("voiceMode", "text"))),
+                    timeout=30,
+                )
             except Exception:
                 self._send_json(500, {"error": "Eyra could not answer that request. Check the terminal logs."})
                 return
-            self._send_json(200, {"reply": reply})
+            self._send_json(200, result)
             return
-        if self.path == "/api/local-voice-turn":
+        if parsed.path == "/api/cancel":
+            payload = self._read_json()
+            task_id = str(payload.get("taskId", "")).strip()
+            if not task_id:
+                self._send_json(400, {"error": "taskId is required."})
+                return
+            result = self.runtime.run_sync(self.runtime.cancel_task(task_id))
+            self._send_json(200 if result.get("status") != "missing" else 404, result)
+            return
+        if parsed.path == "/api/approve":
+            payload = self._read_json()
+            approval_id = str(payload.get("approvalId", "")).strip()
+            if not approval_id:
+                self._send_json(400, {"error": "approvalId is required."})
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.approve(approval_id)))
+            return
+        if parsed.path == "/api/reject":
+            payload = self._read_json()
+            approval_id = str(payload.get("approvalId", "")).strip()
+            if not approval_id:
+                self._send_json(400, {"error": "approvalId is required."})
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.reject(approval_id)))
+            return
+        if parsed.path == "/api/local-voice-turn":
             payload = self._read_bytes(max_bytes=25 * 1024 * 1024)
             if not payload:
                 self._send_json(400, {"error": "No audio was received."})
@@ -471,13 +830,14 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": transcript})
                 return
             try:
-                reply = asyncio.run(self._chat(transcript, {"voiceMode": "local"}))
+                result = self.runtime.run_sync(self.runtime.handle_message(transcript, "local"), timeout=30)
             except Exception:
                 self._send_json(500, {"error": "Eyra could not answer that voice request.", "transcript": transcript})
                 return
-            self._send_json(200, {"transcript": transcript, "reply": reply})
+            result["transcript"] = transcript
+            self._send_json(200, result)
             return
-        if self.path == "/api/local-speak":
+        if parsed.path == "/api/local-speak":
             payload = self._read_json()
             text = str(payload.get("text", "")).strip()
             if not text:
@@ -487,16 +847,13 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             status = 200 if message == "Local speech started." else 500
             self._send_json(status, {"status": message})
             return
-        if self.path == "/api/realtime-session":
-            if not validate_web_session_token(self.headers.get("X-Eyra-Web-Token", ""), self.web_session_token):
-                self._send_json(403, {"error": "Web UI session token is required for Realtime voice."})
-                return
+        if parsed.path == "/api/realtime-session":
             status, payload = create_realtime_session_payload(self.settings)
-            if status == 200:
+            if status == 200 and self.settings.REALTIME_TOOLS_ENABLED:
                 payload["eyra_tool_token"] = self.realtime_tool_token
             self._send_json(status, payload)
             return
-        if self.path == "/api/realtime-tool-call":
+        if parsed.path == "/api/realtime-tool-call":
             web_token = self.headers.get("X-Eyra-Web-Token", "")
             token = self.headers.get("X-Eyra-Realtime-Tool-Token", "")
             if not validate_web_session_token(web_token, self.web_session_token) or not validate_realtime_tool_token(
@@ -507,30 +864,25 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
                 self._send_json(403, {"error": "Realtime tool calls are disabled or unauthorized."})
                 return
             payload = self._read_json()
-            output = asyncio.run(call_realtime_tool(self.settings, payload))
+            output = self.runtime.run_sync(call_realtime_tool(self.settings, payload))
             self._send_json(200, {"output": output})
             return
         self._send_json(404, {"error": "Not found."})
 
-    async def _chat(self, text: str, payload: dict[str, Any]) -> str:
-        self.conversation.append({"role": "user", "content": text})
-        registry = build_tool_registry(self.settings)
-        interaction = InteractionStyle.VOICE if payload.get("voiceMode") in ("local", "realtime") else InteractionStyle.TEXT
-        chunks: list[str] = []
-        async for chunk in process_task_stream(
-            text_content=text,
-            complexity_scorer=self.scorer,
-            settings=self.settings,
-            messages=self.conversation,
-            quality_mode=QualityMode.BALANCED,
-            interaction_style=interaction,
-            tool_registry=registry,
-        ):
-            chunks.append(chunk)
-        reply = "".join(chunks).strip()
-        if reply:
-            self.conversation.append({"role": "assistant", "content": reply})
-        return reply or "No response."
+    def do_PUT(self):
+        self._send_json(405, {"error": "Method not allowed."})
+
+    def do_DELETE(self):
+        self._send_json(405, {"error": "Method not allowed."})
+
+    def _authorized(self) -> bool:
+        if not web_auth_required(self.settings):
+            return True
+        provided = self.headers.get("X-Eyra-Web-Token", "")
+        if validate_web_session_token(provided, self.web_session_token):
+            return True
+        self._send_json(401, {"error": "Web UI session token is required."})
+        return False
 
     def _read_json(self) -> dict[str, Any]:
         raw = self._read_bytes()
@@ -541,7 +893,10 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
 
     def _read_bytes(self, max_bytes: int = 1_000_000) -> bytes:
         length = int(self.headers.get("content-length", "0"))
-        if length <= 0 or length > max_bytes:
+        limit = min(max_bytes, max(1, int(self.settings.WEB_UI_MAX_REQUEST_BYTES)))
+        if max_bytes > int(self.settings.WEB_UI_MAX_REQUEST_BYTES) and max_bytes > 1_000_000:
+            limit = max_bytes
+        if length <= 0 or length > limit:
             return b""
         return self.rfile.read(length)
 
@@ -564,26 +919,33 @@ def create_realtime_session_payload(settings: Settings) -> tuple[int, dict[str, 
     api_key = settings.OPENAI_API_KEY
     if not api_key:
         return 400, {"error": "OPENAI_API_KEY is not configured for Realtime voice."}
+    session: dict[str, Any] = {
+        "type": "realtime",
+        "model": settings.REALTIME_MODEL,
+        "instructions": (
+            "You are Eyra, a local-first macOS assistant. Realtime voice is an online mode. "
+            "Keep spoken replies short and clear."
+        ),
+        "audio": {"output": {"voice": settings.REALTIME_VOICE}},
+    }
+    tools = realtime_tools(settings)
+    if tools:
+        session["tools"] = tools
+        session["tool_choice"] = "auto"
     body = json.dumps(
         {
-            "session": {
-                "type": "realtime",
-                "model": settings.REALTIME_MODEL,
-                "instructions": (
-                    "You are Eyra, a local-first macOS assistant. Use tools for current OS facts and actions. "
-                    "Keep spoken replies short and clear."
-                ),
-                "audio": {"output": {"voice": settings.REALTIME_VOICE}},
-                "tools": realtime_tools(settings),
-                "tool_choice": "auto",
-            }
+            "session": session,
         }
     ).encode()
     request = urllib.request.Request(
         "https://api.openai.com/v1/realtime/client_secrets",
         data=body,
         method="POST",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "OpenAI-Safety-Identifier": "eyra-local-session",
+        },
     )
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
@@ -595,7 +957,7 @@ def create_realtime_session_payload(settings: Settings) -> tuple[int, dict[str, 
 
 
 def validate_realtime_tool_token(settings: Settings, provided: str, expected: str) -> bool:
-    if not settings.REALTIME_VOICE_ENABLED:
+    if not settings.REALTIME_VOICE_ENABLED or not settings.REALTIME_TOOLS_ENABLED:
         return False
     if not provided or not expected:
         return False
@@ -609,9 +971,15 @@ def validate_web_session_token(provided: str, expected: str) -> bool:
 
 
 def realtime_tools(settings: Settings) -> list[dict[str, Any]]:
+    if not settings.REALTIME_TOOLS_ENABLED:
+        return []
+    configured = {name.strip() for name in settings.REALTIME_ALLOWED_TOOLS.split(",") if name.strip()}
+    allowed = configured or _SAFE_REALTIME_TOOLS
     tools = []
-    for tool in build_tool_registry(settings).to_openai_tools(include_costly=True):
+    for tool in build_tool_registry(settings).to_openai_tools(include_costly=False):
         fn = tool.get("function", {})
+        if fn.get("name") not in allowed:
+            continue
         tools.append(
             {
                 "type": "function",
@@ -625,6 +993,13 @@ def realtime_tools(settings: Settings) -> list[dict[str, Any]]:
 
 async def call_realtime_tool(settings: Settings, payload: dict[str, Any]) -> str:
     name = str(payload.get("name", ""))
+    allowed = {
+        tool.get("name")
+        for tool in realtime_tools(settings)
+        if isinstance(tool, dict) and tool.get("type") == "function"
+    }
+    if name not in allowed:
+        return f"Realtime tool is not allowed: {name}"
     raw_arguments = payload.get("arguments", "{}")
     if isinstance(raw_arguments, str):
         arguments = raw_arguments
@@ -698,22 +1073,22 @@ def speak_local_text(text: str) -> str:
 
 
 def run_web_server(settings: Settings) -> None:
-    web_session_token = secrets.token_urlsafe(24)
+    web_session_token = settings.WEB_UI_TOKEN.strip() or secrets.token_urlsafe(32)
     realtime_tool_token = secrets.token_urlsafe(32)
+    runtime = WebAssistantRuntime(settings)
     handler = type(
         "EyraWebHandler",
         (_EyraWebHandler,),
         {
             "settings": settings,
-            "scorer": ComplexityScorer(),
-            "conversation": [],
+            "runtime": runtime,
             "web_session_token": web_session_token,
             "realtime_tool_token": realtime_tool_token,
         },
     )
-    server = ThreadingHTTPServer((settings.WEB_UI_HOST, settings.WEB_UI_PORT), handler)
+    server = EyraThreadingHTTPServer((settings.WEB_UI_HOST, settings.WEB_UI_PORT), handler)
     print(f"Eyra web UI: http://{settings.WEB_UI_HOST}:{settings.WEB_UI_PORT}")
-    if settings.WEB_UI_HOST not in {"127.0.0.1", "localhost", "::1"}:
+    if web_auth_required(settings):
         print(f"Eyra web UI token URL: http://{settings.WEB_UI_HOST}:{settings.WEB_UI_PORT}/?token={web_session_token}")
     try:
         server.serve_forever()
@@ -721,6 +1096,7 @@ def run_web_server(settings: Settings) -> None:
         print("\nEyra web UI stopped.")
     finally:
         server.server_close()
+        runtime.close()
 
 
 def run() -> None:
