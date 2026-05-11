@@ -11,9 +11,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Packaged installs expose the `eyra` console command and include the runtime entry module in the wheel.
+- Shared tool-registry construction for terminal and web sessions.
+- Optional OS operator tools for bounded command execution, process listing, file metadata, file search, LaunchAgent status, app opening, notifications, and clipboard writes.
+- Voice-codex-style operator aliases for voice context, system snapshots, URL fetches, LaunchAgent management, Codex/OpenClaw session lookup, and Codex/OpenClaw task delegation.
+- Optional stdio MCP bridge for listing and calling configured MCP server tools.
+- Optional terminal-agent status, session listing, bounded redacted session reading, and delegation bridges for Codex and OpenClaw.
+- Built-in `eyra-web` browser UI for phone or browser access, with text chat, Local Whisper browser voice turns, and optional OpenAI Realtime WebRTC voice.
+- Local Web UI voice replies through `wh whisper` after Local Whisper browser voice turns.
+- Realtime voice session endpoint that mints server-side ephemeral client secrets and exposes Eyra tools to Realtime sessions.
 
 ### Changed
 
+- Realtime voice now requires `OPENAI_API_KEY` explicitly and no longer falls back to provider `API_KEY`.
+- Realtime web tool calls now require both Realtime mode and unguessable Web UI/tool-call tokens.
+- Delegated Codex/OpenClaw subprocesses now run under the normal tool timeout and are killed on timeout or cancellation.
+- The terminal runtime now uses the shared tool-registry builder instead of constructing tools inside `LiveSession`.
+- First-run `.env` writing now preserves and documents Web UI, Realtime, OS tools, MCP, and agent delegation settings.
+- `setup.sh` now registers both `eyra` and `eyra-web`.
+- Browser clicks now avoid false failures when navigation completes after the click but before text extraction.
 - `/voice on` now rechecks Local Whisper at runtime and starts an owned voice loop when voice was disabled or unavailable at startup.
 - Voice readiness now tracks input and speech separately, so TTS can keep working while ASR is unavailable or still loading.
 - `/voice off` now cancels the owned voice task instead of relying on global task-name lookup.

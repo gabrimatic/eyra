@@ -262,6 +262,22 @@ class ClickElementTool(BaseTool):
     def __init__(self, session: BrowserSession | None = None):
         self._session = session or BrowserSession()
 
+    async def _click(self, locator) -> None:
+        """Click without folding slow navigation waits into element-click failure."""
+        await locator.first.click(timeout=5000, no_wait_after=True)
+
+    async def _page_content_after_click(self, page) -> ToolResult:
+        for _ in range(10):
+            try:
+                title = await page.title()
+                text = await _extract_text(page, max_chars=2000)
+                return ToolResult(content=_page_header(page, title) + text)
+            except Exception:
+                await page.wait_for_timeout(500)
+        title = await page.title()
+        text = await _extract_text(page, max_chars=2000)
+        return ToolResult(content=_page_header(page, title) + text)
+
     async def execute(self, selector: str = "", **_) -> ToolResult:
         if not selector:
             return ToolResult(content="Missing 'selector'.")
@@ -275,20 +291,22 @@ class ClickElementTool(BaseTool):
             try:
                 loc = page.locator(selector)
                 if await loc.count() > 0:
-                    await loc.first.click(timeout=5000)
+                    await self._click(loc)
                     clicked = True
             except Exception:
                 pass
             if not clicked:
                 link = page.get_by_role("link", name=selector)
                 if await link.count() > 0:
-                    await link.first.click(timeout=5000)
+                    await self._click(link)
                 else:
-                    await page.get_by_text(selector, exact=False).first.click(timeout=5000)
+                    await self._click(page.get_by_text(selector, exact=False))
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=5000)
+            except Exception:
+                pass
             await page.wait_for_timeout(800)
-            title = await page.title()
-            text = await _extract_text(page, max_chars=2000)
-            return ToolResult(content=_page_header(page, title) + text)
+            return await self._page_content_after_click(page)
         except Exception as e:
             logger.error("click_element failed: %s", e, exc_info=True)
             return ToolResult(content=f"Could not click '{selector}': element not found or not clickable.")

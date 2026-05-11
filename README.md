@@ -8,7 +8,7 @@ Eyra is a local-first voice agent for the macOS terminal.
 
 Speak or type. Eyra routes the request to an OpenAI-compatible model, calls local tools when needed, and speaks back through Local Whisper. The default path stays on your machine: Ollama at localhost, Silero VAD in process, screenshots in memory, no telemetry.
 
-Cloud providers and network-backed tools are opt-in.
+Cloud providers, network-backed tools, full OS command tools, MCP bridges, external agent delegation, Realtime voice, and the Web UI are opt-in.
 
 <p align="center"><img src="screenshot.png" width="800" alt="Eyra terminal screenshot"></p>
 
@@ -50,6 +50,15 @@ Eyra
 
 Eyra is now listening. Type or speak without leaving the session.
 
+Optional phone/browser access:
+
+```bash
+WEB_UI_ENABLED=true uv run python -m web.server
+```
+
+Then open `http://127.0.0.1:8765` on the same machine. Set `WEB_UI_HOST=0.0.0.0` only when you intentionally want access from other devices on your network.
+When the Web UI is exposed beyond localhost, Eyra prints a tokenized URL for privileged Realtime tool calls. Keep that URL private.
+
 ---
 
 ## What it does
@@ -58,6 +67,11 @@ Eyra is now listening. Type or speak without leaving the session.
 - Voice: Local Whisper handles transcription and speech; Silero VAD decides when you finished speaking.
 - Model routing: one configured model by default, with experimental complexity routing when you turn it on.
 - Local tools: screenshot, time, clipboard, system info, and sandboxed filesystem access through function calling.
+- Optional OS tools: command execution, URL fetch, process listing, system snapshots, file metadata/search, LaunchAgent status/management, app opening, notifications, and clipboard writes. These stay off until `OS_TOOLS_ENABLED=true` or `NETWORK_TOOLS_ENABLED=true` for URL/network work.
+- Optional MCP tools: list and call stdio MCP servers from `MCP_CONFIG_PATH`.
+- Optional agent delegation: inspect Codex/OpenClaw availability and sessions, read bounded redacted session content, use Codex/OpenClaw-compatible tool names, and hand complex work to terminal agents when `AGENT_TOOLS_ENABLED=true`.
+- Optional Web UI: a compact browser interface for text access, Local Whisper voice turns, and local voice feedback from a phone or another system.
+- Optional Realtime voice: online browser voice can use OpenAI Realtime when `REALTIME_VOICE_ENABLED=true` and an OpenAI key is configured.
 - Filesystem safety: existing files are not overwritten unless `overwrite=true`; binary reads and edits return a clean message.
 - Network tools: weather and browser access stay disabled until `NETWORK_TOOLS_ENABLED=true`.
 - Provider support: Ollama, LM Studio, vLLM, OpenRouter, Groq, OpenAI, or any compatible `/v1/chat/completions` endpoint.
@@ -74,7 +88,9 @@ Eyra runs one live session with a typed channel, a voice channel, and one stream
 - Interruption: Eyra stops speaking when you start talking, then listens again.
 - Runtime recovery: `/voice on` rechecks Local Whisper and enables whichever side is ready. ASR and TTS are tracked separately, so speech can keep working while input is still loading.
 - Typed input: keyboard input is always available and feeds the same conversation as voice.
-- Tool use: the model can call local function tools for screenshot, time, clipboard, system info, and filesystem work. Weather and browser tools are available only after you opt in.
+- Tool use: the model can call local function tools for screenshot, time, clipboard, system info, and filesystem work. OS command tools, MCP bridges, agent session inspection, agent delegation, weather, URL fetch, and browser tools are available only after you opt in.
+- Web UI: `eyra-web` serves a small local UI with the same shared tool registry as the terminal session. It is meant for phone and browser access without replacing the terminal loop. Local voice turns transcribe through `wh transcribe` and speak replies through `wh whisper`.
+- Realtime voice: browser Realtime voice is an online option. Eyra mints server-side ephemeral client secrets and never puts the standard OpenAI API key in browser code.
 - Model routing: complexity routing is experimental and off by default. When enabled, `ComplexityScorer` dispatches requests to Simple, Moderate, or Complex tiers.
 - Tool fallback: if a local model rejects native tool calling, Eyra falls back to plain streaming so text chat keeps working. Choose a tool-capable model when you need local tools.
 
@@ -107,6 +123,18 @@ When `USE_MOCK_CLIENT=true`, backend and model checks are skipped on purpose so 
 | `/quit` | Exit |
 
 Unknown commands are caught locally and never sent to the model.
+
+The Web UI is a separate process:
+
+```bash
+WEB_UI_ENABLED=true uv run python -m web.server
+```
+
+After `setup.sh`, the shortcut is:
+
+```bash
+WEB_UI_ENABLED=true eyra-web
+```
 
 ---
 
@@ -174,6 +202,23 @@ VOICE_VAD_THRESHOLD=0.6        # Silero VAD sensitivity (0.0-1.0, higher = stric
 # Optional network tools. Keep false for the local-first default.
 NETWORK_TOOLS_ENABLED=false
 
+# Optional OS, agent, MCP, and network tools. Keep false for the local-first default.
+OS_TOOLS_ENABLED=false
+AGENT_TOOLS_ENABLED=false
+MCP_TOOLS_ENABLED=false
+MCP_CONFIG_PATH=~/.config/eyra/mcp.json
+
+# Optional Web UI.
+WEB_UI_ENABLED=false
+WEB_UI_HOST=127.0.0.1
+WEB_UI_PORT=8765
+
+# Optional online Realtime voice.
+REALTIME_VOICE_ENABLED=false
+REALTIME_MODEL=gpt-realtime-2
+REALTIME_VOICE=marin
+OPENAI_API_KEY=
+
 # Optional log path. Default: ~/Library/Logs/Eyra/eyra.log on macOS.
 # EYRA_LOG_FILE=~/Library/Logs/Eyra/eyra.log
 
@@ -204,9 +249,15 @@ Default behavior: no telemetry, no analytics, no remote browsing, and no remote 
 | wh transcribe (local-whisper) | Subprocess, local |
 | wh whisper (local-whisper) | Subprocess, local |
 | Screenshots | In-memory; never written to disk |
+| OS command tools | Disabled by default; local only when enabled |
+| MCP stdio tools | Disabled by default; local server processes from `MCP_CONFIG_PATH` |
+| Agent session tools | Disabled by default; read bounded, redacted local Codex/OpenClaw session files when enabled |
+| Agent delegation | Disabled by default; local terminal agent commands when enabled |
+| Realtime voice | Disabled by default; contacts OpenAI only when enabled and used |
+| Web UI | Disabled by default; local HTTP server when enabled |
 | Weather/browser tools | Disabled by default; contact remote sites only when `NETWORK_TOOLS_ENABLED=true` and a tool is used. Weather requires an explicit location and does not use remote IP geolocation. |
 
-Data leaves your machine only when you choose a remote AI provider or turn on network tools. A remote `API_BASE_URL` receives prompts and images. Network tools send the requested URL, search query, or weather location to the relevant remote service.
+Data leaves your machine only when you choose a remote AI provider, enable Realtime voice, or turn on network tools. A remote `API_BASE_URL` receives prompts and images. Realtime voice sends browser audio/text to OpenAI only when explicitly enabled and used. Network tools send the requested URL, search query, or weather location to the relevant remote service.
 
 ---
 
@@ -220,6 +271,7 @@ eyra/
 │   ├── main.py                     # Entry point, preflight, live session launch
 │   ├── runtime/
 │   │   ├── live_session.py         # Unified orchestrator
+│   │   ├── tooling.py              # Shared tool registry builder
 │   │   ├── models.py              # Runtime state and event dataclasses
 │   │   ├── preflight.py           # Backend, model, and capability validation
 │   │   ├── speech_controller.py   # TTS output and STT input coordination
@@ -235,7 +287,11 @@ eyra/
 │   │   ├── clipboard.py           # Clipboard reader tool
 │   │   ├── system_info.py         # System info tool
 │   │   ├── browser.py             # Optional network browser tools
+│   │   ├── mcp_stdio.py           # Optional stdio MCP bridge
+│   │   ├── operator.py            # Optional OS and agent tools
 │   │   └── filesystem.py          # Sandboxed file read/write/edit/list
+│   ├── web/
+│   │   └── server.py              # Built-in browser and phone UI
 │   ├── chat/
 │   │   ├── capture.py             # In-memory screenshot capture
 │   │   ├── complexity_scorer.py   # Deterministic prompt routing
@@ -286,6 +342,18 @@ ollama show <model>
 ```
 
 If the model does not list tools, text chat will still work, but local tool calls will be skipped by the backend. Choose a tool-capable model for filesystem, screenshot, time, clipboard, weather, or browser actions.
+
+</details>
+
+<details><summary><strong>Web UI not reachable from a phone</strong></summary>
+
+The Web UI binds to `127.0.0.1` by default. That is safest, but only the same machine can reach it. For another device on your network, set:
+
+```bash
+WEB_UI_ENABLED=true WEB_UI_HOST=0.0.0.0 uv run python -m web.server
+```
+
+Use a trusted network. Realtime voice also requires browser microphone support and an explicit `OPENAI_API_KEY` when `REALTIME_VOICE_ENABLED=true`. Eyra does not reuse `API_KEY` for Realtime because that may belong to another provider.
 
 </details>
 
