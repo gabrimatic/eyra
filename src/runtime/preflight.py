@@ -150,13 +150,13 @@ class PreflightManager:
             if found:
                 result.models_ready.append(model)
                 _ok(f"Model: {model}")
-                await self._warn_if_ollama_model_lacks_tools(model)
+                await self._inspect_model_tool_capability(result, model)
             elif self.settings.AUTO_PULL_MODELS and self._is_ollama:
                 print(f"  {DIM}›{NC} Pulling {model}...", end="", flush=True)
                 if await self._pull_model(model):
                     result.models_ready.append(model)
                     print(f"\r  {GREEN}✓{NC} Model: {model}    ")
-                    await self._warn_if_ollama_model_lacks_tools(model)
+                    await self._inspect_model_tool_capability(result, model)
                 else:
                     result.models_missing.append(model)
                     print(f"\r  {RED}✗{NC} Model: {model} (pull failed)    ")
@@ -164,9 +164,11 @@ class PreflightManager:
                 result.models_missing.append(model)
                 _fail(f"Model missing: {model}")
 
-    async def _warn_if_ollama_model_lacks_tools(self, model: str) -> None:
-        """Warn when Ollama reports a model that cannot accept native tools."""
+    async def _inspect_model_tool_capability(self, result: PreflightResult, model: str) -> None:
+        """Record whether a configured model can accept native tools when known."""
         if not self._is_ollama:
+            result.tool_capable_models.append(model)
+            result.vision_capable_models.append(model)
             return
         base = self.settings.API_BASE_URL.removesuffix("/v1").rstrip("/")
         try:
@@ -178,8 +180,14 @@ class PreflightManager:
         except Exception as e:
             logger.debug("Could not inspect Ollama model capabilities for %s: %s", model, e)
             return
+        result.tool_capability_checked_models.append(model)
+        result.vision_capability_checked_models.append(model)
         if capabilities and "tools" not in capabilities:
             _warn(f"Model lacks native tool calling: {model}")
+        else:
+            result.tool_capable_models.append(model)
+        if not capabilities or "vision" in capabilities:
+            result.vision_capable_models.append(model)
 
     async def _pull_model(self, model: str) -> bool:
         if shutil.which("ollama") is None:

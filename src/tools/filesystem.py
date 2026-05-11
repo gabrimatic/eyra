@@ -1,16 +1,24 @@
-"""Filesystem tools — read, write, edit, and navigate files and directories."""
+"""Filesystem tools — read, write, edit, move, copy, and open local paths."""
 
 import asyncio
+import hashlib
 import logging
+import shutil
 from pathlib import Path
 
+from tools.approval import GLOBAL_APPROVAL_MANAGER, ApprovalManager, approval_required_message
 from tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
 
 _MAX_READ_BYTES = 64_000  # ~64 KB text read limit
 _MAX_LIST_ENTRIES = 200
-_DEFAULT_ALLOWED_ROOTS = (Path.home() / "Documents", Path("/tmp").resolve())
+_DEFAULT_ALLOWED_ROOTS = (
+    Path.home() / "Documents",
+    Path.home() / "Desktop",
+    Path.home() / "Downloads",
+    Path("/tmp").resolve(),
+)
 
 
 def parse_allowed_roots(paths_str: str) -> tuple[Path, ...]:
@@ -46,6 +54,28 @@ def _human_size(size: int) -> str:
             return f"{size:.1f} {unit}" if unit != "B" else f"{size} B"
         size /= 1024
     return f"{size:.1f} TB"
+
+
+def _content_fingerprint(content: str) -> str:
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
+def _trusted_overwrite(token: str, expected: str) -> bool:
+    return bool(token and expected and token == expected)
+
+
+def _approval_or_result(
+    manager: ApprovalManager,
+    *,
+    tool_name: str,
+    title: str,
+    details: dict[str, object],
+    approval_id: str = "",
+) -> ToolResult | None:
+    if approval_id and manager.consume(approval_id, tool_name, title, details):
+        return None
+    approval = manager.request(tool_name, title, details)
+    return ToolResult(content=approval_required_message(approval))
 
 
 class ReadFileTool(BaseTool):
@@ -123,25 +153,54 @@ class WriteFileTool(BaseTool):
                 "type": "boolean",
                 "description": "Set true only when replacing an existing file is intentional.",
             },
+            "approval_id": {
+                "type": "string",
+                "description": "Server-issued approval id for this exact overwrite action.",
+            },
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve file overwrites."},
         },
         "required": ["path", "content"],
     }
     costly = False
 
-    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+    def __init__(
+        self,
+        allowed_roots: tuple[Path, ...] = (),
+        default_path: Path | None = None,
+        approval_manager: ApprovalManager | None = None,
+        trusted_overwrite_token: str = "",
+    ):
         self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
         self._default_path = default_path.expanduser().resolve() if default_path else None
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+        self._trusted_overwrite_token = trusted_overwrite_token
 
-    async def execute(self, path: str = "", content: str = "", overwrite: bool = False, **_) -> ToolResult:
+    async def execute(
+        self,
+        path: str = "",
+        content: str = "",
+        overwrite: bool = False,
+        approval_id: str = "",
+        confirmed: bool = False,
+        trusted_overwrite_token: str = "",
+        **_,
+    ) -> ToolResult:
         try:
-            return await asyncio.to_thread(self._run, path, content, overwrite is True)
+            return await asyncio.to_thread(
+                self._run,
+                path,
+                content,
+                overwrite is True,
+                approval_id,
+                trusted_overwrite_token,
+            )
         except PermissionError as e:
             return ToolResult(content=str(e))
         except Exception as e:
             logger.error("write_file failed: %s", e, exc_info=True)
             return ToolResult(content=f"Filesystem error: {e}")
 
-    def _run(self, path: str, content: str, overwrite: bool) -> ToolResult:
+    def _run(self, path: str, content: str, overwrite: bool, approval_id: str, trusted_overwrite_token: str) -> ToolResult:
         p = _resolve(path, self._roots, self._default_path)
         if p.exists() and not p.is_file():
             return ToolResult(content=f"Path exists and is not a file: {p}")
@@ -152,6 +211,20 @@ class WriteFileTool(BaseTool):
                     "Call write_file with overwrite=true only if the user asked to replace it."
                 )
             )
+        if p.exists() and overwrite and not _trusted_overwrite(trusted_overwrite_token, self._trusted_overwrite_token):
+            approval = _approval_or_result(
+                self._approvals,
+                tool_name=self.name,
+                title="file overwrite",
+                details={
+                    "path": str(p),
+                    "content_length": len(content.encode()),
+                    "content_sha256": _content_fingerprint(content),
+                },
+                approval_id=approval_id,
+            )
+            if approval is not None:
+                return approval
         p.parent.mkdir(parents=True, exist_ok=True)
         existed = p.exists()
         p.write_text(content)
@@ -315,3 +388,273 @@ class CreateDirectoryTool(BaseTool):
             return ToolResult(content=f"Already exists: {p}")
         p.mkdir(parents=True, exist_ok=True)
         return ToolResult(content=f"Created directory: {p}")
+
+
+class MovePathTool(BaseTool):
+    name = "move_path"
+    description = (
+        "Move a file or folder within the allowed filesystem sandbox. "
+        "If the destination exists, overwrite must be true and only when the user explicitly asked to replace it."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "source": {"type": "string", "description": "File or folder to move."},
+            "destination": {"type": "string", "description": "Destination file or folder path."},
+            "overwrite": {
+                "type": "boolean",
+                "description": "Set true only when replacing the destination is explicitly requested.",
+            },
+            "approval_id": {
+                "type": "string",
+                "description": "Server-issued approval id for this exact overwrite action.",
+            },
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve move overwrites."},
+        },
+        "required": ["source", "destination"],
+    }
+    costly = False
+
+    def __init__(
+        self,
+        allowed_roots: tuple[Path, ...] = (),
+        default_path: Path | None = None,
+        approval_manager: ApprovalManager | None = None,
+        trusted_overwrite_token: str = "",
+    ):
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+        self._trusted_overwrite_token = trusted_overwrite_token
+
+    async def execute(
+        self,
+        source: str = "",
+        destination: str = "",
+        overwrite: bool = False,
+        approval_id: str = "",
+        confirmed: bool = False,
+        trusted_overwrite_token: str = "",
+        **_,
+    ) -> ToolResult:
+        try:
+            return await asyncio.to_thread(
+                self._run,
+                source,
+                destination,
+                overwrite is True,
+                approval_id,
+                trusted_overwrite_token,
+            )
+        except PermissionError as e:
+            return ToolResult(content=str(e))
+        except Exception as e:
+            logger.error("move_path failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Filesystem error: {e}")
+
+    def _run(self, source: str, destination: str, overwrite: bool, approval_id: str, trusted_overwrite_token: str) -> ToolResult:
+        src = _resolve(source, self._roots, self._default_path)
+        dest = _resolve(destination, self._roots, self._default_path)
+        if not src.exists():
+            return ToolResult(content=f"Source does not exist: {src}")
+        if dest.exists():
+            if not overwrite:
+                return ToolResult(
+                    content=(
+                        f"Destination already exists: {dest}. "
+                        "Call move_path with overwrite=true only if the user asked to replace it."
+                    )
+                )
+            if not _trusted_overwrite(trusted_overwrite_token, self._trusted_overwrite_token):
+                approval = _approval_or_result(
+                    self._approvals,
+                    tool_name=self.name,
+                    title="move overwrite",
+                    details={"source": str(src), "destination": str(dest)},
+                    approval_id=approval_id,
+                )
+                if approval is not None:
+                    return approval
+            if dest.is_dir():
+                shutil.rmtree(dest)
+            else:
+                dest.unlink()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
+        return ToolResult(content=f"Moved: {src} -> {dest}")
+
+
+class CopyPathTool(BaseTool):
+    name = "copy_path"
+    description = (
+        "Copy a file or folder within the allowed filesystem sandbox. "
+        "If the destination exists, overwrite must be true and only when the user explicitly asked to replace it."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "source": {"type": "string", "description": "File or folder to copy."},
+            "destination": {"type": "string", "description": "Destination file or folder path."},
+            "overwrite": {
+                "type": "boolean",
+                "description": "Set true only when replacing the destination is explicitly requested.",
+            },
+            "approval_id": {
+                "type": "string",
+                "description": "Server-issued approval id for this exact overwrite action.",
+            },
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve copy overwrites."},
+        },
+        "required": ["source", "destination"],
+    }
+    costly = False
+
+    def __init__(
+        self,
+        allowed_roots: tuple[Path, ...] = (),
+        default_path: Path | None = None,
+        approval_manager: ApprovalManager | None = None,
+        trusted_overwrite_token: str = "",
+    ):
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+        self._trusted_overwrite_token = trusted_overwrite_token
+
+    async def execute(
+        self,
+        source: str = "",
+        destination: str = "",
+        overwrite: bool = False,
+        approval_id: str = "",
+        confirmed: bool = False,
+        trusted_overwrite_token: str = "",
+        **_,
+    ) -> ToolResult:
+        try:
+            return await asyncio.to_thread(
+                self._run,
+                source,
+                destination,
+                overwrite is True,
+                approval_id,
+                trusted_overwrite_token,
+            )
+        except PermissionError as e:
+            return ToolResult(content=str(e))
+        except Exception as e:
+            logger.error("copy_path failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Filesystem error: {e}")
+
+    def _run(self, source: str, destination: str, overwrite: bool, approval_id: str, trusted_overwrite_token: str) -> ToolResult:
+        src = _resolve(source, self._roots, self._default_path)
+        dest = _resolve(destination, self._roots, self._default_path)
+        if not src.exists():
+            return ToolResult(content=f"Source does not exist: {src}")
+        if dest.exists():
+            if not overwrite:
+                return ToolResult(
+                    content=(
+                        f"Destination already exists: {dest}. "
+                        "Call copy_path with overwrite=true only if the user asked to replace it."
+                    )
+                )
+            if not _trusted_overwrite(trusted_overwrite_token, self._trusted_overwrite_token):
+                approval = _approval_or_result(
+                    self._approvals,
+                    tool_name=self.name,
+                    title="copy overwrite",
+                    details={"source": str(src), "destination": str(dest)},
+                    approval_id=approval_id,
+                )
+                if approval is not None:
+                    return approval
+            if dest.is_dir():
+                shutil.rmtree(dest)
+            else:
+                dest.unlink()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if src.is_dir():
+            shutil.copytree(src, dest)
+        else:
+            shutil.copy2(src, dest)
+        return ToolResult(content=f"Copied: {src} -> {dest}")
+
+
+class OpenPathTool(BaseTool):
+    name = "open_path"
+    description = "Open an allowed file or folder with the default macOS app."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File or folder to open."},
+        },
+        "required": ["path"],
+    }
+    costly = False
+
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+
+    async def execute(self, path: str = "", **_) -> ToolResult:
+        try:
+            p = _resolve(path, self._roots, self._default_path)
+            if not p.exists():
+                return ToolResult(content=f"Path does not exist: {p}")
+            proc = await asyncio.create_subprocess_exec(
+                "open",
+                str(p),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                detail = stderr.decode(errors="replace").strip()
+                return ToolResult(content=f"Could not open {p}: {detail or 'open failed'}")
+            return ToolResult(content=f"Opened: {p}")
+        except PermissionError as e:
+            return ToolResult(content=str(e))
+        except Exception as e:
+            logger.error("open_path failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Filesystem error: {e}")
+
+
+class RevealPathTool(BaseTool):
+    name = "reveal_path"
+    description = "Reveal an allowed file or folder in Finder."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File or folder to reveal in Finder."},
+        },
+        "required": ["path"],
+    }
+    costly = False
+
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+
+    async def execute(self, path: str = "", **_) -> ToolResult:
+        try:
+            p = _resolve(path, self._roots, self._default_path)
+            if not p.exists():
+                return ToolResult(content=f"Path does not exist: {p}")
+            proc = await asyncio.create_subprocess_exec(
+                "open",
+                "-R",
+                str(p),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                detail = stderr.decode(errors="replace").strip()
+                return ToolResult(content=f"Could not reveal {p}: {detail or 'open -R failed'}")
+            return ToolResult(content=f"Revealed in Finder: {p}")
+        except PermissionError as e:
+            return ToolResult(content=str(e))
+        except Exception as e:
+            logger.error("reveal_path failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Filesystem error: {e}")

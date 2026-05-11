@@ -120,6 +120,30 @@ class TestVoiceInputVAD:
                 assert result is not None
                 assert len(result) > 0
 
+    def test_speech_start_callback_fires_on_vad_onset(self):
+        """A real VAD onset notifies the caller before recording finishes."""
+        vi = _make_vi(min_speech_ms=60, max_duration_s=5)
+
+        speech_start_frame = 3
+        speech_end_frame = speech_start_frame + vi.min_speech_frames + 2
+
+        stream = _mock_stream()
+        stream.read = MagicMock(
+            return_value=(np.full((FRAME_SAMPLES, 1), 1000, dtype=np.int16), False)
+        )
+        mock_vad = _mock_vad_events({
+            speech_start_frame: {"start": speech_start_frame * FRAME_SAMPLES},
+            speech_end_frame: {"end": speech_end_frame * FRAME_SAMPLES},
+        })
+        on_speech_start = MagicMock()
+
+        with patch("runtime.voice_input.sd.InputStream", return_value=stream):
+            with patch.object(vi, "_new_vad_iterator", return_value=mock_vad):
+                result = vi._record(on_speech_start=on_speech_start)
+
+        assert result is not None
+        on_speech_start.assert_called_once()
+
     def test_only_speech_frames_captured(self):
         """Pre-speech silence should not be in the output (only lookback)."""
         vi = _make_vi(min_speech_ms=60, max_duration_s=5)

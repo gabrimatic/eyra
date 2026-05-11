@@ -133,6 +133,7 @@ async def process_task_stream(
     interaction_style: InteractionStyle = InteractionStyle.TEXT,
     tool_registry: ToolRegistry | None = None,
     current_goal: str | None = None,
+    require_tools: bool = False,
 ) -> AsyncGenerator[str, None]:
     """
     Score complexity, select a model, and stream the response.
@@ -176,6 +177,9 @@ async def process_task_stream(
             async for chunk in client.stream_with_tools(
                 context, model_name=model_name, tools=tool_registry, include_costly=is_complex,
                 history=messages,
+                tool_timeout_seconds=settings.TOOL_TIMEOUT_SECONDS,
+                max_tool_rounds=settings.MAX_WORKER_TOOL_STEPS,
+                require_tools=require_tools,
             ):
                 yield chunk
         else:

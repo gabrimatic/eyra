@@ -31,6 +31,10 @@ class PreflightResult:
     speech_available: bool | None = None
     wh_bin: str | None = None
     screen_capture_available: bool = False
+    tool_capable_models: list[str] = field(default_factory=list)
+    tool_capability_checked_models: list[str] = field(default_factory=list)
+    vision_capable_models: list[str] = field(default_factory=list)
+    vision_capability_checked_models: list[str] = field(default_factory=list)
 
 
 @dataclass

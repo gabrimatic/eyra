@@ -8,22 +8,70 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+No unreleased changes.
+
+## [4.0.0] - 2026-05-11
+
 ### Added
 
 - Packaged installs expose the `eyra` console command and include the runtime entry module in the wheel.
+- Shared tool-registry construction for terminal and web sessions.
+- `pypdf` dependency for local PDF text extraction.
+- Optional OS operator tools for bounded command execution, process listing, file metadata, file search, LaunchAgent status, app opening, notifications, and clipboard writes.
+- Voice-codex-style operator aliases for voice context, system snapshots, URL fetches, LaunchAgent management, Codex/OpenClaw session lookup, and Codex/OpenClaw task delegation.
+- Optional stdio MCP bridge for listing and calling configured MCP server tools.
+- Optional terminal-agent status, session listing, bounded redacted session reading, and delegation bridges for Codex and OpenClaw.
+- Built-in `eyra-web` browser UI for phone or browser access, with text chat, Local Whisper browser voice turns, and optional OpenAI Realtime WebRTC voice.
+- Web UI task APIs for creating long work, listing tasks, viewing task detail, and cancelling tasks without blocking the browser request.
+- Web UI auth controls: `WEB_UI_TOKEN`, `WEB_UI_REQUIRE_TOKEN=auto`, request size limits, and token-required non-health endpoints by default.
+- Local Web UI voice replies through `wh whisper` after Local Whisper browser voice turns.
+- Realtime voice session endpoint that mints server-side ephemeral client secrets and can expose allowlisted low-risk tools to Realtime sessions.
+- Realtime tool safety controls: `REALTIME_TOOLS_ENABLED=false` by default and `REALTIME_ALLOWED_TOOLS` for explicit low-risk allowlists.
+- Background task manager with task ids, lifecycle states, progress, final results, failures, timeouts, and cancellation.
+- Task commands: `/tasks`, `/task <id>`, `/cancel <id>`, and `/cancel all`.
+- Risky-action approvals with `/approvals`, `/approve <id>`, and `/reject <id>`.
+- `/voice-test` manual diagnostic for physical speech interruption checks.
+- Non-blocking coordinator behavior so typed and voice input remain available while background tasks run.
+- Local PDF text extraction tool for sandboxed PDFs, including scanned/image-only reporting without online OCR.
+- Sandboxed filesystem move, copy, open, and reveal tools.
+- Deterministic local handlers for common move, copy, create, overwrite, and direct-read file requests.
+- Local macOS context tools for frontmost app and sandbox-filtered Finder selection.
+- Task and tool safety settings for background concurrency, worker model override, task timeout, tool timeout, model concurrency, and task status updates.
+- `VISION_MODEL` for screen/image tasks, allowing a separate vision-capable model from the main tool-capable model.
 
 ### Changed
 
+- Realtime voice now requires `OPENAI_API_KEY` explicitly and no longer falls back to provider `API_KEY`.
+- Realtime web tool calls now require both Realtime mode and unguessable Web UI/tool-call tokens.
+- Realtime now uses `gpt-realtime` as the default model name for the current OpenAI Realtime API.
+- Realtime tools are no longer exposed by default; risky local tools are not available to Realtime unless explicitly allowlisted.
+- Realtime tool allowlists are restricted to Eyra's built-in low-risk Realtime tool set; local clipboard, filesystem, screen, OS, MCP, browser, and agent tools are not exposed to Realtime.
+- Web UI now requires token auth automatically for all non-health endpoints, including localhost, and refuses cross-origin API requests from other origins.
+- Web UI responses now include local-app security headers: content security policy, no-referrer policy, no-sniff, no-store, and frame denial.
+- Voice input now stays active during TTS so a real VAD speech onset can interrupt active speech output and continue recording the user's utterance.
+- MCP tool calls now require server-side action-specific approval before execution.
+- Risky OS, LaunchAgent, clipboard, shell-command, and agent-delegation tools now require server-side action-specific approval. Model-supplied `confirmed=true` no longer executes those actions.
+- Model-driven file overwrites now require server-side action-specific approval. Controller-owned overwrite confirmations still work only after the user explicitly says to overwrite the pending file action.
+- Delegated Codex/OpenClaw subprocesses now run under the normal tool timeout and are killed on timeout or cancellation.
+- The terminal runtime now uses the shared tool-registry builder instead of constructing tools inside `LiveSession`.
+- First-run `.env` writing now preserves and documents Web UI, Realtime, OS tools, MCP, and agent delegation settings.
+- `setup.sh` now registers both `eyra` and `eyra-web`.
+- Browser clicks now avoid false failures when navigation completes after the click but before text extraction.
 - `/voice on` now rechecks Local Whisper at runtime and starts an owned voice loop when voice was disabled or unavailable at startup.
 - Voice readiness now tracks input and speech separately, so TTS can keep working while ASR is unavailable or still loading.
 - `/voice off` now cancels the owned voice task instead of relying on global task-name lookup.
 - `/mode fast` now explains when complexity routing is disabled instead of silently switching to an unused mode.
 - `write_file` now protects existing files unless `overwrite=true` is provided explicitly.
-- The default filesystem sandbox is now `~/Documents,/tmp` instead of the whole home directory.
+- The default filesystem sandbox is now `~/Documents,~/Desktop,~/Downloads,/tmp` instead of the whole home directory.
 - Runtime logs now use a writable log path by default, with `EYRA_LOG_FILE` as an override.
 - `/goal` now reaches the response pipeline as session context for future replies.
+- `/status` now includes task state.
 - Weather lookups require an explicit location and no longer use remote IP geolocation.
 - Tool-call logs now record tool names and argument keys without persisting argument values.
+- Tool-required background tasks now report clearly when the selected model cannot use local tools.
+- PDF summary workers now extract local PDF text before asking the model to summarize, with a bounded local fallback if the model returns no text.
+- Screen requests now use controller-owned screenshot capture and a configurable vision model, so the vision model does not need native tool calling.
+- Document requests such as page-by-page PDF summaries no longer trigger screen capture intent detection.
 - `.env.example` now includes `AUTO_PULL_MODELS`.
 - CI and contributor docs now include wheel-build verification.
 - `read_file` now refuses binary files with a clean message instead of streaming raw bytes into the terminal.

@@ -270,6 +270,9 @@ class AIClient(BaseAIClient):
         tools: ToolRegistry | None = None,
         include_costly: bool = True,
         history: list[dict] | None = None,
+        tool_timeout_seconds: int = 30,
+        max_tool_rounds: int = 5,
+        require_tools: bool = False,
     ) -> AsyncGenerator[str, None]:
         if not tools or not tools.to_openai_tools(include_costly=include_costly):
             # generate_completion_stream already cleans via _clean_stream
@@ -278,6 +281,9 @@ class AIClient(BaseAIClient):
             return
 
         if self._native_tools_supported is False:
+            if require_tools:
+                yield "The selected model cannot use local tools. Text chat still works, but this task needs a tool-capable model."
+                return
             async for chunk in self.generate_completion_stream(messages, model_name=model_name):
                 yield chunk
             return
@@ -285,7 +291,7 @@ class AIClient(BaseAIClient):
         chosen_model = model_name or self.model_name
         openai_tools = tools.to_openai_tools(include_costly=include_costly)
 
-        for _ in range(5):
+        for _ in range(max(1, max_tool_rounds)):
             accumulated_content = ""
             tool_calls_raw: dict[int, dict] = {}
             _content_buffer = ""
@@ -307,6 +313,12 @@ class AIClient(BaseAIClient):
                 if _is_tools_unsupported_error(e):
                     self._native_tools_supported = False
                     self.logger.info("Model %s does not support native tools; retrying without tools", chosen_model)
+                    if require_tools:
+                        yield (
+                            "The selected model cannot use local tools. Text chat still works, "
+                            "but this task needs a tool-capable model."
+                        )
+                        return
                     async for chunk in self.generate_completion_stream(messages, model_name=chosen_model):
                         yield chunk
                     return
@@ -424,10 +436,15 @@ class AIClient(BaseAIClient):
             pending_images: list[dict] = []
             for tc in normalized_tool_calls:
                 try:
-                    result = await asyncio.wait_for(tools.execute(tc["name"], tc["arguments"]), timeout=30)
+                    result = await asyncio.wait_for(
+                        tools.execute(tc["name"], tc["arguments"]),
+                        timeout=max(1, tool_timeout_seconds),
+                    )
                 except asyncio.TimeoutError:
-                    logger.error("Tool '%s' timed out after 30s", tc["name"])
-                    result = ToolResult(content=f"Tool '{tc['name']}' timed out after 30 seconds.")
+                    logger.error("Tool '%s' timed out after %ss", tc["name"], tool_timeout_seconds)
+                    result = ToolResult(
+                        content=f"Tool '{tc['name']}' timed out after {tool_timeout_seconds} seconds."
+                    )
                 tool_msg = {
                     "role": "tool",
                     "tool_call_id": tc["id"],
@@ -451,5 +468,5 @@ class AIClient(BaseAIClient):
                     history.append(img_msg)
 
         # Safety: if 5 rounds exhausted without a final text response, yield a fallback
-        logger.warning("Tool-calling loop exhausted after 5 rounds")
+        logger.warning("Tool-calling loop exhausted after %s rounds", max_tool_rounds)
         yield "\n[Reached tool-call limit. Please try rephrasing your request.]"
