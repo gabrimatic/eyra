@@ -206,6 +206,15 @@ class TestWebServerHelpers:
         assert event["event"] == "task"
         assert event["task"]["id"] == result["taskId"]
 
+    def test_web_runtime_close_closes_owned_event_loop(self):
+        settings = Settings(USE_MOCK_CLIENT=True, LIVE_LISTENING_ENABLED=False, LIVE_SPEECH_ENABLED=False)
+        runtime = WebAssistantRuntime(settings)
+        loop = runtime._loop
+
+        runtime.close()
+
+        assert loop.is_closed()
+
     def test_web_runtime_refuses_open_ended_tool_task_without_tool_capable_model(self, tmp_path):
         from runtime.models import PreflightResult
 

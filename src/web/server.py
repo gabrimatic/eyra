@@ -381,6 +381,8 @@ class WebAssistantRuntime:
         finally:
             self._loop.call_soon_threadsafe(self._loop.stop)
             self._thread.join(timeout=2)
+            if not self._loop.is_closed():
+                self._loop.close()
 
 
 def render_index_html(settings: Settings) -> str:
