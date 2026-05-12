@@ -10,7 +10,7 @@ import tempfile
 import urllib.error
 import urllib.request
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -128,6 +128,7 @@ def run_certification(settings: Settings | None = None, *, include_physical: boo
         job_store = DurableJobStore(tmp_path / "jobs.sqlite3")
         trigger_store = TriggerStore(tmp_path / "triggers.sqlite3")
         try:
+            _check_terminal_runtime_contracts(report, settings, tmp_path)
             _guarded(report, "job_persistence", lambda: _check_job_persistence(job_store))
             _guarded(report, "task_logs", lambda: _check_task_logs(job_store))
             _guarded(report, "task_artifacts", lambda: _check_task_artifacts(job_store))
@@ -171,6 +172,59 @@ def run_certification(settings: Settings | None = None, *, include_physical: boo
         "Realtime voice is disabled by default." if not settings.REALTIME_VOICE_ENABLED else "Realtime voice is enabled for this run.",
     )
     return report
+
+
+def _check_terminal_runtime_contracts(report: CertificationReport, settings: Settings, tmp_path: Path) -> None:
+    _guarded(report, "typed_command_path", lambda: _check_typed_command_path(tmp_path), command="/status")
+    if settings.USE_MOCK_CLIENT:
+        report.add(
+            "real_local_model_startup",
+            "skipped",
+            "Current certification settings use the mock client.",
+            command="uv run python src/main.py",
+        )
+        return
+    _guarded(
+        report,
+        "real_local_model_startup",
+        lambda: _check_real_local_model_startup(settings),
+        command="PreflightManager.run",
+    )
+
+
+def _check_typed_command_path(tmp_path: Path) -> str:
+    session = None
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        session, _root = _build_certification_session(tmp_path / "typed-command")
+        try:
+            handled = asyncio.run(session._handle_command("/status"))
+            if handled is not True:
+                raise RuntimeError("Typed /status command was not handled locally.")
+            return "Typed local command path handled /status without model routing."
+        finally:
+            if session is not None:
+                asyncio.run(session.task_manager.shutdown())
+                asyncio.run(session._browser_session.close())
+                session.trigger_store.close()
+                session.job_store.close()
+
+
+def _check_real_local_model_startup(settings: Settings) -> str:
+    from runtime.preflight import PreflightManager
+
+    safe_settings = replace(
+        settings,
+        AUTO_PULL_MODELS=False,
+        LIVE_LISTENING_ENABLED=False,
+        LIVE_SPEECH_ENABLED=False,
+    )
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        result = asyncio.run(PreflightManager(safe_settings).run())
+    if not result.backend_reachable:
+        raise RuntimeError(f"Local model backend is unreachable: {safe_settings.API_BASE_URL}")
+    if result.models_missing:
+        raise RuntimeError(f"Configured local models are missing: {', '.join(result.models_missing)}")
+    return "Real local backend preflight reached the configured model set without auto-pull."
 
 
 def _check_job_persistence(store: DurableJobStore) -> str:

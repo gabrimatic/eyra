@@ -22,6 +22,8 @@ def test_certification_matrix_contains_required_structured_rows(tmp_path):
 
     required = {
         "mock_terminal_startup",
+        "real_local_model_startup",
+        "typed_command_path",
         "voice_diagnostics",
         "job_persistence",
         "task_logs",
@@ -238,3 +240,23 @@ def test_certification_exercises_web_and_capability_privacy_paths(tmp_path):
 
     assert web_rows.issubset(rows)
     assert {rows[name].status for name in web_rows} == {"passed"}
+
+
+def test_certification_exercises_terminal_command_rows(tmp_path):
+    from runtime.certification import run_certification
+    from utils.settings import Settings
+
+    settings = Settings(
+        USE_MOCK_CLIENT=True,
+        LIVE_LISTENING_ENABLED=False,
+        LIVE_SPEECH_ENABLED=False,
+        JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+        TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+    )
+
+    report = run_certification(settings=settings, include_physical=False)
+    rows = {row.name: row for row in report.rows}
+
+    assert rows["typed_command_path"].status == "passed"
+    assert rows["real_local_model_startup"].status == "skipped"
+    assert "mock" in rows["real_local_model_startup"].reason.lower()
