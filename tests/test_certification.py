@@ -144,6 +144,51 @@ def test_certification_fails_when_voice_diagnostics_have_failed_check(tmp_path):
     assert result.failed is True
 
 
+def test_certification_voice_failure_reason_includes_multiple_diagnostic_failures(tmp_path):
+    from runtime.certification import run_certification
+    from runtime.voice_diagnostics import DiagnosticCheck, DiagnosticReport
+    from utils.settings import Settings
+
+    settings = Settings(
+        LIVE_LISTENING_ENABLED=True,
+        LIVE_SPEECH_ENABLED=False,
+        JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+        TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+    )
+    report = DiagnosticReport(
+        title="Voice diagnostics",
+        checks=[
+            DiagnosticCheck("captured_audio", "failed", "microphone input is silent/all-zero"),
+            DiagnosticCheck(
+                "alternate_input_device",
+                "failed",
+                "No alternate input device delivered nonzero audio (Jump Desktop Microphone: all-zero).",
+            ),
+        ],
+    )
+
+    class FakeDiagnostics:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def run(self, **_kwargs):
+            return report
+
+    import runtime.certification as certification
+
+    original = certification.VoiceDiagnostics
+    certification.VoiceDiagnostics = FakeDiagnostics
+    try:
+        result = run_certification(settings=settings, include_physical=False)
+    finally:
+        certification.VoiceDiagnostics = original
+
+    row = next(row for row in result.rows if row.name == "voice_diagnostics")
+    assert row.status == "failed"
+    assert "captured_audio: microphone input is silent/all-zero" in row.reason
+    assert "alternate_input_device: No alternate input device delivered nonzero audio" in row.reason
+
+
 def test_certification_exercises_real_file_operations_and_approval_paths(tmp_path):
     from runtime.certification import run_certification
     from utils.settings import Settings

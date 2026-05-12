@@ -129,8 +129,12 @@ def run_certification(settings: Settings | None = None, *, include_physical: boo
         )
         failed_checks = [check for check in diagnostic.checks if check.status == "failed"]
         if failed_checks:
-            first = failed_checks[0]
-            report.add("voice_diagnostics", "failed", f"{first.name}: {first.reason}", command="/voice-diagnose")
+            report.add(
+                "voice_diagnostics",
+                "failed",
+                _format_failed_diagnostic_checks(failed_checks),
+                command="/voice-diagnose",
+            )
         else:
             report.add("voice_diagnostics", "passed", "No failed voice diagnostic checks.", command="/voice-diagnose")
     else:
@@ -200,6 +204,13 @@ def run_certification(settings: Settings | None = None, *, include_physical: boo
         "Realtime voice is disabled by default." if not settings.REALTIME_VOICE_ENABLED else "Realtime voice is enabled for this run.",
     )
     return report
+
+
+def _format_failed_diagnostic_checks(checks) -> str:
+    failures = [f"{check.name}: {check.reason}" for check in checks]
+    if len(failures) <= 3:
+        return "; ".join(failures)
+    return "; ".join(failures[:3]) + f"; +{len(failures) - 3} more"
 
 
 def _check_terminal_runtime_contracts(report: CertificationReport, settings: Settings, tmp_path: Path) -> None:
