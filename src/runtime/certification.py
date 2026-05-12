@@ -4,14 +4,31 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Awaitable, Callable
 
 from runtime.jobs import DurableJobStore, JobStatus, RiskLevel
 from runtime.tasks import BackgroundTaskManager
 from runtime.triggers import TriggerStatus, TriggerStore
 from runtime.voice_diagnostics import VoiceDiagnostics
+from tools.approval import ApprovalManager
+from tools.filesystem import (
+    AppendFileTool,
+    CompareFilesTool,
+    CompressPathTool,
+    CopyPathTool,
+    DeletePermanentlyTool,
+    DuplicatePathTool,
+    MovePathTool,
+    MoveToTrashTool,
+    PrependFileTool,
+    RenamePathTool,
+    RestoreFromTrashTool,
+    UncompressArchiveTool,
+    WriteFileTool,
+)
 from utils.settings import Settings
 
 
@@ -45,6 +62,21 @@ class CertificationReport:
 def _guarded(report: CertificationReport, name: str, check: Callable[[], str], *, command: str = "") -> None:
     try:
         reason = check()
+    except Exception as exc:
+        report.add(name, "failed", str(exc) or exc.__class__.__name__, command=command)
+    else:
+        report.add(name, "passed", reason, command=command)
+
+
+async def _guarded_async(
+    report: CertificationReport,
+    name: str,
+    check: Callable[[], Awaitable[str]],
+    *,
+    command: str = "",
+) -> None:
+    try:
+        reason = await check()
     except Exception as exc:
         report.add(name, "failed", str(exc) or exc.__class__.__name__, command=command)
     else:
@@ -94,8 +126,10 @@ def run_certification(settings: Settings | None = None, *, include_physical: boo
             _guarded(report, "job_persistence", lambda: _check_job_persistence(job_store))
             _guarded(report, "task_logs", lambda: _check_task_logs(job_store))
             _guarded(report, "task_artifacts", lambda: _check_task_artifacts(job_store))
+            asyncio.run(_check_file_operation_matrix(report, tmp_path))
             _guarded(report, "operation_ledger", lambda: _check_operation_ledger(job_store))
             _guarded(report, "undo_reversible_file_move", lambda: _check_undo_metadata(job_store))
+            _guarded(report, "undo_reversible_file_operations", lambda: _check_file_operation_undo_metadata(job_store))
             _guarded(report, "trigger_creation", lambda: _check_trigger_creation(trigger_store, tmp_path))
             _guarded(report, "reminder_trigger", lambda: _check_reminder_trigger(trigger_store))
             _guarded(report, "recurring_reminder_trigger", lambda: _check_recurring_reminder_trigger(trigger_store))
@@ -158,6 +192,224 @@ def _check_task_artifacts(store: DurableJobStore) -> str:
     return "Task artifacts persisted."
 
 
+async def _check_file_operation_matrix(report: CertificationReport, tmp_path: Path) -> None:
+    root = (tmp_path / "filesystem").resolve()
+    root.mkdir()
+    roots = (root,)
+
+    async def direct_file_write() -> str:
+        target = root / "write" / "note.txt"
+        result = await WriteFileTool(allowed_roots=roots, default_path=root).execute(
+            path=str(target),
+            content="hello",
+        )
+        if "Created:" not in result.content or target.read_text() != "hello":
+            raise RuntimeError("write_file did not create the expected text file.")
+        return "write_file created a sandboxed text file."
+
+    async def overwrite_refusal() -> str:
+        target = root / "overwrite-refusal.txt"
+        target.write_text("old")
+        result = await WriteFileTool(allowed_roots=roots, default_path=root).execute(
+            path=str(target),
+            content="new",
+        )
+        if "already exists" not in result.content or target.read_text() != "old":
+            raise RuntimeError("write_file overwrote an existing file without explicit overwrite.")
+        return "write_file refused implicit overwrite."
+
+    async def explicit_overwrite_approval() -> str:
+        target = root / "approved-overwrite.txt"
+        target.write_text("old")
+        manager = ApprovalManager()
+        tool = WriteFileTool(allowed_roots=roots, default_path=root, approval_manager=manager)
+        first = await tool.execute(path=str(target), content="new", overwrite=True, confirmed=True)
+        if "Approval required" not in first.content or target.read_text() != "old":
+            raise RuntimeError("overwrite did not require server-side approval.")
+        pending = manager.list_pending()
+        if len(pending) != 1 or not manager.approve(pending[0].id):
+            raise RuntimeError("overwrite approval could not be approved.")
+        second = await tool.execute(path=str(target), content="new", overwrite=True, approval_id=pending[0].id)
+        if "Updated:" not in second.content or target.read_text() != "new":
+            raise RuntimeError("approved overwrite did not update the file.")
+        return "overwrite consumed an exact server-side approval."
+
+    async def direct_file_move() -> str:
+        source = root / "move-source.txt"
+        destination = root / "moved" / "move-source.txt"
+        source.write_text("move me")
+        result = await MovePathTool(allowed_roots=roots, default_path=root).execute(
+            source=str(source),
+            destination=str(destination),
+        )
+        if "Moved:" not in result.content or source.exists() or destination.read_text() != "move me":
+            raise RuntimeError("move_path did not move the file.")
+        return "move_path moved a sandboxed file."
+
+    async def direct_file_copy() -> str:
+        source = root / "copy-source.txt"
+        destination = root / "copied" / "copy-source.txt"
+        source.write_text("copy me")
+        result = await CopyPathTool(allowed_roots=roots, default_path=root).execute(
+            source=str(source),
+            destination=str(destination),
+        )
+        if "Copied:" not in result.content or source.read_text() != "copy me" or destination.read_text() != "copy me":
+            raise RuntimeError("copy_path did not copy the file.")
+        return "copy_path copied a sandboxed file."
+
+    async def append_prepend() -> str:
+        target = root / "append-prepend.txt"
+        target.write_text("middle")
+        appended = await AppendFileTool(allowed_roots=roots, default_path=root).execute(
+            path=str(target),
+            content="\nend",
+        )
+        prepended = await PrependFileTool(allowed_roots=roots, default_path=root).execute(
+            path=str(target),
+            content="start\n",
+        )
+        if "Appended" not in appended.content or "Prepended" not in prepended.content:
+            raise RuntimeError("append/prepend tools did not report success.")
+        if target.read_text() != "start\nmiddle\nend":
+            raise RuntimeError("append/prepend content did not match.")
+        return "append_file and prepend_file updated a text file."
+
+    async def compare_files() -> str:
+        left = root / "left.txt"
+        right = root / "right.txt"
+        left.write_text("same\nleft\n")
+        right.write_text("same\nright\n")
+        result = await CompareFilesTool(allowed_roots=roots, default_path=root).execute(
+            left_path=str(left),
+            right_path=str(right),
+        )
+        if "-left" not in result.content or "+right" not in result.content:
+            raise RuntimeError("compare_files did not return the expected unified diff.")
+        return "compare_files returned a unified diff."
+
+    async def rename_path() -> str:
+        source = root / "old-name.txt"
+        source.write_text("rename me")
+        result = await RenamePathTool(allowed_roots=roots, default_path=root).execute(
+            path=str(source),
+            new_name="new-name.txt",
+        )
+        renamed = root / "new-name.txt"
+        if "Renamed:" not in result.content or source.exists() or renamed.read_text() != "rename me":
+            raise RuntimeError("rename_path did not rename the file in place.")
+        return "rename_path renamed a sandboxed file."
+
+    async def duplicate_path() -> str:
+        source = root / "duplicate.txt"
+        source.write_text("duplicate me")
+        result = await DuplicatePathTool(allowed_roots=roots, default_path=root).execute(path=str(source))
+        duplicate = root / "duplicate copy.txt"
+        if "Duplicated:" not in result.content or source.read_text() != "duplicate me" or duplicate.read_text() != "duplicate me":
+            raise RuntimeError("duplicate_path did not create the expected duplicate.")
+        return "duplicate_path created a default copy."
+
+    async def trash_delete() -> str:
+        source = root / "trash-delete.txt"
+        source.write_text("recoverable")
+        result = await MoveToTrashTool(allowed_roots=roots, default_path=root).execute(path=str(source))
+        trash_path = _trash_path_from_result(result.content)
+        if "Moved to Trash:" not in result.content or source.exists() or not trash_path.exists():
+            raise RuntimeError("move_to_trash did not move the file to Trash.")
+        cleanup = await RestoreFromTrashTool(allowed_roots=roots, default_path=root).execute(
+            trash_path=str(trash_path),
+            destination=str(root / "trash-delete-restored.txt"),
+        )
+        if "Restored:" not in cleanup.content:
+            raise RuntimeError("trash cleanup restore failed.")
+        return "move_to_trash removed a sandboxed file without permanent deletion."
+
+    async def restore_from_trash() -> str:
+        source = root / "restore-source.txt"
+        destination = root / "restore-destination.txt"
+        source.write_text("restore me")
+        trashed = await MoveToTrashTool(allowed_roots=roots, default_path=root).execute(path=str(source))
+        trash_path = _trash_path_from_result(trashed.content)
+        restored = await RestoreFromTrashTool(allowed_roots=roots, default_path=root).execute(
+            trash_path=str(trash_path),
+            destination=str(destination),
+        )
+        if "Restored:" not in restored.content or destination.read_text() != "restore me" or trash_path.exists():
+            raise RuntimeError("restore_from_trash did not restore the file.")
+        return "restore_from_trash restored a trashed file into the sandbox."
+
+    async def permanent_delete_approval() -> str:
+        target = root / "permanent-delete.txt"
+        target.write_text("delete me")
+        manager = ApprovalManager()
+        tool = DeletePermanentlyTool(allowed_roots=roots, default_path=root, approval_manager=manager)
+        first = await tool.execute(path=str(target))
+        if "Approval required" not in first.content or not target.exists():
+            raise RuntimeError("permanent delete did not require approval.")
+        pending = manager.list_pending()
+        if len(pending) != 1 or not manager.approve(pending[0].id):
+            raise RuntimeError("permanent delete approval could not be approved.")
+        second = await tool.execute(path=str(target), approval_id=pending[0].id)
+        if "Permanently deleted:" not in second.content or target.exists():
+            raise RuntimeError("approved permanent delete did not remove the file.")
+        return "delete_permanently required and consumed an exact approval."
+
+    async def zip_unzip() -> str:
+        folder = root / "archive-folder"
+        folder.mkdir()
+        (folder / "note.txt").write_text("archive me")
+        archive = root / "archive-folder.zip"
+        destination = root / "expanded"
+        compressed = await CompressPathTool(allowed_roots=roots, default_path=root).execute(
+            source=str(folder),
+            destination=str(archive),
+        )
+        uncompressed = await UncompressArchiveTool(allowed_roots=roots, default_path=root).execute(
+            archive=str(archive),
+            destination=str(destination),
+        )
+        if "Compressed:" not in compressed.content or "Uncompressed:" not in uncompressed.content:
+            raise RuntimeError("zip/unzip tools did not report success.")
+        if (destination / "archive-folder" / "note.txt").read_text() != "archive me":
+            raise RuntimeError("uncompressed archive content did not match.")
+        return "compress_path and uncompress_archive round-tripped a folder."
+
+    async def zip_path_traversal_refusal() -> str:
+        archive = root / "malicious.zip"
+        destination = root / "malicious-expanded"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("../escape.txt", "nope")
+        result = await UncompressArchiveTool(allowed_roots=roots, default_path=root).execute(
+            archive=str(archive),
+            destination=str(destination),
+        )
+        if "outside the destination" not in result.content or destination.exists():
+            raise RuntimeError("uncompress_archive did not refuse a path traversal archive.")
+        return "uncompress_archive refused zip path traversal."
+
+    await _guarded_async(report, "direct_file_write", direct_file_write, command="write_file")
+    await _guarded_async(report, "overwrite_refusal", overwrite_refusal, command="write_file")
+    await _guarded_async(report, "explicit_overwrite_approval", explicit_overwrite_approval, command="write_file")
+    await _guarded_async(report, "direct_file_move", direct_file_move, command="move_path")
+    await _guarded_async(report, "direct_file_copy", direct_file_copy, command="copy_path")
+    await _guarded_async(report, "append_prepend", append_prepend, command="append_file/prepend_file")
+    await _guarded_async(report, "compare_files", compare_files, command="compare_files")
+    await _guarded_async(report, "rename_path", rename_path, command="rename_path")
+    await _guarded_async(report, "duplicate_path", duplicate_path, command="duplicate_path")
+    await _guarded_async(report, "trash_delete", trash_delete, command="move_to_trash")
+    await _guarded_async(report, "restore_from_trash", restore_from_trash, command="restore_from_trash")
+    await _guarded_async(report, "permanent_delete_approval", permanent_delete_approval, command="delete_permanently")
+    await _guarded_async(report, "zip_unzip", zip_unzip, command="compress_path/uncompress_archive")
+    await _guarded_async(report, "zip_path_traversal_refusal", zip_path_traversal_refusal, command="uncompress_archive")
+
+
+def _trash_path_from_result(content: str) -> Path:
+    marker = " -> "
+    if marker not in content:
+        raise RuntimeError(f"Trash path missing from result: {content}")
+    return Path(content.rsplit(marker, 1)[1]).expanduser().resolve()
+
+
 def _check_operation_ledger(store: DurableJobStore) -> str:
     job = store.create_job(title="Ledger job", original_user_input="move", source_frontend="cert")
     op = store.record_operation(
@@ -182,6 +434,35 @@ def _check_undo_metadata(store: DurableJobStore) -> str:
     if not any(op.undo.get("type") == "file.move" for op in operations):
         raise RuntimeError("No reversible file move undo metadata was found.")
     return "Reversible file move undo metadata is present."
+
+
+def _check_file_operation_undo_metadata(store: DurableJobStore) -> str:
+    job = store.create_job(title="Undo metadata job", original_user_input="file operations", source_frontend="cert")
+    expected = {
+        "file.move": "file.move",
+        "file.trash": "file.restore_from_trash",
+        "file.rename": "file.rename",
+        "file.duplicate": "file.trash",
+    }
+    for action_type, undo_type in expected.items():
+        store.record_operation(
+            job_id=job.id,
+            user_request=f"certify {action_type}",
+            normalized_action={"type": action_type},
+            capability="filesystem",
+            target=f"/tmp/{action_type.replace('.', '-')}.txt",
+            before_state={"path": "/tmp/before.txt"},
+            after_state={"path": "/tmp/after.txt"},
+            risk_level=RiskLevel.LOW_RISK_CHANGE,
+            success=True,
+            undo={"type": undo_type},
+        )
+    operations = store.list_operations(job.id)
+    seen = {op.normalized_action.get("type"): op.undo.get("type") for op in operations}
+    missing = {action: undo for action, undo in expected.items() if seen.get(action) != undo}
+    if missing:
+        raise RuntimeError(f"Missing reversible undo metadata: {sorted(missing)}")
+    return "Undo metadata persisted for move, trash, rename, and duplicate file operations."
 
 
 def _check_trigger_creation(store: TriggerStore, tmp_path: Path) -> str:
