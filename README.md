@@ -1,6 +1,6 @@
 # Eyra
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-lightgrey.svg)](LICENSE)
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)]()
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)]()
 
@@ -567,13 +567,13 @@ WEB_UI_ENABLED=true USE_MOCK_CLIENT=true uv run python -m web.server
 
 ### Third-party licenses
 
-All dependencies use MIT, BSD, or Apache 2.0 licenses. See each package for details.
+Dependencies keep their own licenses. See each package for details.
 
 </details>
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Source-available under the PolyForm Noncommercial License 1.0.0. Noncommercial use, modification, and redistribution are allowed when the license and required notices stay with the software. Commercial use requires written permission from Soroush Yousefpour. See [LICENSE](LICENSE).
 
 ---
 

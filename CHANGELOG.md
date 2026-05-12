@@ -67,6 +67,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/voice on` and startup preflight now probe Local Whisper microphone readiness separately from speech output, keep speech available if input fails, and report speech-only state honestly.
 - Shared Web health now uses runtime preflight evidence instead of settings-only capability guesses.
 - Sandboxed moves now use copy plus unlink instead of filesystem rename so protected-folder or iCloud-backed paths do not hang on macOS.
+- Project licensing changed from MIT to PolyForm Noncommercial 1.0.0, with required notices preserving the Eyra name and copyright attribution.
 
 ### Fixed
 
