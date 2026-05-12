@@ -40,12 +40,17 @@ def test_certification_matrix_contains_required_structured_rows(tmp_path):
         "permanent_delete_approval",
         "zip_unzip",
         "zip_path_traversal_refusal",
+        "background_task_creation",
         "cancel",
         "pause_resume",
+        "task_retry",
+        "clear_completed",
         "operation_ledger",
         "undo_reversible_file_move",
         "undo_reversible_file_operations",
         "trigger_creation",
+        "trigger_fire",
+        "trigger_pause_resume_cancel",
         "reminder_trigger",
         "recurring_reminder_trigger",
         "network_disabled_refusal",
@@ -151,3 +156,49 @@ def test_certification_exercises_real_file_operations_and_approval_paths(tmp_pat
 
     assert file_rows.issubset(rows)
     assert {rows[name].status for name in file_rows} == {"passed"}
+
+
+def test_certification_exercises_job_and_trigger_lifecycle_paths(tmp_path):
+    from runtime.certification import run_certification
+    from utils.settings import Settings
+
+    settings = Settings(
+        USE_MOCK_CLIENT=True,
+        LIVE_LISTENING_ENABLED=False,
+        LIVE_SPEECH_ENABLED=False,
+        JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+        TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+    )
+
+    report = run_certification(settings=settings, include_physical=False)
+    rows = {row.name: row for row in report.rows}
+
+    lifecycle_rows = {
+        "background_task_creation",
+        "task_retry",
+        "clear_completed",
+        "trigger_fire",
+        "trigger_pause_resume_cancel",
+    }
+
+    assert lifecycle_rows.issubset(rows)
+    assert {rows[name].status for name in lifecycle_rows} == {"passed"}
+
+
+def test_certification_run_does_not_print_runtime_noise(tmp_path, capsys):
+    from runtime.certification import run_certification
+    from utils.settings import Settings
+
+    settings = Settings(
+        USE_MOCK_CLIENT=True,
+        LIVE_LISTENING_ENABLED=False,
+        LIVE_SPEECH_ENABLED=False,
+        JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+        TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+    )
+
+    run_certification(settings=settings, include_physical=False)
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
@@ -131,6 +133,7 @@ def run_certification(settings: Settings | None = None, *, include_physical: boo
             _guarded(report, "undo_reversible_file_move", lambda: _check_undo_metadata(job_store))
             _guarded(report, "undo_reversible_file_operations", lambda: _check_file_operation_undo_metadata(job_store))
             _guarded(report, "trigger_creation", lambda: _check_trigger_creation(trigger_store, tmp_path))
+            asyncio.run(_check_live_session_job_and_trigger_contracts(report, tmp_path))
             _guarded(report, "reminder_trigger", lambda: _check_reminder_trigger(trigger_store))
             _guarded(report, "recurring_reminder_trigger", lambda: _check_recurring_reminder_trigger(trigger_store))
             asyncio.run(_check_task_control(report, job_store))
@@ -465,6 +468,133 @@ def _check_file_operation_undo_metadata(store: DurableJobStore) -> str:
     return "Undo metadata persisted for move, trash, rename, and duplicate file operations."
 
 
+async def _check_live_session_job_and_trigger_contracts(report: CertificationReport, tmp_path: Path) -> None:
+    session = None
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        session, root = _build_certification_session(tmp_path)
+        try:
+            async def task_retry() -> str:
+                source = root / "Desktop" / "retry-cert.txt"
+                destination = root / "Documents" / "retry-cert.txt"
+                await session._handle_user_input("Move retry-cert.txt from my Desktop to Documents.")
+                failed_job = next(
+                    (job for job in session.job_store.list_jobs() if job.original_user_input.startswith("Move retry-cert")),
+                    None,
+                )
+                if failed_job is None or failed_job.status != JobStatus.FAILED:
+                    raise RuntimeError("Initial deterministic file job did not fail in a retryable way.")
+                source.write_text("retry")
+                await session._handle_command(f"/task retry {failed_job.id}")
+                if source.exists() or destination.read_text() != "retry":
+                    raise RuntimeError("Retry did not replay the deterministic file job successfully.")
+                return "Failed deterministic file job retried from its original request."
+
+            async def trigger_fire() -> str:
+                source = root / "Downloads" / "trigger-cert.txt"
+                destination = root / "Documents" / "trigger-cert.txt"
+                await session._handle_user_input("When trigger-cert.txt appears in my Downloads, move it to Documents.")
+                task = session.task_manager.latest_active_task()
+                if task is None:
+                    raise RuntimeError("File trigger did not create a background task.")
+                source.write_text("trigger me")
+                await session.task_manager.wait_for_task(task.id)
+                trigger = next(
+                    (
+                        row
+                        for row in session.trigger_store.list_triggers()
+                        if row.original_request.startswith("When trigger-cert")
+                    ),
+                    None,
+                )
+                if trigger is None or session.trigger_store.get_trigger(trigger.id).status != TriggerStatus.COMPLETED:
+                    raise RuntimeError("File trigger did not complete.")
+                if source.exists() or destination.read_text() != "trigger me":
+                    raise RuntimeError("File trigger did not move the created file.")
+                return "File-appears trigger fired once and moved the file."
+
+            async def trigger_pause_resume_cancel() -> str:
+                paused_source = root / "Downloads" / "paused-cert.txt"
+                paused_destination = root / "Documents" / "paused-cert.txt"
+                await session._handle_user_input("When paused-cert.txt appears in my Downloads, move it to Documents.")
+                paused_task = session.task_manager.latest_active_task()
+                paused_trigger = session.trigger_store.list_triggers()[0]
+                if paused_task is None:
+                    raise RuntimeError("Paused trigger did not create a background task.")
+                await session._handle_command(f"/trigger pause {paused_trigger.id}")
+                paused_source.write_text("wait")
+                await asyncio.sleep(0.05)
+                if paused_destination.exists():
+                    raise RuntimeError("Paused trigger fired before resume.")
+                await session._handle_command(f"/trigger resume {paused_trigger.id}")
+                await session.task_manager.wait_for_task(paused_task.id)
+                if paused_source.exists() or paused_destination.read_text() != "wait":
+                    raise RuntimeError("Resumed trigger did not fire.")
+
+                cancelled_source = root / "Downloads" / "cancelled-cert.txt"
+                cancelled_destination = root / "Documents" / "cancelled-cert.txt"
+                await session._handle_user_input("When cancelled-cert.txt appears in my Downloads, move it to Documents.")
+                cancelled_task = session.task_manager.latest_active_task()
+                cancelled_trigger = session.trigger_store.list_triggers()[0]
+                if cancelled_task is None:
+                    raise RuntimeError("Cancelled trigger did not create a background task.")
+                await session._handle_command(f"/trigger cancel {cancelled_trigger.id}")
+                cancelled_source.write_text("no move")
+                await session.task_manager.wait_for_task(cancelled_task.id)
+                if cancelled_destination.exists():
+                    raise RuntimeError("Cancelled trigger still fired.")
+                restored = session.trigger_store.get_trigger(cancelled_trigger.id)
+                if restored is None or restored.status != TriggerStatus.CANCELLED:
+                    raise RuntimeError("Trigger cancel command did not persist cancelled status.")
+                return "Trigger pause/resume/cancel commands affected real trigger workers."
+
+            await _guarded_async(report, "task_retry", task_retry, command="/task retry <id>")
+            await _guarded_async(report, "trigger_fire", trigger_fire, command="file trigger worker")
+            await _guarded_async(
+                report,
+                "trigger_pause_resume_cancel",
+                trigger_pause_resume_cancel,
+                command="/trigger pause|resume|cancel <id>",
+            )
+        finally:
+            if session is not None:
+                await session.task_manager.shutdown()
+                await session._browser_session.close()
+                session.trigger_store.close()
+                session.job_store.close()
+
+
+def _build_certification_session(tmp_path: Path):
+    from chat.complexity_scorer import ComplexityScorer
+    from runtime.live_session import LiveSession
+    from runtime.models import LiveRuntimeState, PreflightResult
+
+    root = (tmp_path / "live-session").resolve()
+    folders = [root / name for name in ("Desktop", "Downloads", "Documents", "Pictures", "Movies", "Music")]
+    for folder in folders:
+        folder.mkdir(parents=True, exist_ok=True)
+    settings = Settings(
+        USE_MOCK_CLIENT=True,
+        LIVE_LISTENING_ENABLED=False,
+        LIVE_SPEECH_ENABLED=False,
+        FILESYSTEM_ALLOWED_PATHS=",".join(str(path) for path in (*folders, root)),
+        FILESYSTEM_DEFAULT_PATH=str(root / "Documents"),
+        JOB_STORE_PATH=str(root / "jobs.sqlite3"),
+        TRIGGER_STORE_PATH=str(root / "triggers.sqlite3"),
+        TRIGGER_CHECK_INTERVAL_SECONDS=0.01,
+        TRIGGER_TIMEOUT_SECONDS=2,
+    )
+    preflight = PreflightResult(
+        backend_reachable=True,
+        models_ready=[settings.MODEL],
+        tool_capable_models=[settings.MODEL],
+        tool_capability_checked_models=[settings.MODEL],
+    )
+    state = LiveRuntimeState.from_preflight(preflight, settings=settings)
+    session = LiveSession(settings, preflight, state, ComplexityScorer())
+    session._path_in_named_folder = lambda folder, name: str(root / folder.strip().title() / name)  # type: ignore[method-assign]
+    return session, root
+
+
 def _check_trigger_creation(store: TriggerStore, tmp_path: Path) -> str:
     trigger = store.create_file_exists_trigger(
         title="Move report",
@@ -507,6 +637,18 @@ def _check_recurring_reminder_trigger(store: TriggerStore) -> str:
 async def _check_task_control(report: CertificationReport, store: DurableJobStore) -> None:
     manager = BackgroundTaskManager(max_concurrent=1, task_timeout_seconds=2, job_store=store, source_frontend="cert")
 
+    async def done_worker(task):
+        task.mark_progress("Certification worker ran")
+        return "done"
+
+    created = manager.create_task("Create me", "create background task", done_worker)
+    await manager.wait_for_task(created.id)
+    persisted = store.get_job(created.id)
+    if created.status.value == "completed" and persisted is not None and persisted.status == JobStatus.COMPLETED:
+        report.add("background_task_creation", "passed", "Background task created, ran, and persisted.")
+    else:
+        report.add("background_task_creation", "failed", "Background task did not complete and persist.")
+
     async def slow_worker(task):
         while not task.cancellation_requested:
             await asyncio.sleep(0.05)
@@ -532,4 +674,20 @@ async def _check_task_control(report: CertificationReport, store: DurableJobStor
         report.add("pause_resume", "failed", "Queued task pause/resume failed.")
     await manager.wait_for_task(blocker.id)
     await manager.wait_for_task(paused.id)
+    memory_count = manager.clear_terminal_tasks()
+    store_count = store.clear_terminal_jobs()
+    terminal_jobs = {
+        JobStatus.COMPLETED,
+        JobStatus.FAILED,
+        JobStatus.CANCELLED,
+    }
+    if (
+        memory_count >= 1
+        and store_count >= 1
+        and not manager.list_tasks(include_recent=True)
+        and not any(job.status in terminal_jobs for job in store.list_jobs(limit=100))
+    ):
+        report.add("clear_completed", "passed", "Completed, failed, and cancelled task rows were cleared.")
+    else:
+        report.add("clear_completed", "failed", "Terminal task rows were not cleared consistently.")
     await manager.shutdown()
