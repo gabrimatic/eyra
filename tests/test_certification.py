@@ -66,10 +66,18 @@ def test_certification_matrix_contains_required_structured_rows(tmp_path):
         "capability_privacy_answers",
         "screen_vision_model_split",
         "browser_enabled_open_url",
+        "browser_enabled_click",
+        "browser_enabled_fill_form",
+        "browser_enabled_page_screenshot",
+        "browser_download_approval",
+        "browser_upload_approval",
+        "browser_download_sandbox_refusal",
+        "browser_upload_sandbox_refusal",
         "network_disabled_refusal",
         "os_enabled_list_open_apps",
         "os_tools_disabled_refusal",
         "agent_enabled_coding_approval",
+        "mcp_enabled_tool_approval",
         "mcp_disabled_default",
         "agent_bridge_disabled_default",
         "realtime_disabled_default",
@@ -326,7 +334,19 @@ def test_certification_exercises_enabled_browser_tool_path(tmp_path):
     report = run_certification(settings=settings, include_physical=False)
     rows = {row.name: row for row in report.rows}
 
-    assert rows["browser_enabled_open_url"].status == "passed"
+    browser_rows = {
+        "browser_enabled_open_url",
+        "browser_enabled_click",
+        "browser_enabled_fill_form",
+        "browser_enabled_page_screenshot",
+        "browser_download_approval",
+        "browser_upload_approval",
+        "browser_download_sandbox_refusal",
+        "browser_upload_sandbox_refusal",
+    }
+
+    assert browser_rows.issubset(rows)
+    assert {rows[name].status for name in browser_rows} == {"passed"}
 
 
 def test_certification_exercises_enabled_os_tool_path(tmp_path, monkeypatch):
@@ -377,6 +397,27 @@ def test_certification_exercises_enabled_agent_coding_approval_path(tmp_path):
     rows = {row.name: row for row in report.rows}
 
     assert rows["agent_enabled_coding_approval"].status == "passed"
+
+
+def test_certification_exercises_enabled_mcp_approval_path(tmp_path):
+    from runtime.certification import run_certification
+    from utils.settings import Settings
+
+    settings = Settings(
+        USE_MOCK_CLIENT=True,
+        LIVE_LISTENING_ENABLED=False,
+        LIVE_SPEECH_ENABLED=False,
+        MCP_TOOLS_ENABLED=True,
+        FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+        FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+        JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+        TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+    )
+
+    report = run_certification(settings=settings, include_physical=False)
+    rows = {row.name: row for row in report.rows}
+
+    assert rows["mcp_enabled_tool_approval"].status == "passed"
 
 
 def test_certification_exercises_screen_vision_model_split_when_available(tmp_path, monkeypatch):

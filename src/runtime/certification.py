@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import io
 import json
+import sys
 import tempfile
+import textwrap
 import urllib.error
 import urllib.request
 import zipfile
@@ -38,6 +41,21 @@ from tools.filesystem import (
     WriteFileTool,
 )
 from utils.settings import Settings
+
+_BROWSER_CERT_ROWS: tuple[tuple[str, str], ...] = (
+    ("browser_enabled_open_url", "open_url"),
+    ("browser_enabled_click", "click_element"),
+    ("browser_enabled_fill_form", "fill_form_field"),
+    ("browser_enabled_page_screenshot", "page_screenshot"),
+    ("browser_download_approval", "download_file"),
+    ("browser_upload_approval", "upload_file"),
+    ("browser_download_sandbox_refusal", "download_file"),
+    ("browser_upload_sandbox_refusal", "upload_file"),
+)
+
+_MCP_CERT_ROWS: tuple[tuple[str, str], ...] = (
+    ("mcp_enabled_tool_approval", "call_mcp_tool"),
+)
 
 
 @dataclass
@@ -150,6 +168,7 @@ def run_certification(settings: Settings | None = None, *, include_physical: boo
             _check_web_runtime_contracts(report, tmp_path)
             _check_enabled_browser_tool_contract(report, settings, tmp_path)
             _check_enabled_os_tool_contract(report, settings, tmp_path)
+            asyncio.run(_check_enabled_mcp_contract(report, settings, tmp_path))
             asyncio.run(_check_enabled_agent_coding_contract(report, settings, tmp_path))
         finally:
             trigger_store.close()
@@ -790,51 +809,202 @@ def _check_web_runtime_contracts(report: CertificationReport, tmp_path: Path) ->
 
 def _check_enabled_browser_tool_contract(report: CertificationReport, settings: Settings, tmp_path: Path) -> None:
     if not settings.NETWORK_TOOLS_ENABLED:
-        report.add(
-            "browser_enabled_open_url",
-            "skipped",
-            "Network/browser tools are disabled in settings.",
-            command="NETWORK_TOOLS_ENABLED=true open_url",
-        )
+        for name, command in _BROWSER_CERT_ROWS:
+            report.add(
+                name,
+                "skipped",
+                "Network/browser tools are disabled in settings.",
+                command=f"NETWORK_TOOLS_ENABLED=true {command}",
+            )
         return
-    _guarded(
-        report,
-        "browser_enabled_open_url",
-        lambda: asyncio.run(_check_browser_enabled_open_url(settings, tmp_path / "browser-tool")),
-        command="open_url",
-    )
+    try:
+        asyncio.run(_check_browser_enabled_matrix(report, settings, tmp_path / "browser-tool"))
+    except Exception as exc:
+        existing = {row.name for row in report.rows}
+        for name, command in _BROWSER_CERT_ROWS:
+            if name not in existing:
+                report.add(name, "failed", str(exc) or exc.__class__.__name__, command=command)
 
 
-async def _check_browser_enabled_open_url(settings: Settings, root: Path) -> str:
+async def _check_browser_enabled_matrix(report: CertificationReport, settings: Settings, root: Path) -> None:
     from runtime.tooling import build_tool_registry
     from tools.browser import BrowserSession
 
     root.mkdir(parents=True, exist_ok=True)
+    download_source = root / "download.txt"
+    download_source.write_text("downloaded by eyra certification")
+    upload_source = root / "upload.txt"
+    upload_source.write_text("upload me")
     (root / "index.html").write_text(
         "<html><body><main>"
         "Eyra local browser certification page. "
         "This page is served from localhost so the enabled browser path can be checked without external network access. "
+        "<button id='details' onclick=\"document.querySelector('#result').textContent='Details clicked by certification';\">Reveal details</button>"
+        "<p id='result'>Details hidden.</p>"
+        "<label for='cert-name'>Certification name</label><input id='cert-name' name='cert-name'>"
+        "<a id='download' href='/download.txt' download='download.txt'>Download report</a>"
+        "<input id='cert-upload' type='file'>"
         "</main></body></html>"
     )
     server, thread = _start_static_cert_server(root)
     session = BrowserSession()
+    approvals = ApprovalManager()
+    safe_settings = replace(
+        settings,
+        FILESYSTEM_ALLOWED_PATHS=str(root),
+        FILESYSTEM_DEFAULT_PATH=str(root),
+    )
     try:
-        registry = build_tool_registry(settings, browser_session=session)
+        registry = build_tool_registry(safe_settings, browser_session=session, approval_manager=approvals)
         names = {schema["function"]["name"] for schema in registry.to_openai_tools(include_costly=True)}
-        if "open_url" not in names:
-            raise RuntimeError("open_url was not registered while network tools were enabled.")
-        result = await registry.execute(
-            "open_url",
-            json.dumps({"url": f"http://127.0.0.1:{server.server_port}/index.html"}),
+        page_url = f"http://127.0.0.1:{server.server_port}/index.html"
+
+        async def open_url() -> str:
+            _require_browser_tools(names, {"open_url"})
+            result = await registry.execute("open_url", json.dumps({"url": page_url}))
+            if "Eyra local browser certification page" not in result.content:
+                raise RuntimeError("open_url did not return the local certification page content.")
+            return "Enabled browser registry opened a local HTTP page with Playwright."
+
+        async def click_element() -> str:
+            _require_browser_tools(names, {"open_url", "click_element"})
+            await registry.execute("open_url", json.dumps({"url": page_url}))
+            result = await registry.execute("click_element", json.dumps({"selector": "#details"}))
+            if "Details clicked by certification" not in result.content:
+                raise RuntimeError("click_element did not activate the local page control.")
+            return "click_element clicked a harmless local browser control."
+
+        async def fill_form_field() -> str:
+            _require_browser_tools(names, {"open_url", "fill_form_field"})
+            await registry.execute("open_url", json.dumps({"url": page_url}))
+            result = await registry.execute(
+                "fill_form_field",
+                json.dumps({"selector": "#cert-name", "value": "Eyra certification"}),
+            )
+            page = await session.page()
+            value = await page.locator("#cert-name").input_value()
+            if "Filled #cert-name" not in result.content or value != "Eyra certification":
+                raise RuntimeError("fill_form_field did not update the local test field without submit.")
+            return "fill_form_field filled a local form field without submitting."
+
+        async def page_screenshot() -> str:
+            _require_browser_tools(names, {"open_url", "page_screenshot"})
+            await registry.execute("open_url", json.dumps({"url": page_url}))
+            result = await registry.execute("page_screenshot", "{}")
+            if not result.image_base64:
+                raise RuntimeError("page_screenshot did not return image data.")
+            base64.b64decode(result.image_base64, validate=True)
+            return "page_screenshot returned a base64 browser screenshot."
+
+        async def download_approval() -> str:
+            _require_browser_tools(names, {"open_url", "download_file"})
+            _clear_pending_approvals(approvals)
+            await registry.execute("open_url", json.dumps({"url": page_url}))
+            destination = root / "downloads" / "cert-download.txt"
+            pending = await registry.execute(
+                "download_file",
+                json.dumps({"selector": "#download", "destination": str(destination), "confirmed": True}),
+            )
+            pending_approvals = approvals.list_pending()
+            if "Approval required" not in pending.content or len(pending_approvals) != 1:
+                raise RuntimeError("download_file did not require exact server-side approval.")
+            if not approvals.approve(pending_approvals[0].id):
+                raise RuntimeError("download approval could not be approved.")
+            result = await registry.execute(
+                "download_file",
+                json.dumps(
+                    {
+                        "selector": "#download",
+                        "destination": str(destination),
+                        "approval_id": pending_approvals[0].id,
+                    }
+                ),
+            )
+            if "Downloaded:" not in result.content or destination.read_text() != download_source.read_text():
+                raise RuntimeError("download_file did not save the approved local download.")
+            return "download_file required approval and saved to the sandbox."
+
+        async def upload_approval() -> str:
+            _require_browser_tools(names, {"open_url", "upload_file"})
+            _clear_pending_approvals(approvals)
+            await registry.execute("open_url", json.dumps({"url": page_url}))
+            pending = await registry.execute(
+                "upload_file",
+                json.dumps({"selector": "#cert-upload", "path": str(upload_source), "confirmed": True}),
+            )
+            pending_approvals = approvals.list_pending()
+            if "Approval required" not in pending.content or len(pending_approvals) != 1:
+                raise RuntimeError("upload_file did not require exact server-side approval.")
+            if not approvals.approve(pending_approvals[0].id):
+                raise RuntimeError("upload approval could not be approved.")
+            result = await registry.execute(
+                "upload_file",
+                json.dumps(
+                    {
+                        "selector": "#cert-upload",
+                        "path": str(upload_source),
+                        "approval_id": pending_approvals[0].id,
+                    }
+                ),
+            )
+            page = await session.page()
+            value = await page.locator("#cert-upload").input_value()
+            if "Uploaded:" not in result.content or not value.endswith("upload.txt"):
+                raise RuntimeError("upload_file did not attach the approved sandbox file.")
+            return "upload_file required approval and attached a sandbox file without submitting."
+
+        async def download_sandbox_refusal() -> str:
+            _require_browser_tools(names, {"download_file"})
+            outside = root.parent / "outside-download.txt"
+            result = await registry.execute(
+                "download_file",
+                json.dumps({"selector": "#download", "destination": str(outside)}),
+            )
+            if "Access denied" not in result.content:
+                raise RuntimeError("download_file did not refuse a destination outside the sandbox.")
+            return "download_file refused a destination outside the sandbox before approval."
+
+        async def upload_sandbox_refusal() -> str:
+            _require_browser_tools(names, {"upload_file"})
+            outside = root.parent / "outside-upload.txt"
+            outside.write_text("outside")
+            result = await registry.execute(
+                "upload_file",
+                json.dumps({"selector": "#cert-upload", "path": str(outside)}),
+            )
+            if "Access denied" not in result.content:
+                raise RuntimeError("upload_file did not refuse a source outside the sandbox.")
+            return "upload_file refused a source outside the sandbox before approval."
+
+        await _guarded_async(report, "browser_enabled_open_url", open_url, command="open_url")
+        await _guarded_async(report, "browser_enabled_click", click_element, command="click_element")
+        await _guarded_async(report, "browser_enabled_fill_form", fill_form_field, command="fill_form_field")
+        await _guarded_async(report, "browser_enabled_page_screenshot", page_screenshot, command="page_screenshot")
+        await _guarded_async(report, "browser_download_approval", download_approval, command="download_file")
+        await _guarded_async(report, "browser_upload_approval", upload_approval, command="upload_file")
+        await _guarded_async(
+            report,
+            "browser_download_sandbox_refusal",
+            download_sandbox_refusal,
+            command="download_file",
         )
-        if "Eyra local browser certification page" not in result.content:
-            raise RuntimeError("open_url did not return the local certification page content.")
-        return "Enabled browser registry opened a local HTTP page with Playwright."
+        await _guarded_async(report, "browser_upload_sandbox_refusal", upload_sandbox_refusal, command="upload_file")
     finally:
         await session.close()
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def _require_browser_tools(names: set[str], expected: set[str]) -> None:
+    missing = expected - names
+    if missing:
+        raise RuntimeError(f"Browser tools were not registered while network tools were enabled: {', '.join(sorted(missing))}")
+
+
+def _clear_pending_approvals(approvals: ApprovalManager) -> None:
+    for approval in approvals.list_pending():
+        approvals.reject(approval.id)
 
 
 class _QuietStaticHandler(SimpleHTTPRequestHandler):
@@ -892,6 +1062,136 @@ async def _check_os_enabled_list_open_apps(settings: Settings, root: Path) -> st
     if not isinstance(payload.get("apps"), list):
         raise RuntimeError("list_open_apps did not return an apps list.")
     return "Enabled OS tool registry listed visible macOS applications."
+
+
+async def _check_enabled_mcp_contract(
+    report: CertificationReport,
+    settings: Settings,
+    tmp_path: Path,
+) -> None:
+    if not settings.MCP_TOOLS_ENABLED:
+        for name, command in _MCP_CERT_ROWS:
+            report.add(
+                name,
+                "skipped",
+                "MCP bridge is disabled in settings.",
+                command=f"MCP_TOOLS_ENABLED=true {command}",
+            )
+        return
+    await _guarded_async(
+        report,
+        "mcp_enabled_tool_approval",
+        lambda: _check_mcp_enabled_tool_approval(settings, tmp_path / "mcp"),
+        command="call_mcp_tool",
+    )
+
+
+async def _check_mcp_enabled_tool_approval(settings: Settings, root: Path) -> str:
+    from runtime.tooling import build_tool_registry
+
+    root.mkdir(parents=True, exist_ok=True)
+    server_script = root / "cert_mcp_server.py"
+    server_script.write_text(
+        textwrap.dedent(
+            r'''
+            import json
+            import sys
+
+
+            def read_msg():
+                headers = {}
+                while True:
+                    line = sys.stdin.buffer.readline()
+                    if not line:
+                        return None
+                    if line in (b"\r\n", b"\n"):
+                        break
+                    key, value = line.decode().split(":", 1)
+                    headers[key.lower()] = value.strip()
+                return json.loads(sys.stdin.buffer.read(int(headers["content-length"])))
+
+
+            def write_msg(payload):
+                raw = json.dumps(payload).encode()
+                sys.stdout.buffer.write(f"Content-Length: {len(raw)}\r\n\r\n".encode() + raw)
+                sys.stdout.buffer.flush()
+
+
+            while True:
+                msg = read_msg()
+                if msg is None:
+                    break
+                if "id" not in msg:
+                    continue
+                method = msg.get("method")
+                if method == "initialize":
+                    write_msg({"jsonrpc": "2.0", "id": msg["id"], "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "cert", "version": "1"}}})
+                elif method == "tools/list":
+                    write_msg({"jsonrpc": "2.0", "id": msg["id"], "result": {"tools": [{"name": "echo", "description": "Echo text", "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}}}]}})
+                elif method == "tools/call":
+                    text = msg["params"]["arguments"].get("text", "")
+                    write_msg({"jsonrpc": "2.0", "id": msg["id"], "result": {"content": [{"type": "text", "text": "echo: " + text}]}})
+            '''
+        )
+    )
+    config_path = root / "mcp.json"
+    config_path.write_text(json.dumps({"servers": {"cert": {"command": sys.executable, "args": [str(server_script)]}}}))
+
+    approvals = ApprovalManager()
+    safe_settings = replace(
+        settings,
+        MCP_CONFIG_PATH=str(config_path),
+        FILESYSTEM_ALLOWED_PATHS=str(root),
+        FILESYSTEM_DEFAULT_PATH=str(root),
+    )
+    registry = build_tool_registry(safe_settings, approval_manager=approvals)
+    names = {schema["function"]["name"] for schema in registry.to_openai_tools(include_costly=True)}
+    if {"list_mcp_tools", "call_mcp_tool"} - names:
+        raise RuntimeError("MCP tools were not registered while MCP_TOOLS_ENABLED=true.")
+
+    listed = await registry.execute("list_mcp_tools", json.dumps({"server": "cert"}))
+    if '"name": "echo"' not in listed.content:
+        raise RuntimeError("list_mcp_tools did not list the local certification MCP tool.")
+
+    pending = await registry.execute(
+        "call_mcp_tool",
+        json.dumps({"server": "cert", "tool": "echo", "arguments": {"text": "hi"}, "confirmed": True}),
+    )
+    pending_approvals = approvals.list_pending()
+    if "Approval required" not in pending.content or len(pending_approvals) != 1:
+        raise RuntimeError("call_mcp_tool did not require exact server-side approval.")
+    if not approvals.approve(pending_approvals[0].id):
+        raise RuntimeError("MCP approval could not be approved.")
+
+    called = await registry.execute(
+        "call_mcp_tool",
+        json.dumps(
+            {
+                "server": "cert",
+                "tool": "echo",
+                "arguments": {"text": "hi"},
+                "approval_id": pending_approvals[0].id,
+            }
+        ),
+    )
+    if "echo: hi" not in called.content:
+        raise RuntimeError("call_mcp_tool did not execute after exact approval.")
+
+    reused = await registry.execute(
+        "call_mcp_tool",
+        json.dumps(
+            {
+                "server": "cert",
+                "tool": "echo",
+                "arguments": {"text": "changed"},
+                "approval_id": pending_approvals[0].id,
+            }
+        ),
+    )
+    if "Approval required" not in reused.content or "echo: changed" in reused.content:
+        raise RuntimeError("call_mcp_tool reused an approval for different MCP arguments.")
+
+    return "Enabled MCP bridge listed a local server and required exact approval before tool execution."
 
 
 async def _check_enabled_agent_coding_contract(
