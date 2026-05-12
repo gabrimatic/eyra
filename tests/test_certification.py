@@ -53,6 +53,13 @@ def test_certification_matrix_contains_required_structured_rows(tmp_path):
         "trigger_pause_resume_cancel",
         "reminder_trigger",
         "recurring_reminder_trigger",
+        "web_standalone_runtime",
+        "web_shared_runtime",
+        "web_auth",
+        "web_event_stream",
+        "web_job_logs_artifacts_api",
+        "web_trigger_api",
+        "capability_privacy_answers",
         "network_disabled_refusal",
         "os_tools_disabled_refusal",
         "mcp_disabled_default",
@@ -202,3 +209,32 @@ def test_certification_run_does_not_print_runtime_noise(tmp_path, capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == ""
+
+
+def test_certification_exercises_web_and_capability_privacy_paths(tmp_path):
+    from runtime.certification import run_certification
+    from utils.settings import Settings
+
+    settings = Settings(
+        USE_MOCK_CLIENT=True,
+        LIVE_LISTENING_ENABLED=False,
+        LIVE_SPEECH_ENABLED=False,
+        JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+        TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+    )
+
+    report = run_certification(settings=settings, include_physical=False)
+    rows = {row.name: row for row in report.rows}
+
+    web_rows = {
+        "web_standalone_runtime",
+        "web_shared_runtime",
+        "web_auth",
+        "web_event_stream",
+        "web_job_logs_artifacts_api",
+        "web_trigger_api",
+        "capability_privacy_answers",
+    }
+
+    assert web_rows.issubset(rows)
+    assert {rows[name].status for name in web_rows} == {"passed"}

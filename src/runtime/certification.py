@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import json
 import tempfile
+import urllib.error
+import urllib.request
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -137,6 +140,7 @@ def run_certification(settings: Settings | None = None, *, include_physical: boo
             _guarded(report, "reminder_trigger", lambda: _check_reminder_trigger(trigger_store))
             _guarded(report, "recurring_reminder_trigger", lambda: _check_recurring_reminder_trigger(trigger_store))
             asyncio.run(_check_task_control(report, job_store))
+            _check_web_runtime_contracts(report, tmp_path)
         finally:
             trigger_store.close()
             job_store.close()
@@ -605,6 +609,233 @@ def _check_trigger_creation(store: TriggerStore, tmp_path: Path) -> str:
     if store.get_trigger(trigger.id) is None:
         raise RuntimeError("Trigger row was not persisted.")
     return "File trigger row persisted."
+
+
+def _check_web_runtime_contracts(report: CertificationReport, tmp_path: Path) -> None:
+    web_root = (tmp_path / "web").resolve()
+    web_root.mkdir()
+
+    _guarded(report, "web_standalone_runtime", lambda: _check_web_standalone_runtime(web_root))
+    _guarded(report, "web_shared_runtime", lambda: _check_web_shared_runtime(web_root))
+    _guarded(report, "web_auth", lambda: _check_web_auth(web_root), command="GET /api/tasks")
+    _guarded(report, "web_event_stream", lambda: _check_web_event_stream(web_root), command="/api/events")
+    _guarded(
+        report,
+        "web_job_logs_artifacts_api",
+        lambda: _check_web_job_logs_artifacts_api(web_root),
+        command="/api/job/<id>/logs",
+    )
+    _guarded(report, "web_trigger_api", lambda: _check_web_trigger_api(web_root), command="/api/triggers")
+    _guarded(report, "capability_privacy_answers", lambda: _check_capability_privacy_answers(web_root))
+
+
+def _web_cert_settings(root: Path) -> Settings:
+    return Settings(
+        USE_MOCK_CLIENT=True,
+        LIVE_LISTENING_ENABLED=False,
+        LIVE_SPEECH_ENABLED=False,
+        WEB_UI_ENABLED=True,
+        WEB_UI_HOST="127.0.0.1",
+        WEB_UI_PORT=0,
+        WEB_UI_REQUIRE_TOKEN="true",
+        FILESYSTEM_ALLOWED_PATHS=str(root),
+        FILESYSTEM_DEFAULT_PATH=str(root),
+        JOB_STORE_PATH=str(root / "jobs.sqlite3"),
+        TRIGGER_STORE_PATH=str(root / "triggers.sqlite3"),
+        TRIGGER_CHECK_INTERVAL_SECONDS=0.01,
+        TRIGGER_TIMEOUT_SECONDS=2,
+    )
+
+
+def _check_web_standalone_runtime(root: Path) -> str:
+    from web.server import WebAssistantRuntime, build_health_payload
+
+    settings = _web_cert_settings(root / "standalone")
+    runtime = WebAssistantRuntime(settings)
+    try:
+        health = build_health_payload(settings, runtime_scope=runtime.runtime_scope, preflight=runtime.preflight)
+        if runtime.runtime_scope != "standalone" or health["runtime"]["sharedState"] is not False:
+            raise RuntimeError("Standalone Web runtime did not report standalone scope.")
+        if health["web"]["authRequired"] is not True or health["capabilities"]["localFirst"] is not True:
+            raise RuntimeError("Standalone Web health payload did not report local-first authenticated defaults.")
+        return "Standalone Web runtime reported local-first authenticated health."
+    finally:
+        runtime.close()
+
+
+def _check_web_shared_runtime(root: Path) -> str:
+    from chat.complexity_scorer import ComplexityScorer
+    from runtime.models import PreflightResult
+    from runtime.shared import RuntimeSharedState
+    from web.server import WebAssistantRuntime
+
+    settings = _web_cert_settings(root / "shared")
+    preflight = PreflightResult(backend_reachable=True, models_ready=[settings.MODEL])
+    shared = RuntimeSharedState.create(settings, preflight=preflight, source_frontend="terminal")
+    runtime = WebAssistantRuntime(settings, preflight=preflight, shared=shared)
+
+    async def create_shared_task():
+        async def worker(task):
+            return "shared task done"
+
+        task = shared.task_manager.create_task("Shared task", "certify shared web", worker)
+        await shared.task_manager.wait_for_task(task.id)
+        return task.id
+
+    try:
+        task_id = runtime.run_sync(create_shared_task())
+        tasks = runtime.run_sync(runtime.list_tasks())
+        if runtime.runtime_scope != "shared" or runtime.task_manager is not shared.task_manager:
+            raise RuntimeError("Web runtime did not use terminal-owned shared state.")
+        if tasks["tasks"][0]["id"] != task_id or shared.job_store.get_job(task_id) is None:
+            raise RuntimeError("Shared Web runtime did not expose terminal-owned tasks.")
+        if not isinstance(shared.scorer, ComplexityScorer):
+            raise RuntimeError("Shared runtime did not preserve scorer.")
+        return "Shared Web runtime used terminal-owned jobs, approvals, tools, and task events."
+    finally:
+        runtime.close()
+        shared.close()
+
+
+def _check_web_auth(root: Path) -> str:
+    runtime, handle, base = _start_web_cert_server(root / "auth")
+    try:
+        unauthorized = False
+        try:
+            urllib.request.urlopen(base + "/api/tasks", timeout=5)
+        except urllib.error.HTTPError as exc:
+            unauthorized = exc.code == 401
+        if not unauthorized:
+            raise RuntimeError("Token-protected Web API allowed an unauthenticated request.")
+        payload = _web_get_json(base + "/api/tasks", token=handle.web_session_token)
+        if "tasks" not in payload:
+            raise RuntimeError("Authorized Web API request did not return task payload.")
+        return "Web API required an exact token for non-health endpoints."
+    finally:
+        handle.close()
+        runtime.close()
+
+
+def _check_web_event_stream(root: Path) -> str:
+    from web.server import WebAssistantRuntime
+
+    settings = _web_cert_settings(root / "events")
+    runtime = WebAssistantRuntime(settings)
+    subscriber = runtime.subscribe_task_events()
+
+    async def create_event_task():
+        async def worker(task):
+            return "event task done"
+
+        task = runtime.task_manager.create_task("Event task", "certify event stream", worker)
+        await runtime.task_manager.wait_for_task(task.id)
+        return task.id
+
+    try:
+        task_id = runtime.run_sync(create_event_task())
+        event = subscriber.get(timeout=2)
+        if event.get("event") != "task" or event.get("task", {}).get("id") != task_id:
+            raise RuntimeError("Web task event stream did not publish the task event.")
+        return "Web task event stream published task lifecycle events."
+    finally:
+        runtime.unsubscribe_task_events(subscriber)
+        runtime.close()
+
+
+def _check_web_job_logs_artifacts_api(root: Path) -> str:
+    from runtime.jobs import JobStatus
+
+    runtime, handle, base = _start_web_cert_server(root / "job-api")
+    try:
+        job = runtime.job_store.create_job(
+            title="Web durable job",
+            original_user_input="certify web logs",
+            source_frontend="web",
+        )
+        runtime.job_store.update_job(job.id, status=JobStatus.COMPLETED, artifacts=[{"path": "/tmp/web.txt"}])
+        runtime.job_store.record_log(job.id, "Web job started.")
+        logs = _web_get_json(base + f"/api/job/{job.id}/logs", token=handle.web_session_token)
+        artifacts = _web_get_json(base + f"/api/job/{job.id}/artifacts", token=handle.web_session_token)
+        if logs["logs"][0]["message"] != "Web job started.":
+            raise RuntimeError("Web logs API did not return persisted logs.")
+        if artifacts["artifacts"][0]["path"] != "/tmp/web.txt":
+            raise RuntimeError("Web artifacts API did not return persisted artifacts.")
+        return "Web job logs and artifacts APIs returned persisted job data."
+    finally:
+        handle.close()
+        runtime.close()
+
+
+def _check_web_trigger_api(root: Path) -> str:
+    runtime, handle, base = _start_web_cert_server(root / "trigger-api")
+    try:
+        trigger = runtime.trigger_store.create_file_exists_trigger(
+            title="Move web download",
+            source_path=str(root / "Downloads" / "a.txt"),
+            action={"type": "file.move", "destination": str(root / "Documents" / "a.txt")},
+            original_request="When a.txt appears in Downloads, move it to Documents.",
+        )
+        listed = _web_get_json(base + "/api/triggers", token=handle.web_session_token)
+        paused = _web_post_json(
+            base + "/api/trigger",
+            {"triggerId": trigger.id, "action": "pause"},
+            token=handle.web_session_token,
+        )
+        if listed["triggers"][0]["id"] != trigger.id:
+            raise RuntimeError("Web trigger list API did not return persisted trigger.")
+        if paused["trigger"]["status"] != "paused":
+            raise RuntimeError("Web trigger update API did not pause the trigger.")
+        return "Web trigger APIs listed and updated persisted triggers."
+    finally:
+        handle.close()
+        runtime.close()
+
+
+def _check_capability_privacy_answers(root: Path) -> str:
+    from web.server import WebAssistantRuntime
+
+    settings = _web_cert_settings(root / "capabilities")
+    runtime = WebAssistantRuntime(settings)
+    try:
+        result = runtime.run_sync(runtime.handle_message("What would leave my machine?"))
+        reply = result.get("reply", "")
+        if "Leaves machine by default" not in reply or "This is a mock response" in reply:
+            raise RuntimeError("Capability/privacy answer was not handled deterministically.")
+        return "Capability and privacy question returned deterministic local runtime answer."
+    finally:
+        runtime.close()
+
+
+def _start_web_cert_server(root: Path):
+    from web.server import WebAssistantRuntime, start_web_server_in_thread
+
+    settings = _web_cert_settings(root)
+    runtime = WebAssistantRuntime(settings)
+    handle = start_web_server_in_thread(
+        settings,
+        runtime=runtime,
+        web_session_token="cert-web-token",
+        realtime_tool_token="cert-realtime-token",
+    )
+    base = f"http://{settings.WEB_UI_HOST}:{handle.server.server_port}"
+    return runtime, handle, base
+
+
+def _web_get_json(url: str, *, token: str) -> dict:
+    request = urllib.request.Request(url, headers={"X-Eyra-Web-Token": token})
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return json.loads(response.read().decode())
+
+
+def _web_post_json(url: str, payload: dict, *, token: str) -> dict:
+    request = urllib.request.Request(
+        url,
+        method="POST",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "X-Eyra-Web-Token": token},
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return json.loads(response.read().decode())
 
 
 def _check_reminder_trigger(store: TriggerStore) -> str:
