@@ -67,6 +67,8 @@ class VoiceInput:
         max_duration_s: float = 300,
         threshold: float = 0.6,
         wh_bin: str | None = None,
+        input_device: str | int | None = None,
+        sample_rate: int = SAMPLE_RATE,
     ):
         """Initialize voice input.
 
@@ -78,24 +80,30 @@ class VoiceInput:
                 Higher = stricter. End-of-speech uses threshold - 0.15
                 (hysteresis built into Silero).
             wh_bin: Resolved path to the wh binary. Falls back to "wh" on PATH.
+            input_device: Optional sounddevice device index or name.
+            sample_rate: Capture sample rate. Silero's default path expects 16 kHz.
         """
-        self.min_speech_frames = int(min_speech_ms / FRAME_MS)
-        self.max_frames = int(max_duration_s * 1000 / FRAME_MS)
+        self._sample_rate = int(sample_rate)
+        self._frame_samples = int(FRAME_SAMPLES * (self._sample_rate / SAMPLE_RATE))
+        self._frame_ms = self._frame_samples / self._sample_rate * 1000
+        self.min_speech_frames = int(min_speech_ms / self._frame_ms)
+        self.max_frames = int(max_duration_s * 1000 / self._frame_ms)
         self._model = load_silero_vad(onnx=True)
         self._threshold = threshold
         self._silence_duration_ms = silence_duration_ms
         self._wh_bin = wh_bin or "wh"
+        self._input_device = input_device if input_device not in {"", None} else None
         self._cancel = threading.Event()
 
         # Warm up ONNX model to avoid first-inference latency
-        self._model(torch.zeros(FRAME_SAMPLES), SAMPLE_RATE)
+        self._model(torch.zeros(self._frame_samples), self._sample_rate)
 
     def _new_vad_iterator(self) -> VADIterator:
         """Create a fresh VADIterator for a recording session."""
         return VADIterator(
             self._model,
             threshold=self._threshold,
-            sampling_rate=SAMPLE_RATE,
+            sampling_rate=self._sample_rate,
             min_silence_duration_ms=self._silence_duration_ms,
             speech_pad_ms=50,
         )
@@ -110,7 +118,7 @@ class VoiceInput:
         if audio is None or len(audio) == 0:
             return None
 
-        wav_path = await asyncio.to_thread(self._save_wav, audio)
+        wav_path = await asyncio.to_thread(self._save_wav, audio, self._sample_rate)
         if not wav_path:
             return None
 
@@ -146,16 +154,17 @@ class VoiceInput:
 
         try:
             with sd.InputStream(
-                samplerate=SAMPLE_RATE,
+                samplerate=self._sample_rate,
+                device=self._input_device,
                 channels=CHANNELS,
                 dtype=DTYPE,
-                blocksize=FRAME_SAMPLES,
+                blocksize=self._frame_samples,
             ) as stream:
                 for _ in range(self.max_frames):
                     if self._cancel.is_set():
                         return None
 
-                    data, _overflowed = stream.read(FRAME_SAMPLES)
+                    data, _overflowed = stream.read(self._frame_samples)
                     frame = data[:, 0] if data.ndim > 1 else data.flatten()
 
                     chunk = _int16_to_float32(frame)
@@ -206,14 +215,14 @@ class VoiceInput:
     # ── WAV export ────────────────────────────────────────────────────────
 
     @staticmethod
-    def _save_wav(audio: np.ndarray) -> str | None:
+    def _save_wav(audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -> str | None:
         try:
             fd, path = tempfile.mkstemp(suffix=".wav")
             os.close(fd)
             with wave.open(path, "wb") as wf:
                 wf.setnchannels(CHANNELS)
                 wf.setsampwidth(2)  # int16 = 2 bytes
-                wf.setframerate(SAMPLE_RATE)
+                wf.setframerate(sample_rate)
                 wf.writeframes(audio.tobytes())
             return path
         except Exception as e:

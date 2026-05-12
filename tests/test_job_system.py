@@ -44,6 +44,23 @@ def test_job_store_persists_job_details_across_restarts(tmp_path):
     second.close()
 
 
+def test_job_store_sets_schema_version_and_common_indexes(tmp_path):
+    store = DurableJobStore(tmp_path / "eyra-jobs.sqlite3")
+    version = store._conn.execute("PRAGMA user_version").fetchone()[0]
+    indexes = {
+        row[1]
+        for row in store._conn.execute(
+            "SELECT type, name FROM sqlite_master WHERE type = 'index'"
+        ).fetchall()
+    }
+
+    assert version >= 1
+    assert "idx_jobs_status_updated" in indexes
+    assert "idx_job_logs_job_id_id" in indexes
+    assert "idx_operation_ledger_job_id_timestamp" in indexes
+    store.close()
+
+
 def test_operation_ledger_records_reversible_action_metadata(tmp_path):
     store = DurableJobStore(tmp_path / "eyra-jobs.sqlite3")
     job = store.create_job(

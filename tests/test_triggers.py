@@ -32,6 +32,22 @@ def test_trigger_store_persists_file_move_trigger(tmp_path):
     second.close()
 
 
+def test_trigger_store_sets_schema_version_and_common_indexes(tmp_path):
+    store = TriggerStore(tmp_path / "triggers.sqlite3")
+    version = store._conn.execute("PRAGMA user_version").fetchone()[0]
+    indexes = {
+        row[1]
+        for row in store._conn.execute(
+            "SELECT type, name FROM sqlite_master WHERE type = 'index'"
+        ).fetchall()
+    }
+
+    assert version >= 1
+    assert "idx_triggers_status_updated" in indexes
+    assert "idx_triggers_kind_status" in indexes
+    store.close()
+
+
 def test_trigger_store_marks_cancelled_and_completed(tmp_path):
     store = TriggerStore(tmp_path / "triggers.sqlite3")
     trigger = store.create_file_exists_trigger(

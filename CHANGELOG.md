@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Durable local job store backed by SQLite, including persisted job rows, job logs, and operation ledger entries.
 - `JOB_STORE_PATH` setting for the local durable job database.
+- `/voice-diagnose` for bounded local microphone diagnostics, all-zero audio reporting, selected-device checks, VAD probing, Local Whisper socket checks, and generated WAV transcription checks.
+- `VOICE_INPUT_DEVICE`, `VOICE_SAMPLE_RATE`, `VOICE_DEBUG_RECORD_SECONDS`, and `VOICE_DIAGNOSTIC_SAVE_AUDIO` settings for microphone selection and diagnostics.
+- Local `scripts/certify_voice_to_computer.py` certification matrix for offline product-contract checks across voice diagnostics, durable jobs, task control, operation ledger, triggers, and disabled-by-default optional surfaces.
 - `/operations` and “What changed?” support for inspecting recent local operation ledger entries.
 - Sandboxed `move_to_trash` and `restore_from_trash` filesystem tools.
 - Runtime capability and privacy-boundary snapshots for `/capabilities`, “What can you control?”, Web health, and the `discover_capabilities` tool.
@@ -27,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - OS-gated UI action tools for approved coordinate clicks, focused text entry, and hotkeys.
 - Browser form-field filling without submit when network/browser tools are enabled.
 - One-time local file-appears triggers, backed by SQLite and visible through `/triggers`.
+- SQLite job and trigger stores now set schema versions, common query indexes, WAL mode, busy timeout, and owner-only database file permissions where supported.
 - Shared intent detection for terminal and Web UI requests, so screen, filesystem, network, PDF, and background-task decisions stay aligned across both surfaces.
 - Event-driven Web UI task updates through a local event stream, replacing the browser-side task polling loop.
 - Web runtime creation and API listing for the same persisted one-time file triggers as the terminal runtime.

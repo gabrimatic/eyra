@@ -121,6 +121,7 @@ def _write_env(base_url: str, api_key: str, model: str):
     provider_keys = {
         "API_BASE_URL", "API_KEY", "USE_MOCK_CLIENT", "MODEL", "VISION_MODEL", "SIMPLE_MODEL", "MODERATE_MODEL",
         "AUTO_PULL_MODELS", "LIVE_LISTENING_ENABLED", "LIVE_SPEECH_ENABLED", "SPEECH_COOLDOWN_MS",
+        "VOICE_INPUT_DEVICE", "VOICE_SAMPLE_RATE", "VOICE_DEBUG_RECORD_SECONDS", "VOICE_DIAGNOSTIC_SAVE_AUDIO",
         "VOICE_SILENCE_MS", "VOICE_VAD_THRESHOLD", "NETWORK_TOOLS_ENABLED", "OS_TOOLS_ENABLED",
         "AGENT_TOOLS_ENABLED", "MCP_TOOLS_ENABLED", "MCP_CONFIG_PATH", "WEB_UI_ENABLED", "WEB_UI_HOST",
         "WEB_UI_PORT", "WEB_UI_TOKEN", "WEB_UI_REQUIRE_TOKEN", "WEB_UI_MAX_REQUEST_BYTES",
@@ -173,6 +174,10 @@ def _write_env(base_url: str, api_key: str, model: str):
         f"LIVE_LISTENING_ENABLED={existing.get('LIVE_LISTENING_ENABLED', 'true')}",
         f"LIVE_SPEECH_ENABLED={existing.get('LIVE_SPEECH_ENABLED', 'true')}",
         f"SPEECH_COOLDOWN_MS={existing.get('SPEECH_COOLDOWN_MS', '3000')}",
+        f"VOICE_INPUT_DEVICE={existing.get('VOICE_INPUT_DEVICE', '')}",
+        f"VOICE_SAMPLE_RATE={existing.get('VOICE_SAMPLE_RATE', '16000')}",
+        f"VOICE_DEBUG_RECORD_SECONDS={existing.get('VOICE_DEBUG_RECORD_SECONDS', '3')}",
+        f"VOICE_DIAGNOSTIC_SAVE_AUDIO={existing.get('VOICE_DIAGNOSTIC_SAVE_AUDIO', 'false')}",
         f"VOICE_SILENCE_MS={existing.get('VOICE_SILENCE_MS', '1500')}",
         f"VOICE_VAD_THRESHOLD={existing.get('VOICE_VAD_THRESHOLD', '0.6')}",
         "",

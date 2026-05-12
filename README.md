@@ -75,7 +75,7 @@ That shared Web frontend uses the terminal-owned approvals, jobs, task events, t
 - Responsive coordinator: typed and voice input remain available while workers handle long tasks.
 - Background tasks: long PDF, file, screen, website, and multi-tool work has an id, lifecycle, progress, final result, failure, or cancellation. Jobs, logs, and operation ledger entries are persisted locally in SQLite.
 - Local triggers: one-time “when this file appears, move it”, “remind me in 10 minutes to …”, and recurring “every 30 minutes remind me to …” triggers run as bounded background tasks, with definitions and status persisted locally.
-- Voice: Local Whisper handles transcription and speech; Silero VAD decides when you finished speaking.
+- Voice: Local Whisper handles transcription and speech; Silero VAD decides when you finished speaking. `/voice-diagnose` checks the selected microphone, all-zero audio, Local Whisper ASR, generated WAV transcription, and the local socket path.
 - Model routing: one configured model by default, with experimental complexity routing when you turn it on.
 - Local tools: screenshot, time, clipboard, system info, frontmost app, sandboxed Finder selection, PDF text extraction, and sandboxed filesystem access through function calling.
 - Optional OS tools: command execution, URL fetch, process listing, system snapshots, accessibility-tree snapshots, local OCR screen text extraction, file metadata/search, LaunchAgent status/management, app opening, notifications, approved Shortcut execution, and clipboard writes. These stay off until `OS_TOOLS_ENABLED=true` or `NETWORK_TOOLS_ENABLED=true` for URL/network work.
@@ -102,7 +102,7 @@ That shared Web frontend uses the terminal-owned approvals, jobs, task events, t
 
 Eyra runs one live session with a typed channel, a voice channel, a coordinator, and a background task manager.
 
-- Voice: [Local Whisper](https://github.com/gabrimatic/local-whisper) handles ASR through Qwen3-ASR and TTS through Kokoro. Eyra records microphone audio with sounddevice, classifies 32ms frames with Silero VAD, and transcribes after a pause.
+- Voice: [Local Whisper](https://github.com/gabrimatic/local-whisper) handles ASR through Qwen3-ASR and TTS through Kokoro. Eyra records microphone audio with sounddevice, classifies 32ms frames with Silero VAD, and transcribes after a pause. Set `VOICE_INPUT_DEVICE` to an input device index or name when the system default is wrong.
 - Interruption: Eyra can stop speech output immediately through the shared interrupt path; run `/voice-test` for the physical microphone interruption check on your Mac.
 - Hands-free status: say “Stop” to interrupt speech output, or “Show status” to read the local runtime status without typing `/status`.
 - Coordinator: quick local intents such as task status, cancellation, disabled-network refusals, time checks, and common file actions are handled immediately.
@@ -157,6 +157,7 @@ When `USE_MOCK_CLIENT=true`, backend and model checks are skipped on purpose so 
 | Command | What it does |
 |---------|-------------|
 | `/voice on\|off` | Toggle voice input and speech output, with runtime recovery |
+| `/voice-diagnose` | Run local microphone, VAD, and Local Whisper diagnostics |
 | `/voice-test` | Start the manual voice interruption diagnostic |
 | `/mute` | Mute speech output only |
 | `/unmute` | Unmute speech |
@@ -266,6 +267,10 @@ AUTO_PULL_MODELS=true
 LIVE_LISTENING_ENABLED=true
 LIVE_SPEECH_ENABLED=true
 SPEECH_COOLDOWN_MS=3000
+VOICE_INPUT_DEVICE=               # Optional sounddevice input device index or name.
+VOICE_SAMPLE_RATE=16000           # Microphone sample rate used for VAD and WAV probes.
+VOICE_DEBUG_RECORD_SECONDS=3      # Bounded local capture length for /voice-diagnose.
+VOICE_DIAGNOSTIC_SAVE_AUDIO=false # Save diagnostic audio under ~/Library/Application Support/Eyra/diagnostics.
 VOICE_SILENCE_MS=1500          # Silence after speech before processing (ms).
 VOICE_VAD_THRESHOLD=0.6        # Silero VAD sensitivity (0.0-1.0, higher = stricter)
 
@@ -521,6 +526,32 @@ Eyra uses local VAD for barge-in. It does not perform full acoustic echo cancell
 
 </details>
 
+<details><summary><strong>Voice diagnostics</strong></summary>
+
+Run:
+
+```text
+/voice-diagnose
+```
+
+The diagnostic stays local. It lists input devices, resolves `VOICE_INPUT_DEVICE`, checks 16 kHz sample-rate support, records a bounded microphone probe, reports silent/all-zero audio clearly, checks stream overflow, probes Silero VAD, checks the Local Whisper socket, and runs `wh transcribe` on a generated local WAV.
+
+If the diagnostic says `microphone input is silent/all-zero`, first check macOS microphone permission for the terminal app, then try a specific device in `.env`:
+
+```env
+VOICE_INPUT_DEVICE=2
+```
+
+or:
+
+```env
+VOICE_INPUT_DEVICE=USB Headset
+```
+
+Diagnostic audio is not saved unless `VOICE_DIAGNOSTIC_SAVE_AUDIO=true`.
+
+</details>
+
 <details><summary><strong>Voice not working</strong></summary>
 
 Voice requires [Local Whisper](https://github.com/gabrimatic/local-whisper), which powers input (ASR) and output (TTS). Install it:
@@ -550,6 +581,7 @@ bash -n setup.sh
 uv build --wheel
 USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv run python src/main.py
 WEB_UI_ENABLED=true USE_MOCK_CLIENT=true uv run python -m web.server
+uv run python scripts/certify_voice_to_computer.py
 ```
 
 ---

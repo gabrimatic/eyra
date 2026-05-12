@@ -14,7 +14,7 @@ Privacy is a core constraint, not a feature toggle.
 | Permission | Why | Scope |
 |------------|-----|-------|
 | **Screen capture** | Screenshot tool, on demand, model-invoked | Single frame when requested |
-| **Microphone** | Voice input recording | In-process via sounddevice (Silero VAD); transcription via local-whisper |
+| **Microphone** | Voice input recording | In-process via sounddevice (Silero VAD); transcription via local-whisper. `/voice-diagnose` records only a bounded local probe and saves audio only when `VOICE_DIAGNOSTIC_SAVE_AUDIO=true`. |
 | **Network** | AI backend API | Loopback by default; follows `API_BASE_URL` |
 | **Network tools** | Weather and browser lookup | Disabled by default; enabled only with `NETWORK_TOOLS_ENABLED=true` |
 
@@ -31,6 +31,7 @@ Permissions are requested on demand. Nothing runs in the background between inte
 | Weather/browser tools | Opt-in | Contact remote sites only when `NETWORK_TOOLS_ENABLED=true` and a tool is used. Weather requires an explicit location and does not use remote IP geolocation. Browser uses headless Chromium, http/https only, 30s tool timeout. |
 | `.env` file | Controlled by you | Must not be committed |
 | Local logs | Local artifact | Stored under `~/Library/Logs/Eyra/eyra.log` by default on macOS. Tool-call logs record tool names and argument keys only, not argument values. |
+| Local job and trigger stores | Local artifact | SQLite files default under `~/.local/share/eyra`, use WAL and busy timeout, and are set to owner-only file permissions where supported. |
 | Web UI | Local server, disabled by default | Runs preflight before serving. Non-health endpoints require a token by default, cross-origin API requests are refused, and `WEB_UI_MAX_REQUEST_BYTES` limits JSON and browser audio uploads. |
 | Prompts | Untrusted input | Passed to AI backends as message content; no shell execution |
 

@@ -7,6 +7,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -110,6 +111,8 @@ class DurableJobStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        with suppress(OSError):
+            self.path.chmod(0o600)
         self._lock = threading.RLock()
         self._migrate()
 
@@ -360,6 +363,7 @@ class DurableJobStore:
                 """
                 PRAGMA journal_mode = WAL;
                 PRAGMA busy_timeout = 30000;
+                PRAGMA user_version = 1;
 
                 CREATE TABLE IF NOT EXISTS jobs (
                     id TEXT PRIMARY KEY,
@@ -412,6 +416,15 @@ class DurableJobStore:
                     approval_id TEXT,
                     error TEXT
                 );
+
+                CREATE INDEX IF NOT EXISTS idx_jobs_status_updated
+                    ON jobs(status, updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_job_logs_job_id_id
+                    ON job_logs(job_id, id ASC);
+                CREATE INDEX IF NOT EXISTS idx_operation_ledger_job_id_timestamp
+                    ON operation_ledger(job_id, timestamp ASC);
+                CREATE INDEX IF NOT EXISTS idx_operation_ledger_timestamp
+                    ON operation_ledger(timestamp DESC);
                 """
             )
             self._conn.commit()

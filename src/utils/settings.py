@@ -21,6 +21,14 @@ class Settings:
     LIVE_LISTENING_ENABLED: bool = True
     LIVE_SPEECH_ENABLED: bool = True
     SPEECH_COOLDOWN_MS: int = 3000
+    # Voice input: optional sounddevice input device index or name.
+    VOICE_INPUT_DEVICE: str = ""
+    # Voice input: sample rate used by Silero VAD and Local Whisper WAV export.
+    VOICE_SAMPLE_RATE: int = 16000
+    # Voice diagnostics: bounded capture length for local microphone probes.
+    VOICE_DEBUG_RECORD_SECONDS: int = 3
+    # Voice diagnostics: save captured probe audio under a local diagnostics folder.
+    VOICE_DIAGNOSTIC_SAVE_AUDIO: bool = False
     # Voice input: silence duration (ms) after speech to stop recording
     VOICE_SILENCE_MS: int = 1500
     # Voice input: Silero VAD threshold (0.0-1.0). Higher = stricter.
@@ -111,6 +119,10 @@ class Settings:
             LIVE_LISTENING_ENABLED=_bool("LIVE_LISTENING_ENABLED"),
             LIVE_SPEECH_ENABLED=_bool("LIVE_SPEECH_ENABLED"),
             SPEECH_COOLDOWN_MS=_int("SPEECH_COOLDOWN_MS", "3000"),
+            VOICE_INPUT_DEVICE=os.getenv("VOICE_INPUT_DEVICE", ""),
+            VOICE_SAMPLE_RATE=_int("VOICE_SAMPLE_RATE", "16000"),
+            VOICE_DEBUG_RECORD_SECONDS=_int("VOICE_DEBUG_RECORD_SECONDS", "3"),
+            VOICE_DIAGNOSTIC_SAVE_AUDIO=_bool("VOICE_DIAGNOSTIC_SAVE_AUDIO", "false"),
             VOICE_SILENCE_MS=_int("VOICE_SILENCE_MS", "1500"),
             VOICE_VAD_THRESHOLD=_float_range("VOICE_VAD_THRESHOLD", "0.6", 0.0, 1.0),
             FILESYSTEM_ALLOWED_PATHS=os.getenv("FILESYSTEM_ALLOWED_PATHS", "~/Documents,~/Desktop,~/Downloads,/tmp"),

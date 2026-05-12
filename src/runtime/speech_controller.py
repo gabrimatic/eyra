@@ -12,11 +12,21 @@ logger = logging.getLogger(__name__)
 
 
 class SpeechController:
-    def __init__(self, state: LiveRuntimeState, cooldown_ms: int = 3000, silence_duration_ms: int = 1500, vad_threshold: float = 0.6):
+    def __init__(
+        self,
+        state: LiveRuntimeState,
+        cooldown_ms: int = 3000,
+        silence_duration_ms: int = 1500,
+        vad_threshold: float = 0.6,
+        input_device: str | int | None = None,
+        sample_rate: int = 16000,
+    ):
         self.state = state
         self.cooldown_s = cooldown_ms / 1000.0
         self._silence_duration_ms = silence_duration_ms
         self._vad_threshold = vad_threshold
+        self._input_device = input_device
+        self._sample_rate = sample_rate
         self._speaking_proc: asyncio.subprocess.Process | None = None
         self._voice_input = None
 
@@ -31,6 +41,8 @@ class SpeechController:
                 silence_duration_ms=self._silence_duration_ms,
                 threshold=self._vad_threshold,
                 wh_bin=self.state.wh_bin,
+                input_device=self._input_device,
+                sample_rate=self._sample_rate,
             )
         except Exception as e:
             logger.debug("Voice input initialization failed: %s", e)

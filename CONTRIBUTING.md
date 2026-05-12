@@ -14,7 +14,7 @@ cd eyra
 
 Set `USE_MOCK_CLIENT=true` in `.env` to run without a backend during development. Mock mode skips provider and model preflight on purpose.
 
-Voice input and speech output require [Local Whisper](https://github.com/gabrimatic/local-whisper). Install: `brew tap gabrimatic/local-whisper && brew install local-whisper`. Check with `wh status`. Input and speech are tracked separately, so tests should cover speech-only and input-only states when touching voice preflight.
+Voice input and speech output require [Local Whisper](https://github.com/gabrimatic/local-whisper). Install: `brew tap gabrimatic/local-whisper && brew install local-whisper`. Check with `wh status`. Input and speech are tracked separately, so tests should cover speech-only and input-only states when touching voice preflight. Use `/voice-diagnose` for local microphone checks and keep diagnostic audio opt-in.
 
 Network tools are disabled by default. Set `NETWORK_TOOLS_ENABLED=true` in `.env` only when testing weather or browser tools. Weather requests require an explicit location so tests and runtime use never rely on remote IP geolocation.
 
@@ -42,6 +42,7 @@ eyra/
 │   │   ├── tasks.py             # Background task lifecycle
 │   │   ├── tooling.py           # Shared terminal/Web UI tool registry
 │   │   ├── vision.py            # Controller-owned screenshot + vision flow
+│   │   ├── voice_diagnostics.py # Local microphone and Local Whisper diagnostics
 │   │   ├── voice_input.py       # Silero VAD recording + local-whisper transcription
 │   │   └── status_presenter.py  # Session status display
 │   ├── tools/

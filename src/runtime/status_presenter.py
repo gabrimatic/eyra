@@ -151,6 +151,7 @@ def render_help_card():
     """Print the /help command card."""
     cmds = [
         ("/voice     ", "on|off"),
+        ("/voice-diagnose", "Mic diagnostics"),
         ("/voice-test", "Manual interrupt test"),
         ("/mute      ", "Mute speech output"),
         ("/unmute    ", "Unmute speech"),

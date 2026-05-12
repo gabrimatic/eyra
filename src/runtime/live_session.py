@@ -47,6 +47,7 @@ from runtime.tasks import BackgroundTask, BackgroundTaskManager, TaskStatus
 from runtime.tooling import build_tool_registry
 from runtime.triggers import TriggerStatus, TriggerStore
 from runtime.vision import analyze_screen
+from runtime.voice_diagnostics import VoiceDiagnostics
 from tools.approval import ApprovalManager
 from tools.browser import BrowserSession
 from tools.registry import ToolRegistry
@@ -58,7 +59,7 @@ from web.server import WebAssistantRuntime, start_web_server_in_thread
 logger = logging.getLogger(__name__)
 
 _COMMANDS = {
-    "/voice", "/voice-test", "/mute", "/unmute",
+    "/voice", "/voice-diagnose", "/voice-test", "/mute", "/unmute",
     "/goal", "/status", "/quit", "/clear",
     "/mode", "/help", "/tasks", "/task", "/cancel", "/pause", "/resume",
     "/approvals", "/approve", "/reject", "/operations", "/capabilities", "/context", "/triggers", "/trigger",
@@ -107,6 +108,8 @@ class LiveSession:
             cooldown_ms=settings.SPEECH_COOLDOWN_MS,
             silence_duration_ms=settings.VOICE_SILENCE_MS,
             vad_threshold=settings.VOICE_VAD_THRESHOLD,
+            input_device=_settings_str(settings, "VOICE_INPUT_DEVICE", "") or None,
+            sample_rate=_settings_int(settings, "VOICE_SAMPLE_RATE", 16000),
         )
         self.quality_mode = QualityMode.BALANCED
         self._prompt = PromptSession()
@@ -371,6 +374,15 @@ class LiveSession:
             else:
                 voice_status = voice_status_label(self.state)
                 print(f"  Voice is {voice_status}. Usage: /voice on|off")
+            return True
+
+        if command == "/voice-diagnose":
+            arg = lower_parts[1] if len(lower_parts) > 1 else ""
+            report = await VoiceDiagnostics(
+                settings=self.settings,
+                wh_bin=self.state.wh_bin or self.preflight.wh_bin,
+            ).run(include_physical_barge_in=arg in {"barge-in", "bargein", "physical"})
+            print(report.render())
             return True
 
         if command == "/voice-test":

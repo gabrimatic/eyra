@@ -7,6 +7,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -48,6 +49,8 @@ class TriggerStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        with suppress(OSError):
+            self.path.chmod(0o600)
         self._lock = threading.RLock()
         self._migrate()
 
@@ -258,6 +261,7 @@ class TriggerStore:
                 """
                 PRAGMA journal_mode = WAL;
                 PRAGMA busy_timeout = 30000;
+                PRAGMA user_version = 1;
 
                 CREATE TABLE IF NOT EXISTS triggers (
                     id TEXT PRIMARY KEY,
@@ -272,6 +276,11 @@ class TriggerStore:
                     completed_at REAL,
                     last_error TEXT
                 );
+
+                CREATE INDEX IF NOT EXISTS idx_triggers_status_updated
+                    ON triggers(status, updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_triggers_kind_status
+                    ON triggers(kind, status);
                 """
             )
             self._conn.commit()
