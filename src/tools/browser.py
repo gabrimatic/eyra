@@ -52,6 +52,7 @@ class BrowserSession:
     def __init__(self):
         self._cm = None  # context manager from async_playwright()
         self._browser = None
+        self._context = None
         self._page = None
         self._lock = asyncio.Lock()
 
@@ -79,10 +80,7 @@ class BrowserSession:
                 return self._page
             # Close any existing browser before launching a new one
             if self._browser:
-                try:
-                    await self._browser.close()
-                except Exception:
-                    pass
+                await self.close()
             if self._cm:
                 try:
                     await self._cm.__aexit__(None, None, None)
@@ -97,10 +95,25 @@ class BrowserSession:
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
                 ),
             )
-            self._page = await ctx.new_page()
+            self._context = ctx
+            self._page = await self._context.new_page()
             return self._page
 
     async def close(self):
+        try:
+            if self._page and not self._page.is_closed():
+                await self._page.close()
+        except Exception:
+            pass
+        finally:
+            self._page = None
+        try:
+            if self._context:
+                await self._context.close()
+        except Exception:
+            pass
+        finally:
+            self._context = None
         try:
             if self._browser:
                 await self._browser.close()
@@ -115,7 +128,6 @@ class BrowserSession:
             pass
         finally:
             self._cm = None
-        self._page = None
 
 
 async def _extract_text(page, max_chars: int = 4000) -> str:

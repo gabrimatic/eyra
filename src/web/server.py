@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hmac
 import json
+import queue
 import secrets
 import shutil
 import socketserver
@@ -22,7 +24,17 @@ from typing import Any
 from chat.complexity_scorer import ComplexityScorer
 from chat.message_handler import process_task_stream
 from chat.session_state import InteractionStyle, QualityMode
+from runtime.intents import (
+    extract_pdf_path,
+    needs_screen_context,
+    requires_filesystem,
+    requires_model_driven_tools,
+    requires_network,
+    should_background_task,
+    task_title,
+)
 from runtime.models import PreflightResult
+from runtime.preflight import PreflightManager
 from runtime.tasks import BackgroundTask, BackgroundTaskManager, TaskStatus
 from runtime.tooling import build_tool_registry
 from runtime.vision import analyze_screen, vision_model_name
@@ -89,21 +101,6 @@ def validate_request_size(settings: Settings, length: int) -> bool:
     return 0 <= length <= max(1, int(settings.WEB_UI_MAX_REQUEST_BYTES))
 
 
-def _network_request(text: str) -> bool:
-    lowered = text.lower()
-    return "http://" in lowered or "https://" in lowered or any(
-        phrase in lowered for phrase in ("website", "web page", "webpage", "weather", "browse", "search the web")
-    )
-
-
-def _background_request(text: str) -> bool:
-    lowered = text.lower()
-    return bool(
-        "pdf" in lowered
-        or any(word in lowered for word in ("summarize", "organize", "inspect", "translate", "website", "folder"))
-    )
-
-
 def _task_payload(task: BackgroundTask) -> dict[str, Any]:
     return {
         "id": task.id,
@@ -125,7 +122,7 @@ def _task_payload(task: BackgroundTask) -> dict[str, Any]:
 class WebAssistantRuntime:
     """Standalone assistant runtime for the built-in Web UI."""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, preflight: PreflightResult | None = None):
         self.settings = settings
         self.scorer = ComplexityScorer()
         self.conversation: list[dict[str, str]] = []
@@ -137,11 +134,14 @@ class WebAssistantRuntime:
             approval_manager=self.approvals,
         )
         self.model_semaphore = asyncio.Semaphore(max(1, int(settings.MODEL_CONCURRENCY)))
+        self._task_event_subscribers: set[queue.Queue[dict[str, Any]]] = set()
+        self._task_event_lock = threading.Lock()
         self.task_manager = BackgroundTaskManager(
             max_concurrent=max(1, int(settings.MAX_BACKGROUND_TASKS)),
             task_timeout_seconds=max(1, int(settings.TASK_TIMEOUT_SECONDS)),
+            on_event=self._on_task_event,
         )
-        self.preflight = PreflightResult(
+        self.preflight = preflight or PreflightResult(
             backend_reachable=True,
             models_ready=settings.all_model_names,
             screen_capture_available=bool(shutil.which("screencapture")),
@@ -162,28 +162,54 @@ class WebAssistantRuntime:
         text = " ".join(text.strip().split())
         if not text:
             return {"reply": "Message is empty."}
-        if _network_request(text) and not self.settings.NETWORK_TOOLS_ENABLED:
+        if requires_network(text) and not self.settings.NETWORK_TOOLS_ENABLED:
             return {
                 "reply": (
                     "Network tools are disabled. Enable NETWORK_TOOLS_ENABLED=true before asking Eyra to browse, "
                     "summarize websites, or check weather."
                 )
             }
+        if needs_screen_context(text) and not self._vision_available():
+            return {
+                "reply": (
+                    "Screen analysis needs a vision-capable model. Set VISION_MODEL to a model that can process "
+                    "images, or use a main MODEL with vision support."
+                )
+            }
+        if requires_model_driven_tools(text) and not self._tool_actions_available():
+            return {
+                "reply": (
+                    "This open-ended local tool task requires a model with native tool calling. Text chat and "
+                    "recognized controller-owned actions still work with the selected model."
+                )
+            }
         self.conversation.append({"role": "user", "content": text})
-        if _background_request(text):
+        if self.settings.BACKGROUND_TASKS_ENABLED and should_background_task(text):
             task = self.task_manager.create_task(
-                title=text[:48] or "Task",
+                title=task_title(text),
                 original_request=text,
                 worker=lambda task: self._run_worker_task(task, text, voice_mode),
                 related_context=list(self.conversation[-6:]),
                 used_tools=True,
-                required_network=_network_request(text),
-                required_filesystem=any(word in text.lower() for word in ("pdf", "file", "folder")),
-                required_vision="screen" in text.lower() or "looking at" in text.lower(),
+                required_network=requires_network(text),
+                required_filesystem=requires_filesystem(text),
+                required_vision=needs_screen_context(text),
             )
             return {"reply": f"Task {task.id} accepted: {task.title}", "taskId": task.id}
         reply = await self._chat(text, voice_mode)
         return {"reply": reply}
+
+    def _tool_actions_available(self) -> bool:
+        model = self.settings.WORKER_MODEL or self.settings.MODEL
+        checked = set(self.preflight.tool_capability_checked_models)
+        capable = set(self.preflight.tool_capable_models)
+        return model not in checked or model in capable
+
+    def _vision_available(self) -> bool:
+        model = self.settings.VISION_MODEL or self.settings.MODEL
+        checked = set(self.preflight.vision_capability_checked_models)
+        capable = set(self.preflight.vision_capable_models)
+        return model not in checked or model in capable
 
     async def _chat(self, text: str, voice_mode: str = "text") -> str:
         interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
@@ -205,7 +231,7 @@ class WebAssistantRuntime:
 
     async def _run_worker_task(self, task: BackgroundTask, text: str, voice_mode: str) -> str:
         task.mark_progress("Working")
-        if "screen" in text.lower() or "looking at" in text.lower():
+        if needs_screen_context(text):
             task.mark_progress("Capturing screenshot locally")
             return await analyze_screen(
                 settings=self.settings,
@@ -215,6 +241,9 @@ class WebAssistantRuntime:
                 model_semaphore=self.model_semaphore,
                 preflight=self.preflight,
             )
+        pdf_result = await self._run_direct_pdf_task(task, text, voice_mode)
+        if pdf_result is not None:
+            return pdf_result
         chunks: list[str] = []
         interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
         async with self.model_semaphore:
@@ -232,6 +261,45 @@ class WebAssistantRuntime:
                 if len("".join(chunks)) > 120 and task.progress_summary == "Working":
                     task.mark_progress("Preparing final answer")
         return "".join(chunks).strip() or "Task finished."
+
+    async def _run_direct_pdf_task(self, task: BackgroundTask, text: str, voice_mode: str) -> str | None:
+        if "pdf" not in text.lower():
+            return None
+        pdf_path = extract_pdf_path(text)
+        if pdf_path is None:
+            return None
+
+        task.mark_progress("Reading PDF locally")
+        extracted = await self.registry.execute("read_pdf", json.dumps({"path": pdf_path, "max_chars": 50000}))
+        if "No extractable text found" in extracted.content or extracted.content.startswith(
+            ("Access denied:", "Not a file:", "Not a PDF file:", "Could not read PDF")
+        ):
+            return extracted.content
+
+        task.mark_progress("Summarizing extracted PDF text")
+        interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
+        prompt = (
+            "Summarize the PDF for the user's request. Be concise, factual, and do not ask for a follow-up. "
+            "If the user asked for a focus area, answer that focus directly.\n\n"
+            f"User request: {text}\n\n"
+            f"Extracted local PDF text:\n{extracted.content[:50000]}"
+        )
+        chunks: list[str] = []
+        async with self.model_semaphore:
+            async for chunk in process_task_stream(
+                text_content=prompt,
+                complexity_scorer=self.scorer,
+                settings=self.settings,
+                messages=[{"role": "user", "content": prompt}],
+                quality_mode=QualityMode.BALANCED,
+                interaction_style=interaction,
+                tool_registry=None,
+                require_tools=False,
+            ):
+                chunks.append(chunk)
+                if len("".join(chunks)) > 120 and task.progress_summary == "Summarizing extracted PDF text":
+                    task.mark_progress("Preparing final answer")
+        return "".join(chunks).strip() or "The PDF text was extracted locally, but there was not enough readable text to summarize."
 
     async def list_tasks(self) -> dict[str, Any]:
         return {"tasks": [_task_payload(task) for task in self.task_manager.list_tasks(include_recent=True)]}
@@ -272,6 +340,29 @@ class WebAssistantRuntime:
     async def reject(self, approval_id: str) -> dict[str, Any]:
         return {"rejected": self.approvals.reject(approval_id)}
 
+    def subscribe_task_events(self) -> queue.Queue[dict[str, Any]]:
+        subscriber: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=50)
+        with self._task_event_lock:
+            self._task_event_subscribers.add(subscriber)
+        return subscriber
+
+    def unsubscribe_task_events(self, subscriber: queue.Queue[dict[str, Any]]) -> None:
+        with self._task_event_lock:
+            self._task_event_subscribers.discard(subscriber)
+
+    def _on_task_event(self, task: BackgroundTask, event: str) -> None:
+        payload = {"event": "task", "type": event, "task": _task_payload(task)}
+        with self._task_event_lock:
+            subscribers = list(self._task_event_subscribers)
+        for subscriber in subscribers:
+            try:
+                subscriber.put_nowait(payload)
+            except queue.Full:
+                with contextlib.suppress(queue.Empty):
+                    subscriber.get_nowait()
+                with contextlib.suppress(queue.Full):
+                    subscriber.put_nowait(payload)
+
     async def shutdown(self) -> None:
         await self.task_manager.shutdown()
         await self.browser_session.close()
@@ -282,6 +373,8 @@ class WebAssistantRuntime:
         finally:
             self._loop.call_soon_threadsafe(self._loop.stop)
             self._thread.join(timeout=2)
+            if not self._loop.is_closed():
+                self._loop.close()
 
 
 def render_index_html(settings: Settings) -> str:
@@ -492,6 +585,7 @@ def render_index_html(settings: Settings) -> str:
     const micButton = document.getElementById('micButton');
     const voiceMode = document.getElementById('voiceMode');
     const tasks = document.getElementById('tasks');
+    let currentTasks = [];
 
     function addMessage(role, text, extraClass = '') {{
       const el = document.createElement('div');
@@ -521,33 +615,49 @@ def render_index_html(settings: Settings) -> str:
       }}
     }}
 
+    function renderTasks(rows) {{
+      currentTasks = rows || [];
+      tasks.replaceChildren();
+      for (const task of currentTasks.slice(0, 8)) {{
+        const row = document.createElement('div');
+        row.className = 'task';
+        const label = document.createElement('div');
+        label.textContent = `${{task.id}} · ${{task.status}} · ${{task.title}}`;
+        row.appendChild(label);
+        if (['queued', 'running'].includes(task.status)) {{
+          const button = document.createElement('button');
+          button.textContent = 'Cancel';
+          button.onclick = async () => {{
+            await fetch('/api/cancel', {{
+              method: 'POST',
+              headers: {{ 'Content-Type': 'application/json', 'X-Eyra-Web-Token': webToken }},
+              body: JSON.stringify({{ taskId: task.id }}),
+            }});
+            loadTasks();
+          }};
+          row.appendChild(button);
+        }}
+        tasks.appendChild(row);
+      }}
+    }}
+
+    function applyTaskEvent(task) {{
+      if (!task || !task.id) return;
+      const index = currentTasks.findIndex((item) => item.id === task.id);
+      if (index >= 0) {{
+        currentTasks[index] = task;
+      }} else {{
+        currentTasks.unshift(task);
+      }}
+      renderTasks(currentTasks);
+    }}
+
     async function loadTasks() {{
       try {{
         const response = await fetch('/api/tasks', {{ headers: {{ 'X-Eyra-Web-Token': webToken }} }});
         if (!response.ok) return;
         const data = await response.json();
-        tasks.replaceChildren();
-        for (const task of (data.tasks || []).slice(0, 8)) {{
-          const row = document.createElement('div');
-          row.className = 'task';
-          const label = document.createElement('div');
-          label.textContent = `${{task.id}} · ${{task.status}} · ${{task.title}}`;
-          row.appendChild(label);
-          if (['queued', 'running'].includes(task.status)) {{
-            const button = document.createElement('button');
-            button.textContent = 'Cancel';
-            button.onclick = async () => {{
-              await fetch('/api/cancel', {{
-                method: 'POST',
-                headers: {{ 'Content-Type': 'application/json', 'X-Eyra-Web-Token': webToken }},
-                body: JSON.stringify({{ taskId: task.id }}),
-              }});
-              loadTasks();
-            }};
-            row.appendChild(button);
-          }}
-          tasks.appendChild(row);
-        }}
+        renderTasks(data.tasks || []);
       }} catch (_) {{}}
     }}
 
@@ -564,6 +674,25 @@ def render_index_html(settings: Settings) -> str:
     let realtime = null;
     const webToken = new URLSearchParams(window.location.search).get('token') || sessionStorage.getItem('eyraWebToken') || '';
     if (webToken) sessionStorage.setItem('eyraWebToken', webToken);
+
+    function connectTaskEvents() {{
+      if (!window.EventSource) return;
+      const params = new URLSearchParams();
+      if (webToken) params.set('token', webToken);
+      const source = new EventSource(`/api/events?${{params.toString()}}`);
+      source.addEventListener('snapshot', (event) => {{
+        try {{
+          const data = JSON.parse(event.data);
+          renderTasks(data.tasks || []);
+        }} catch (_) {{}}
+      }});
+      source.addEventListener('task', (event) => {{
+        try {{
+          const data = JSON.parse(event.data);
+          applyTaskEvent(data.task);
+        }} catch (_) {{}}
+      }});
+    }}
 
     async function sendLocalAudio(blob) {{
       const reply = addMessage('eyra', 'Listening...');
@@ -720,8 +849,8 @@ def render_index_html(settings: Settings) -> str:
         addMessage('eyra', 'Local voice failed to start.', 'error');
       }}
     }});
+    connectTaskEvents();
     loadTasks();
-    setInterval(loadTasks, 3000);
   </script>
 </body>
 </html>"""
@@ -746,6 +875,11 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/favicon.ico":
             self._send(204, "", "image/x-icon")
+            return
+        if parsed.path == "/api/events":
+            if not self._authorized(allow_query_token=True):
+                return
+            self._send_event_stream()
             return
         if parsed.path == "/api/tasks":
             if not self._authorized():
@@ -778,6 +912,19 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             "/api/approve",
             "/api/reject",
         } and not self._authorized():
+            return
+        if parsed.path in {
+            "/api/chat",
+            "/api/local-voice-turn",
+            "/api/local-speak",
+            "/api/realtime-session",
+            "/api/realtime-tool-call",
+            "/api/cancel",
+            "/api/approve",
+            "/api/reject",
+        } and self._reject_if_too_large(
+            max_bytes=25 * 1024 * 1024 if parsed.path == "/api/local-voice-turn" else 1_000_000
+        ):
             return
         if parsed.path == "/api/chat":
             payload = self._read_json()
@@ -875,13 +1022,16 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         self._send_json(405, {"error": "Method not allowed."})
 
-    def _authorized(self) -> bool:
+    def _authorized(self, allow_query_token: bool = False) -> bool:
         if not self._origin_allowed():
             self._send_json(403, {"error": "Cross-origin Web UI request refused."})
             return False
         if not web_auth_required(self.settings):
             return True
         provided = self.headers.get("X-Eyra-Web-Token", "")
+        if allow_query_token and not provided:
+            parsed = urllib.parse.urlparse(self.path)
+            provided = urllib.parse.parse_qs(parsed.query).get("token", [""])[0]
         if validate_web_session_token(provided, self.web_session_token):
             return True
         self._send_json(401, {"error": "Web UI session token is required."})
@@ -908,11 +1058,51 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
     def _read_bytes(self, max_bytes: int = 1_000_000) -> bytes:
         length = int(self.headers.get("content-length", "0"))
         limit = min(max_bytes, max(1, int(self.settings.WEB_UI_MAX_REQUEST_BYTES)))
-        if max_bytes > int(self.settings.WEB_UI_MAX_REQUEST_BYTES) and max_bytes > 1_000_000:
-            limit = max_bytes
         if length <= 0 or length > limit:
             return b""
         return self.rfile.read(length)
+
+    def _reject_if_too_large(self, max_bytes: int = 1_000_000) -> bool:
+        try:
+            length = int(self.headers.get("content-length", "0"))
+        except ValueError:
+            self._send_json(400, {"error": "Invalid content length."})
+            return True
+        limit = min(max_bytes, max(1, int(self.settings.WEB_UI_MAX_REQUEST_BYTES)))
+        if length > limit:
+            self._send_json(413, {"error": f"Request body is too large. Limit is {limit} bytes."})
+            return True
+        return False
+
+    def _send_event_stream(self) -> None:
+        subscriber = self.runtime.subscribe_task_events()
+        try:
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream; charset=utf-8")
+            self.send_header("cache-control", "no-store")
+            self.send_header("connection", "keep-alive")
+            self.send_header("x-content-type-options", "nosniff")
+            self.send_header("x-frame-options", "DENY")
+            self.end_headers()
+
+            def send_event(name: str, payload: dict[str, Any]) -> None:
+                raw = f"event: {name}\ndata: {json.dumps(payload)}\n\n".encode()
+                self.wfile.write(raw)
+                self.wfile.flush()
+
+            send_event("snapshot", self.runtime.run_sync(self.runtime.list_tasks()))
+            while True:
+                try:
+                    payload = subscriber.get(timeout=15)
+                except queue.Empty:
+                    self.wfile.write(b": keepalive\n\n")
+                    self.wfile.flush()
+                    continue
+                send_event(str(payload.get("event", "message")), payload)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return
+        finally:
+            self.runtime.unsubscribe_task_events(subscriber)
 
     def _send_json(self, status: int, payload: dict[str, Any]) -> None:
         self._send(status, json.dumps(payload), "application/json; charset=utf-8")
@@ -1102,10 +1292,24 @@ def speak_local_text(text: str) -> str:
     return "Local speech started."
 
 
-def run_web_server(settings: Settings) -> None:
+def _web_preflight_problem(preflight: PreflightResult) -> str | None:
+    if not preflight.backend_reachable:
+        return "Backend is not reachable. Start your backend and try again."
+    if preflight.models_missing:
+        return "Missing models: " + ", ".join(preflight.models_missing)
+    return None
+
+
+def run_web_server(settings: Settings, preflight: PreflightResult | None = None) -> None:
+    preflight = preflight or asyncio.run(PreflightManager(settings).run())
+    problem = _web_preflight_problem(preflight)
+    if problem:
+        print(problem)
+        return
+
     web_session_token = settings.WEB_UI_TOKEN.strip() or secrets.token_urlsafe(32)
     realtime_tool_token = secrets.token_urlsafe(32)
-    runtime = WebAssistantRuntime(settings)
+    runtime = WebAssistantRuntime(settings, preflight=preflight)
     handler = type(
         "EyraWebHandler",
         (_EyraWebHandler,),
@@ -1116,7 +1320,12 @@ def run_web_server(settings: Settings) -> None:
             "realtime_tool_token": realtime_tool_token,
         },
     )
-    server = EyraThreadingHTTPServer((settings.WEB_UI_HOST, settings.WEB_UI_PORT), handler)
+    try:
+        server = EyraThreadingHTTPServer((settings.WEB_UI_HOST, settings.WEB_UI_PORT), handler)
+    except OSError as e:
+        runtime.close()
+        print(f"Could not start Eyra web UI on {settings.WEB_UI_HOST}:{settings.WEB_UI_PORT}: {e}")
+        return
     print(f"Eyra web UI: http://{settings.WEB_UI_HOST}:{settings.WEB_UI_PORT}")
     if web_auth_required(settings):
         print(f"Eyra web UI token URL: http://{settings.WEB_UI_HOST}:{settings.WEB_UI_PORT}/?token={web_session_token}")
@@ -1130,6 +1339,9 @@ def run_web_server(settings: Settings) -> None:
 
 
 def run() -> None:
+    from runtime.startup import maybe_run_startup_selector
+
+    maybe_run_startup_selector()
     run_web_server(Settings.load_from_env())
 
 
