@@ -112,6 +112,7 @@ class VoiceDiagnostics:
         self.device_selector = getattr(settings, "VOICE_INPUT_DEVICE", "") or ""
         self._last_audio: np.ndarray | None = None
         self._last_audio_path: str | None = None
+        self._last_vad_speech_detected = False
 
     async def run(self, *, include_physical_barge_in: bool = False) -> DiagnosticReport:
         report = await asyncio.to_thread(self.run_microphone_checks)
@@ -210,7 +211,9 @@ class VoiceDiagnostics:
                 "All-zero audio can mean microphone permission, a muted input, or the wrong input device.",
             )
         report.add("stream_overflow", "failed" if overflowed else "passed", "Input stream reported overflow." if overflowed else "No overflow reported.")
-        report.add("vad_detected_speech", *self._vad_check(audio))
+        vad_status, vad_reason = self._vad_check(audio)
+        self._last_vad_speech_detected = vad_status == "passed"
+        report.add("vad_detected_speech", vad_status, vad_reason)
         self._last_audio_path = self._maybe_save_audio(audio, report)
         return report
 
@@ -232,7 +235,7 @@ class VoiceDiagnostics:
                 event = vad(_int16_to_float32(chunk), return_seconds=False)
                 if event is not None and "start" in event:
                     return "passed", "VAD detected speech onset."
-            return "failed", "VAD did not detect speech in the diagnostic capture."
+            return "skipped", "VAD needs live speech in the diagnostic capture."
         except Exception as exc:
             return "failed", f"VAD probe failed: {exc}"
 
@@ -279,7 +282,7 @@ class VoiceDiagnostics:
             with contextlib.suppress(Exception):
                 Path(probe_path).unlink()
 
-        if self._last_audio is not None and np.any(self._last_audio):
+        if self._last_audio is not None and np.any(self._last_audio) and self._last_vad_speech_detected:
             wav_path = self._last_audio_path or self._generated_capture_wav(self._last_audio)
             try:
                 proc = subprocess.run([self.wh_bin, "transcribe", wav_path], capture_output=True, text=True, timeout=30)
@@ -294,6 +297,8 @@ class VoiceDiagnostics:
                 if wav_path != self._last_audio_path:
                     with contextlib.suppress(Exception):
                         Path(wav_path).unlink()
+        elif self._last_audio is not None and np.any(self._last_audio):
+            report.add("transcription_returns_text", "skipped", "No detected speech in the diagnostic capture.")
         else:
             report.add("transcription_returns_text", "skipped", "No nonzero microphone audio was captured.")
         return report

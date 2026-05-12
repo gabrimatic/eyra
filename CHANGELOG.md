@@ -85,6 +85,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `open_path` now bounds the macOS `open` handoff so terminal sessions do not hang waiting for Finder.
 - File-appears triggers in terminal and Web now wait for real path existence instead of failing early with “Not a file.”
 - Web capability and privacy questions now use deterministic local runtime answers instead of model chat.
+- Voice diagnostics now skip unattended no-speech VAD and ASR checks instead of failing a healthy microphone capture with no human speech.
 
 ## [4.0.0] - 2026-05-11
 

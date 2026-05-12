@@ -3,6 +3,7 @@
 import asyncio
 import os
 import sys
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
@@ -115,6 +116,66 @@ def test_microphone_diagnostic_reports_nonzero_audio_and_overflow():
 
     assert report.check("captured_audio").status == "passed"
     assert report.check("stream_overflow").status == "failed"
+
+
+def test_microphone_diagnostic_skips_vad_when_capture_has_no_speech():
+    from runtime.voice_diagnostics import VoiceDiagnostics
+
+    settings = Settings(VOICE_DEBUG_RECORD_SECONDS=1)
+    frames = [np.full(FRAME_SAMPLES, 1200, dtype=np.int16) for _ in range(2)]
+    stream = _mock_stream(frames)
+
+    class FakeVoiceInput:
+        def __init__(self, **_kwargs):
+            pass
+
+        def _new_vad_iterator(self):
+            return lambda *_args, **_kwargs: None
+
+    with patch("runtime.voice_diagnostics.sd.query_devices", return_value=[]):
+        with patch("runtime.voice_diagnostics.sd.check_input_settings"):
+            with patch("runtime.voice_diagnostics.sd.InputStream", return_value=stream):
+                with patch("runtime.voice_diagnostics.VoiceInput", FakeVoiceInput):
+                    report = VoiceDiagnostics(settings=settings, wh_bin="/opt/wh").run_microphone_checks()
+
+    assert report.check("captured_audio").status == "passed"
+    assert report.check("vad_detected_speech").status == "skipped"
+    assert "needs live speech" in report.check("vad_detected_speech").reason
+
+
+def test_local_whisper_diagnostic_skips_transcription_when_vad_skipped():
+    from runtime.voice_diagnostics import VoiceDiagnostics
+
+    settings = Settings(VOICE_DEBUG_RECORD_SECONDS=1)
+    frames = [np.full(FRAME_SAMPLES, 1200, dtype=np.int16) for _ in range(2)]
+    stream = _mock_stream(frames)
+
+    class FakeVoiceInput:
+        def __init__(self, **_kwargs):
+            pass
+
+        def _new_vad_iterator(self):
+            return lambda *_args, **_kwargs: None
+
+    def fake_run(argv, **_kwargs):
+        if argv[1] == "status":
+            return SimpleNamespace(returncode=0, stdout="running", stderr="")
+        if argv[1] == "transcribe":
+            return SimpleNamespace(returncode=0, stdout="", stderr="Empty transcription")
+        raise AssertionError(f"unexpected command: {argv}")
+
+    diagnostics = VoiceDiagnostics(settings=settings, wh_bin="/opt/wh")
+    with patch("runtime.voice_diagnostics.sd.query_devices", return_value=[]):
+        with patch("runtime.voice_diagnostics.sd.check_input_settings"):
+            with patch("runtime.voice_diagnostics.sd.InputStream", return_value=stream):
+                with patch("runtime.voice_diagnostics.VoiceInput", FakeVoiceInput):
+                    diagnostics.run_microphone_checks()
+
+    with patch("runtime.voice_diagnostics.subprocess.run", side_effect=fake_run):
+        report = diagnostics.run_local_whisper_checks()
+
+    assert report.check("transcription_returns_text").status == "skipped"
+    assert "No detected speech" in report.check("transcription_returns_text").reason
 
 
 def test_voice_diagnose_command_prints_structured_report(capsys):
