@@ -34,10 +34,14 @@ eyra/
 │   │   └── ai_client.py         # OpenAI-compatible async client
 │   ├── runtime/
 │   │   ├── live_session.py      # Central orchestrator (voice + typed input)
+│   │   ├── intents.py           # Shared screen, file, network, PDF, and task intent rules
 │   │   ├── models.py            # Runtime data models
 │   │   ├── preflight.py         # Backend and model validation
 │   │   ├── startup.py           # First-run setup and .env management
 │   │   ├── speech_controller.py # TTS/STT coordination
+│   │   ├── tasks.py             # Background task lifecycle
+│   │   ├── tooling.py           # Shared terminal/Web UI tool registry
+│   │   ├── vision.py            # Controller-owned screenshot + vision flow
 │   │   ├── voice_input.py       # Silero VAD recording + local-whisper transcription
 │   │   └── status_presenter.py  # Session status display
 │   ├── tools/
@@ -49,7 +53,12 @@ eyra/
 │   │   ├── clipboard.py         # Clipboard reader tool
 │   │   ├── system_info.py       # System info tool
 │   │   ├── browser.py           # Optional network browser tools
-│   │   └── filesystem.py        # Sandboxed file read/write/edit/list
+│   │   ├── filesystem.py        # Sandboxed file read/write/edit/list/move/copy/open/reveal
+│   │   ├── operator.py          # Optional local OS and agent tools
+│   │   ├── mcp_stdio.py         # Optional stdio MCP bridge
+│   │   └── pdf.py               # Local PDF text extraction
+│   ├── web/
+│   │   └── server.py            # Optional browser and phone UI
 │   └── utils/
 │       ├── settings.py          # .env config loader
 │       ├── image_history.py     # Image context management
@@ -58,12 +67,12 @@ eyra/
 │       └── mock_client.py       # Mock client for development
 ```
 
-Eyra starts one `LiveSession` with concurrent input loops for voice and typed input. The model can call tools, including screenshot, on demand.
+Eyra starts one `LiveSession` with concurrent input loops for voice and typed input. Long work can become a background task. Terminal and Web UI flows share intent detection and tool registration so a screen, PDF, network, or filesystem request means the same thing in both places.
 
 Routing path:
 
 ```text
-message_handler.py -> complexity_scorer.py -> quality mode override -> response shaping -> client selection -> streaming
+intents.py -> live_session.py or web/server.py -> message_handler.py -> complexity_scorer.py -> client selection -> streaming/tools
 ```
 
 ## New AI backend
@@ -86,12 +95,13 @@ Keep streaming behavior consistent with existing clients. Yield string chunks, n
 
 1. Create a file in `src/tools/`, e.g. `src/tools/my_tool.py`
 2. Implement the tool interface from `src/tools/base.py`
-3. Register it in `src/runtime/live_session.py` inside `_build_tool_registry()`
+3. Register it in `src/runtime/tooling.py` so terminal and Web UI get the same tool surface
 
 The model invokes tools on demand. Keep tool implementations stateless where possible. Gate every network-backed tool behind `NETWORK_TOOLS_ENABLED`.
 Relative filesystem paths resolve under `FILESYSTEM_DEFAULT_PATH` and are still checked against `FILESYSTEM_ALLOWED_PATHS`.
 `write_file` creates new files by default and requires `overwrite=true` before replacing an existing file.
-The default filesystem sandbox is `~/Documents,/tmp`; broaden it only when a workflow needs more access.
+The default filesystem sandbox is `~/Documents,~/Desktop,~/Downloads,/tmp`; broaden it only when a workflow needs more access.
+If a new request type changes when Eyra should use screen, filesystem, network, PDF, or background-task handling, update `src/runtime/intents.py` and cover both terminal and Web UI behavior.
 
 ## Testing
 
@@ -112,6 +122,7 @@ Manual verification:
 3. Speak a prompt (requires Local Whisper), confirm voice response
 4. `/status` - confirm current state is displayed
 5. `/clear` - confirm session is reset
+6. `WEB_UI_ENABLED=true USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv run python -m web.server` - confirm the Web UI preflight path starts, token-protected APIs respond, and task updates arrive without browser polling
 
 ## PR checklist
 

@@ -26,11 +26,12 @@ Permissions are requested on demand. Nothing runs in the background between inte
 |----------|-------------|-------|
 | AI backend at `API_BASE_URL` | Controlled by you | Loopback by default; remote if configured |
 | wh (local-whisper) | Trusted | Subprocess, runs on localhost, no network |
-| Filesystem sandbox | Enforced | Paths restricted to `FILESYSTEM_ALLOWED_PATHS` (default `~/Documents,/tmp`). Rejects empty paths, binary reads, and binary file edits. `write_file` requires explicit overwrite for existing files. |
+| Filesystem sandbox | Enforced | Paths restricted to `FILESYSTEM_ALLOWED_PATHS` (default `~/Documents,~/Desktop,~/Downloads,/tmp`). Rejects empty paths, binary reads, and binary file edits. `write_file` requires explicit overwrite for existing files. |
 | Filesystem default path | Enforced | Relative paths resolve under `FILESYSTEM_DEFAULT_PATH`, then pass through the same sandbox check. |
 | Weather/browser tools | Opt-in | Contact remote sites only when `NETWORK_TOOLS_ENABLED=true` and a tool is used. Weather requires an explicit location and does not use remote IP geolocation. Browser uses headless Chromium, http/https only, 30s tool timeout. |
 | `.env` file | Controlled by you | Must not be committed |
 | Local logs | Local artifact | Stored under `~/Library/Logs/Eyra/eyra.log` by default on macOS. Tool-call logs record tool names and argument keys only, not argument values. |
+| Web UI | Local server, disabled by default | Runs preflight before serving. Non-health endpoints require a token by default, cross-origin API requests are refused, and `WEB_UI_MAX_REQUEST_BYTES` limits JSON and browser audio uploads. |
 | Prompts | Untrusted input | Passed to AI backends as message content; no shell execution |
 
 Prompts are passed to AI backends as message content only. Eyra does not construct shell commands from prompt text.
@@ -62,4 +63,5 @@ These are not considered vulnerabilities:
 
 | Version | Supported |
 |---------|-----------|
-| 3.x     | Yes       |
+| 4.x     | Yes       |
+| 3.x     | Security fixes only |

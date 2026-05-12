@@ -1,6 +1,7 @@
 """Minimal stdio MCP bridge for opt-in local tool servers."""
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
@@ -44,33 +45,52 @@ class _McpSession:
             import os
 
             env = {**os.environ, **{str(k): str(v) for k, v in self.server["env"].items()}}
-        self.proc = await asyncio.create_subprocess_exec(
-            str(command),
-            *[str(arg) for arg in args],
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        await self.request(
-            "initialize",
-            {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "eyra", "version": "1"},
-            },
-        )
-        await self.notify("notifications/initialized", {})
-        return self
+        try:
+            self.proc = await asyncio.create_subprocess_exec(
+                str(command),
+                *[str(arg) for arg in args],
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            await self.request(
+                "initialize",
+                {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "eyra", "version": "1"},
+                },
+            )
+            await self.notify("notifications/initialized", {})
+            return self
+        except Exception:
+            await self._close_process()
+            raise
 
     async def __aexit__(self, *_):
-        if self.proc and self.proc.returncode is None:
-            self.proc.terminate()
+        await self._close_process()
+
+    async def _close_process(self) -> None:
+        proc = self.proc
+        if proc is None:
+            return
+        if proc.stdin is not None:
+            with contextlib.suppress(Exception):
+                proc.stdin.close()
+            with contextlib.suppress(Exception):
+                await proc.stdin.wait_closed()
+        if proc.returncode is None:
             try:
-                await asyncio.wait_for(self.proc.wait(), timeout=2)
+                await asyncio.wait_for(proc.wait(), timeout=0.2)
             except asyncio.TimeoutError:
-                self.proc.kill()
-                await self.proc.wait()
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=2)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+        self.proc = None
 
     async def notify(self, method: str, params: dict[str, Any]) -> None:
         await self._write({"jsonrpc": "2.0", "method": method, "params": params})
