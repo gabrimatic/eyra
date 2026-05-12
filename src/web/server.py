@@ -101,14 +101,6 @@ def validate_request_size(settings: Settings, length: int) -> bool:
     return 0 <= length <= max(1, int(settings.WEB_UI_MAX_REQUEST_BYTES))
 
 
-def _network_request(text: str) -> bool:
-    return requires_network(text)
-
-
-def _background_request(text: str) -> bool:
-    return should_background_task(text)
-
-
 def _task_payload(task: BackgroundTask) -> dict[str, Any]:
     return {
         "id": task.id,
