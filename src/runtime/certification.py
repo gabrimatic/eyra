@@ -11,7 +11,10 @@ import urllib.error
 import urllib.request
 import zipfile
 from dataclasses import dataclass, field, replace
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 from typing import Awaitable, Callable
 
 from runtime.jobs import DurableJobStore, JobStatus, RiskLevel
@@ -123,6 +126,9 @@ def run_certification(settings: Settings | None = None, *, include_physical: boo
     else:
         report.add("physical_barge_in", "skipped", "Physical microphone barge-in was not requested.", command="/voice-test")
 
+    _check_local_whisper_tts_contract(report, settings)
+    _check_screen_vision_model_contract(report, settings)
+
     with tempfile.TemporaryDirectory(prefix="eyra-cert-") as tmp:
         tmp_path = Path(tmp)
         job_store = DurableJobStore(tmp_path / "jobs.sqlite3")
@@ -142,6 +148,8 @@ def run_certification(settings: Settings | None = None, *, include_physical: boo
             _guarded(report, "recurring_reminder_trigger", lambda: _check_recurring_reminder_trigger(trigger_store))
             asyncio.run(_check_task_control(report, job_store))
             _check_web_runtime_contracts(report, tmp_path)
+            _check_enabled_browser_tool_contract(report, settings, tmp_path)
+            _check_enabled_os_tool_contract(report, settings, tmp_path)
         finally:
             trigger_store.close()
             job_store.close()
@@ -210,21 +218,116 @@ def _check_typed_command_path(tmp_path: Path) -> str:
 
 
 def _check_real_local_model_startup(settings: Settings) -> str:
-    from runtime.preflight import PreflightManager
-
-    safe_settings = replace(
-        settings,
-        AUTO_PULL_MODELS=False,
-        LIVE_LISTENING_ENABLED=False,
-        LIVE_SPEECH_ENABLED=False,
-    )
-    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        result = asyncio.run(PreflightManager(safe_settings).run())
+    safe_settings = _cert_preflight_settings(settings)
+    result = _run_cert_preflight(settings)
     if not result.backend_reachable:
         raise RuntimeError(f"Local model backend is unreachable: {safe_settings.API_BASE_URL}")
     if result.models_missing:
         raise RuntimeError(f"Configured local models are missing: {', '.join(result.models_missing)}")
     return "Real local backend preflight reached the configured model set without auto-pull."
+
+
+def _cert_preflight_settings(settings: Settings) -> Settings:
+    return replace(
+        settings,
+        AUTO_PULL_MODELS=False,
+        LIVE_LISTENING_ENABLED=False,
+        LIVE_SPEECH_ENABLED=False,
+    )
+
+
+def _run_cert_preflight(settings: Settings):
+    from runtime.preflight import PreflightManager
+
+    safe_settings = _cert_preflight_settings(settings)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        result = asyncio.run(PreflightManager(safe_settings).run())
+    return result
+
+
+def _check_screen_vision_model_contract(report: CertificationReport, settings: Settings) -> None:
+    if settings.USE_MOCK_CLIENT:
+        report.add(
+            "screen_vision_model_split",
+            "skipped",
+            "Mock client does not certify real screen/vision model capabilities.",
+            command="PreflightManager.run",
+        )
+        return
+    try:
+        reason = _check_screen_vision_model_split(settings)
+    except PermissionError as exc:
+        report.add("screen_vision_model_split", "skipped", str(exc), command="screencapture + vision model")
+    except LookupError as exc:
+        report.add("screen_vision_model_split", "skipped", str(exc), command="screencapture + vision model")
+    except Exception as exc:
+        report.add(
+            "screen_vision_model_split",
+            "failed",
+            str(exc) or exc.__class__.__name__,
+            command="screencapture + vision model",
+        )
+    else:
+        report.add("screen_vision_model_split", "passed", reason, command="screencapture + vision model")
+
+
+def _check_screen_vision_model_split(settings: Settings) -> str:
+    from runtime.vision import vision_model_available, vision_model_name
+
+    result = _run_cert_preflight(settings)
+    if not result.backend_reachable:
+        raise LookupError(f"Local model backend is unreachable: {_cert_preflight_settings(settings).API_BASE_URL}")
+    if result.models_missing:
+        raise LookupError(f"Configured local models are missing: {', '.join(result.models_missing)}")
+    if not result.screen_capture_available:
+        raise PermissionError("Screen capture is unavailable on this Mac.")
+    model = vision_model_name(settings)
+    if not vision_model_available(settings, result):
+        raise LookupError(f"Configured vision model is not confirmed vision-capable: {model}")
+    return f"Screen capture is available and {model} is confirmed vision-capable."
+
+
+def _check_local_whisper_tts_contract(report: CertificationReport, settings: Settings) -> None:
+    if not settings.LIVE_SPEECH_ENABLED:
+        report.add(
+            "local_whisper_tts",
+            "skipped",
+            "Speech output is disabled in settings.",
+            command="wh whisper",
+        )
+        return
+    _guarded(report, "local_whisper_tts", lambda: asyncio.run(_check_local_whisper_tts(settings)), command="wh whisper")
+
+
+async def _check_local_whisper_tts(settings: Settings) -> str:
+    from runtime.models import LiveRuntimeState, PreflightResult
+    from runtime.speech_controller import SpeechController
+
+    wh_bin = _resolve_cert_wh_bin(settings)
+    if wh_bin is None:
+        raise RuntimeError("Local Whisper CLI was not resolved.")
+    preflight = PreflightResult(
+        backend_reachable=True,
+        models_ready=[settings.MODEL],
+        speech_available=True,
+        wh_bin=wh_bin,
+    )
+    state = LiveRuntimeState.from_preflight(preflight, settings=settings)
+    controller = SpeechController(state, cooldown_ms=0)
+    await controller.speak("Eyra certification.")
+    proc = controller._speaking_proc
+    try:
+        if proc is None:
+            raise RuntimeError("Local Whisper TTS did not launch.")
+        return "Local Whisper TTS launched through the resolved wh binary and was interruptible."
+    finally:
+        await controller.interrupt()
+
+
+def _resolve_cert_wh_bin(settings: Settings) -> str | None:
+    from runtime.preflight import PreflightManager
+
+    return PreflightManager(settings)._resolve_wh()
 
 
 def _check_job_persistence(store: DurableJobStore) -> str:
@@ -681,6 +784,112 @@ def _check_web_runtime_contracts(report: CertificationReport, tmp_path: Path) ->
     )
     _guarded(report, "web_trigger_api", lambda: _check_web_trigger_api(web_root), command="/api/triggers")
     _guarded(report, "capability_privacy_answers", lambda: _check_capability_privacy_answers(web_root))
+
+
+def _check_enabled_browser_tool_contract(report: CertificationReport, settings: Settings, tmp_path: Path) -> None:
+    if not settings.NETWORK_TOOLS_ENABLED:
+        report.add(
+            "browser_enabled_open_url",
+            "skipped",
+            "Network/browser tools are disabled in settings.",
+            command="NETWORK_TOOLS_ENABLED=true open_url",
+        )
+        return
+    _guarded(
+        report,
+        "browser_enabled_open_url",
+        lambda: asyncio.run(_check_browser_enabled_open_url(settings, tmp_path / "browser-tool")),
+        command="open_url",
+    )
+
+
+async def _check_browser_enabled_open_url(settings: Settings, root: Path) -> str:
+    from runtime.tooling import build_tool_registry
+    from tools.browser import BrowserSession
+
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "index.html").write_text(
+        "<html><body><main>"
+        "Eyra local browser certification page. "
+        "This page is served from localhost so the enabled browser path can be checked without external network access. "
+        "</main></body></html>"
+    )
+    server, thread = _start_static_cert_server(root)
+    session = BrowserSession()
+    try:
+        registry = build_tool_registry(settings, browser_session=session)
+        names = {schema["function"]["name"] for schema in registry.to_openai_tools(include_costly=True)}
+        if "open_url" not in names:
+            raise RuntimeError("open_url was not registered while network tools were enabled.")
+        result = await registry.execute(
+            "open_url",
+            json.dumps({"url": f"http://127.0.0.1:{server.server_port}/index.html"}),
+        )
+        if "Eyra local browser certification page" not in result.content:
+            raise RuntimeError("open_url did not return the local certification page content.")
+        return "Enabled browser registry opened a local HTTP page with Playwright."
+    finally:
+        await session.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+class _QuietStaticHandler(SimpleHTTPRequestHandler):
+    def log_message(self, _format: str, *_args) -> None:
+        pass
+
+
+def _start_static_cert_server(root: Path) -> tuple[ThreadingHTTPServer, Thread]:
+    handler = partial(_QuietStaticHandler, directory=str(root))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
+
+
+def _check_enabled_os_tool_contract(report: CertificationReport, settings: Settings, tmp_path: Path) -> None:
+    if not settings.OS_TOOLS_ENABLED:
+        report.add(
+            "os_enabled_list_open_apps",
+            "skipped",
+            "OS tools are disabled in settings.",
+            command="OS_TOOLS_ENABLED=true list_open_apps",
+        )
+        return
+    try:
+        reason = asyncio.run(_check_os_enabled_list_open_apps(settings, tmp_path / "os-tool"))
+    except PermissionError as exc:
+        report.add("os_enabled_list_open_apps", "skipped", str(exc), command="list_open_apps")
+    except Exception as exc:
+        report.add("os_enabled_list_open_apps", "failed", str(exc) or exc.__class__.__name__, command="list_open_apps")
+    else:
+        report.add("os_enabled_list_open_apps", "passed", reason, command="list_open_apps")
+
+
+async def _check_os_enabled_list_open_apps(settings: Settings, root: Path) -> str:
+    from runtime.tooling import build_tool_registry
+
+    root.mkdir(parents=True, exist_ok=True)
+    safe_settings = replace(
+        settings,
+        FILESYSTEM_ALLOWED_PATHS=str(root),
+        FILESYSTEM_DEFAULT_PATH=str(root),
+    )
+    registry = build_tool_registry(safe_settings)
+    names = {schema["function"]["name"] for schema in registry.to_openai_tools(include_costly=True)}
+    if "list_open_apps" not in names:
+        raise RuntimeError("list_open_apps was not registered while OS tools were enabled.")
+    result = await registry.execute("list_open_apps", "{}")
+    if result.content.startswith("Could not list open apps:"):
+        lowered = result.content.lower()
+        if "permission" in lowered or "not authorized" in lowered or "not allowed" in lowered:
+            raise PermissionError("macOS Automation/Accessibility permission is not available for list_open_apps.")
+        raise RuntimeError(result.content)
+    payload = json.loads(result.content)
+    if not isinstance(payload.get("apps"), list):
+        raise RuntimeError("list_open_apps did not return an apps list.")
+    return "Enabled OS tool registry listed visible macOS applications."
 
 
 def _web_cert_settings(root: Path) -> Settings:

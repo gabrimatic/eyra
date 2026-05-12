@@ -25,6 +25,7 @@ def test_certification_matrix_contains_required_structured_rows(tmp_path):
         "real_local_model_startup",
         "typed_command_path",
         "voice_diagnostics",
+        "local_whisper_tts",
         "job_persistence",
         "task_logs",
         "task_artifacts",
@@ -62,7 +63,10 @@ def test_certification_matrix_contains_required_structured_rows(tmp_path):
         "web_job_logs_artifacts_api",
         "web_trigger_api",
         "capability_privacy_answers",
+        "screen_vision_model_split",
+        "browser_enabled_open_url",
         "network_disabled_refusal",
+        "os_enabled_list_open_apps",
         "os_tools_disabled_refusal",
         "mcp_disabled_default",
         "agent_bridge_disabled_default",
@@ -260,3 +264,125 @@ def test_certification_exercises_terminal_command_rows(tmp_path):
     assert rows["typed_command_path"].status == "passed"
     assert rows["real_local_model_startup"].status == "skipped"
     assert "mock" in rows["real_local_model_startup"].reason.lower()
+
+
+def test_certification_exercises_local_whisper_tts_when_speech_enabled(tmp_path, monkeypatch):
+    from runtime.certification import run_certification
+    from utils.settings import Settings
+
+    calls = []
+
+    class FakeProcess:
+        returncode = None
+
+        def terminate(self):
+            self.returncode = 0
+
+        async def wait(self):
+            self.returncode = 0
+            return 0
+
+    async def fake_create_subprocess_exec(*args, **_kwargs):
+        calls.append(args)
+        return FakeProcess()
+
+    import runtime.certification as certification
+
+    monkeypatch.setattr(certification, "_resolve_cert_wh_bin", lambda _settings: "/tmp/fake-wh")
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_create_subprocess_exec)
+    settings = Settings(
+        USE_MOCK_CLIENT=True,
+        LIVE_LISTENING_ENABLED=False,
+        LIVE_SPEECH_ENABLED=True,
+        JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+        TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+    )
+
+    report = run_certification(settings=settings, include_physical=False)
+    rows = {row.name: row for row in report.rows}
+
+    assert rows["local_whisper_tts"].status == "passed"
+    assert calls[0][:2] == ("/tmp/fake-wh", "whisper")
+
+
+def test_certification_exercises_enabled_browser_tool_path(tmp_path):
+    from runtime.certification import run_certification
+    from utils.settings import Settings
+
+    settings = Settings(
+        USE_MOCK_CLIENT=True,
+        LIVE_LISTENING_ENABLED=False,
+        LIVE_SPEECH_ENABLED=False,
+        NETWORK_TOOLS_ENABLED=True,
+        FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+        FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+        JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+        TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+    )
+
+    report = run_certification(settings=settings, include_physical=False)
+    rows = {row.name: row for row in report.rows}
+
+    assert rows["browser_enabled_open_url"].status == "passed"
+
+
+def test_certification_exercises_enabled_os_tool_path(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from runtime.certification import run_certification
+    from utils.settings import Settings
+
+    def fake_run(argv, **_kwargs):
+        if argv[:2] == ["osascript", "-e"]:
+            return SimpleNamespace(returncode=0, stdout="Terminal\n", stderr="")
+        raise AssertionError(f"unexpected subprocess call: {argv}")
+
+    monkeypatch.setattr("tools.operator.subprocess.run", fake_run)
+    settings = Settings(
+        USE_MOCK_CLIENT=True,
+        LIVE_LISTENING_ENABLED=False,
+        LIVE_SPEECH_ENABLED=False,
+        OS_TOOLS_ENABLED=True,
+        FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+        FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+        JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+        TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+    )
+
+    report = run_certification(settings=settings, include_physical=False)
+    rows = {row.name: row for row in report.rows}
+
+    assert rows["os_enabled_list_open_apps"].status == "passed"
+
+
+def test_certification_exercises_screen_vision_model_split_when_available(tmp_path, monkeypatch):
+    import runtime.certification as certification
+    from runtime.certification import run_certification
+    from runtime.models import PreflightResult
+    from utils.settings import Settings
+
+    monkeypatch.setattr(
+        certification,
+        "_run_cert_preflight",
+        lambda _settings: PreflightResult(
+            backend_reachable=True,
+            models_ready=["text-model", "vision-model"],
+            screen_capture_available=True,
+            vision_capability_checked_models=["vision-model"],
+            vision_capable_models=["vision-model"],
+        ),
+    )
+    settings = Settings(
+        USE_MOCK_CLIENT=False,
+        MODEL="text-model",
+        VISION_MODEL="vision-model",
+        LIVE_LISTENING_ENABLED=False,
+        LIVE_SPEECH_ENABLED=False,
+        JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+        TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+    )
+
+    report = run_certification(settings=settings, include_physical=False)
+    rows = {row.name: row for row in report.rows}
+
+    assert rows["screen_vision_model_split"].status == "passed"
