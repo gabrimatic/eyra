@@ -703,6 +703,11 @@ class TestVoiceCommand:
 
     def test_voice_on_enables_both(self):
         session, state = self._make_session()
+
+        async def idle_voice_loop():
+            return None
+
+        session._voice_input_loop = idle_voice_loop
         _run(session._handle_command("/voice off"))
         _run(session._handle_command("/voice on"))
         assert state.listening_enabled is True
