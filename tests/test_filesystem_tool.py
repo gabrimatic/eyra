@@ -377,6 +377,27 @@ class TestTrashTools:
 
         _run(run())
 
+    def test_move_to_trash_uses_unique_destination_name(self, tmp_path):
+        async def run():
+            root = tmp_path / "root"
+            trash_root = tmp_path / "trash"
+            root.mkdir()
+            trash_root.mkdir()
+            path = root / "trash-me.txt"
+            path.write_text("recoverable")
+            tool = MoveToTrashTool(allowed_roots=(root,))
+            tool._trash = trash_root.resolve()
+
+            trash_result = await tool.execute(path=str(path))
+            trash_path = Path(trash_result.content.split(" -> ", 1)[1])
+
+            assert trash_path.parent == trash_root
+            assert trash_path.name != "trash-me.txt"
+            assert trash_path.name.startswith("trash-me-")
+            assert trash_path.read_text() == "recoverable"
+
+        _run(run())
+
     def test_delete_permanently_requires_exact_approval(self):
         async def run():
             with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as d:

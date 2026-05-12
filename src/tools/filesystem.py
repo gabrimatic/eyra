@@ -953,12 +953,14 @@ class MoveToTrashTool(BaseTool):
         return ToolResult(content=f"Moved to Trash: {source} -> {destination}")
 
     def _unique_trash_path(self, name: str) -> Path:
-        candidate = self._trash / name
-        if not candidate.exists():
-            return candidate
-        stem = candidate.stem
-        suffix = candidate.suffix
-        return self._trash / f"{stem}-{uuid.uuid4().hex[:8]}{suffix}"
+        original = Path(name)
+        stem = original.stem
+        suffix = original.suffix
+        for _ in range(10):
+            candidate = self._trash / f"{stem}-{uuid.uuid4().hex[:8]}{suffix}"
+            if not candidate.exists():
+                return candidate
+        return self._trash / f"{stem}-{uuid.uuid4().hex}{suffix}"
 
 
 class RestoreFromTrashTool(BaseTool):
