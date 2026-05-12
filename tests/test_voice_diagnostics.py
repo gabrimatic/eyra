@@ -102,6 +102,31 @@ def test_microphone_diagnostic_reports_all_zero_audio():
     assert "silent/all-zero" in report.check("captured_audio").reason
 
 
+def test_microphone_diagnostic_probes_alternate_device_after_all_zero_audio():
+    from runtime.voice_diagnostics import VoiceDiagnostics
+
+    settings = Settings(VOICE_DEBUG_RECORD_SECONDS=1, VOICE_INPUT_DEVICE="1")
+    devices = [
+        {"index": 1, "name": "Silent Mic", "max_input_channels": 1},
+        {"index": 2, "name": "Working Mic", "max_input_channels": 1},
+    ]
+    selected_stream = _mock_stream([np.zeros(FRAME_SAMPLES, dtype=np.int16)])
+    alternate_stream = _mock_stream([np.full(FRAME_SAMPLES, 1200, dtype=np.int16)])
+
+    with patch("runtime.voice_diagnostics.sd.query_devices", return_value=devices):
+        with patch("runtime.voice_diagnostics.sd.check_input_settings"):
+            with patch(
+                "runtime.voice_diagnostics.sd.InputStream",
+                side_effect=[selected_stream, alternate_stream],
+            ) as mock_stream:
+                report = VoiceDiagnostics(settings=settings, wh_bin="/opt/wh").run_microphone_checks()
+
+    assert report.check("captured_audio").status == "failed"
+    assert report.check("alternate_input_device").status == "passed"
+    assert "VOICE_INPUT_DEVICE=2" in report.check("alternate_input_device").reason
+    assert [call.kwargs["device"] for call in mock_stream.call_args_list] == [1, 2]
+
+
 def test_microphone_diagnostic_reports_nonzero_audio_and_overflow():
     from runtime.voice_diagnostics import VoiceDiagnostics
 

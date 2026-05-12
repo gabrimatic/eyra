@@ -86,6 +86,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - File-appears triggers in terminal and Web now wait for real path existence instead of failing early with “Not a file.”
 - Web capability and privacy questions now use deterministic local runtime answers instead of model chat.
 - Voice diagnostics now skip unattended no-speech VAD and ASR checks instead of failing a healthy microphone capture with no human speech.
+- Voice diagnostics now probe alternate input devices after all-zero microphone capture and report the exact `VOICE_INPUT_DEVICE` value when another device delivers audio.
 - Trash moves now use unique destination names so concurrent or repeated same-name deletes cannot overwrite another recoverable Trash item.
 
 ## [4.0.0] - 2026-05-11

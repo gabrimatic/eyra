@@ -100,6 +100,16 @@ def resolve_input_device(selector: str | int | None, devices: list[dict[str, Any
     return int(matches[0].get("index"))
 
 
+def _default_input_index() -> int | None:
+    try:
+        default_device = sd.default.device
+        if isinstance(default_device, (list, tuple)) and default_device:
+            return int(default_device[0])
+        return int(default_device)
+    except Exception:
+        return None
+
+
 class VoiceDiagnostics:
     """Runs bounded local diagnostics without sending audio off the machine."""
 
@@ -210,12 +220,61 @@ class VoiceDiagnostics:
                 "failed",
                 "All-zero audio can mean microphone permission, a muted input, or the wrong input device.",
             )
+            report.add("alternate_input_device", *self._probe_alternate_input_device(devices, selected_device))
         report.add("stream_overflow", "failed" if overflowed else "passed", "Input stream reported overflow." if overflowed else "No overflow reported.")
         vad_status, vad_reason = self._vad_check(audio)
         self._last_vad_speech_detected = vad_status == "passed"
         report.add("vad_detected_speech", vad_status, vad_reason)
         self._last_audio_path = self._maybe_save_audio(audio, report)
         return report
+
+    def _probe_alternate_input_device(self, devices: list[dict[str, Any]], selected_device: int | str | None) -> tuple[str, str]:
+        selected_index = selected_device if isinstance(selected_device, int) else _default_input_index()
+        candidates = [
+            device
+            for device in devices
+            if int(device.get("max_input_channels", 0) or 0) > 0
+            and int(device.get("index", -1)) != selected_index
+        ]
+        if not candidates:
+            return "skipped", "No alternate input devices were available to probe."
+
+        failures: list[str] = []
+        frame_count = max(1, int(min(self.record_seconds, 1) * self.sample_rate / FRAME_SAMPLES))
+        for device in candidates:
+            index = int(device.get("index", -1))
+            name = str(device.get("name", index))
+            try:
+                sd.check_input_settings(
+                    device=index,
+                    channels=CHANNELS,
+                    samplerate=self.sample_rate,
+                    dtype=DTYPE,
+                )
+                frames: list[np.ndarray] = []
+                with sd.InputStream(
+                    samplerate=self.sample_rate,
+                    device=index,
+                    channels=CHANNELS,
+                    dtype=DTYPE,
+                    blocksize=FRAME_SAMPLES,
+                ) as stream:
+                    for _ in range(frame_count):
+                        try:
+                            data, _overflow = stream.read(FRAME_SAMPLES)
+                        except StopIteration:
+                            break
+                        frame = data[:, 0] if getattr(data, "ndim", 1) > 1 else data.flatten()
+                        frames.append(frame.copy())
+                if frames and np.any(np.concatenate(frames).astype(np.int16, copy=False)):
+                    return "passed", f"Alternate input '{name}' delivered nonzero audio. Set VOICE_INPUT_DEVICE={index}."
+                failures.append(f"{name}: all-zero")
+            except Exception as exc:
+                failures.append(f"{name}: {exc}")
+
+        detail = "; ".join(failures[:3])
+        suffix = f" ({detail})" if detail else ""
+        return "failed", f"No alternate input device delivered nonzero audio{suffix}."
 
     def _vad_check(self, audio: np.ndarray) -> tuple[str, str]:
         if not np.any(audio):
