@@ -15,7 +15,7 @@ _SCREEN_CUES = re.compile(
     r"|"
     rf"\b(look(?:ing)?\s+at|show\s+me|read\s+the|text\s+on|code\s+on|what'?s\s+on)\s+(the\s+)?({_UI_NOUNS}|this|that|it|here)\b"
     r"|"
-    r"\bwhat\s+(?:i'?m|i am)\s+looking\s+at\b"
+    r"\b(?:what\s+(?:i'?m|i am)\s+looking\s+at|what\s+am\s+i\s+looking\s+at)\b"
     r"|"
     r"\b(what\s+is\s+(this|that)|what'?s\s+(this|that)|see\s+(this|that|here)|explain\s+(this|that))\b",
     re.I,
@@ -33,7 +33,7 @@ def requires_filesystem(text: str) -> bool:
     """Return True when a request likely needs local filesystem context."""
     return bool(
         re.search(
-            r"\b(file|folder|pdf|desktop|documents|downloads|clipboard|move|copy|write|create|open|read)\b",
+            r"\b(file|folder|pdf|desktop|documents|downloads|clipboard|move|copy|write|create|open|read|remove|delete|trash)\b",
             text,
             re.I,
         )
@@ -42,7 +42,10 @@ def requires_filesystem(text: str) -> bool:
 
 def requires_network(text: str) -> bool:
     """Return True when a request needs opt-in network tools."""
-    return bool(re.search(r"https?://|\b(website|web page|webpage|weather|browse|search the web)\b", text, re.I))
+    return bool(
+        re.search(r"https?://|\b(website|web page|webpage|weather|browse|search the web)\b", text, re.I)
+        or re.search(r"\b(?:open|read|summarize|visit|go to)\s+[a-z0-9-]+(?:\.[a-z0-9-]+)+\b", text, re.I)
+    )
 
 
 def extract_pdf_path(text: str) -> str | None:
@@ -73,7 +76,7 @@ def should_background_task(text: str) -> bool:
         return True
     return bool(
         re.search(
-            r"\b(summarize|read|open|move|copy|create|write|edit|organize|inspect|translate|pdf|file|folder|website)\b",
+            r"\b(summarize|read|open|move|copy|create|write|edit|organize|inspect|translate|pdf|file|folder|website|remove|delete|trash)\b",
             lowered,
         )
     )

@@ -40,8 +40,14 @@ class Settings:
     TOOL_TIMEOUT_SECONDS: int = 30
     MODEL_CONCURRENCY: int = 1
     TASK_STATUS_UPDATES: bool = True
+    JOB_STORE_PATH: str = "~/.local/share/eyra/jobs.sqlite3"
+    TRIGGER_STORE_PATH: str = "~/.local/share/eyra/triggers.sqlite3"
+    TRIGGER_CHECK_INTERVAL_SECONDS: float = 0.5
+    TRIGGER_TIMEOUT_SECONDS: int = 300
     # OS/operator tools are powerful and therefore opt-in. They stay local.
     OS_TOOLS_ENABLED: bool = False
+    # Optional local OCR command for screen text extraction. It must read PNG bytes from stdin.
+    SCREEN_OCR_COMMAND: str = ""
     # External agent bridges are opt-in and disabled by default.
     AGENT_TOOLS_ENABLED: bool = False
     # MCP bridges are opt-in and disabled by default.
@@ -118,7 +124,12 @@ class Settings:
             TOOL_TIMEOUT_SECONDS=_int("TOOL_TIMEOUT_SECONDS", "30"),
             MODEL_CONCURRENCY=_int("MODEL_CONCURRENCY", "1"),
             TASK_STATUS_UPDATES=_bool("TASK_STATUS_UPDATES", "true"),
+            JOB_STORE_PATH=os.getenv("JOB_STORE_PATH", "~/.local/share/eyra/jobs.sqlite3"),
+            TRIGGER_STORE_PATH=os.getenv("TRIGGER_STORE_PATH", "~/.local/share/eyra/triggers.sqlite3"),
+            TRIGGER_CHECK_INTERVAL_SECONDS=_float_range("TRIGGER_CHECK_INTERVAL_SECONDS", "0.5", 0.01, 60.0),
+            TRIGGER_TIMEOUT_SECONDS=_int("TRIGGER_TIMEOUT_SECONDS", "300"),
             OS_TOOLS_ENABLED=_bool("OS_TOOLS_ENABLED", "false"),
+            SCREEN_OCR_COMMAND=os.getenv("SCREEN_OCR_COMMAND", ""),
             AGENT_TOOLS_ENABLED=_bool("AGENT_TOOLS_ENABLED", "false"),
             MCP_TOOLS_ENABLED=_bool("MCP_TOOLS_ENABLED", "false"),
             MCP_CONFIG_PATH=os.getenv("MCP_CONFIG_PATH", "~/.config/eyra/mcp.json"),

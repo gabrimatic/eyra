@@ -553,6 +553,7 @@ class TestScreenContextDetection:
         assert session._needs_screen_context("what is that button?") is True
         assert session._needs_screen_context("read the text on the screen") is True
         assert session._needs_screen_context("what's on the screen?") is True
+        assert session._needs_screen_context("what am I looking at?") is True
         assert session._needs_screen_context("show me the dialog") is True
 
     def test_knowledge_questions_skip_screen(self):

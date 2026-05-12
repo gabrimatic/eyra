@@ -7,10 +7,13 @@ import re
 import shlex
 import shutil
 import subprocess
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from chat.capture import capture_screenshot_in_memory
+from runtime.capabilities import build_capability_snapshot
 from tools.approval import GLOBAL_APPROVAL_MANAGER, ApprovalManager, approval_required_message
 from tools.base import BaseTool, ToolResult
 from tools.filesystem import _resolve
@@ -95,6 +98,7 @@ class DiscoverCapabilitiesTool(BaseTool):
         return _json(
             {
                 "offlineByDefault": True,
+                "capabilities": build_capability_snapshot(self.settings),
                 "tools": {
                     "filesystem": True,
                     "screen": True,
@@ -359,6 +363,73 @@ class SearchFilesTool(BaseTool):
         return ToolResult(content="\n".join(matches) if matches else "No matches.")
 
 
+class ExtractScreenTextTool(BaseTool):
+    name = "extract_screen_text"
+    description = (
+        "Extract visible text from the current screen using a configured local OCR command. "
+        "Use this when exact screen text is needed and no network OCR should be used."
+    )
+    parameters = {"type": "object", "properties": {}}
+    costly = True
+
+    def __init__(self, ocr_command: str = ""):
+        self.ocr_command = ocr_command.strip()
+
+    async def execute(self, **_) -> ToolResult:
+        if not self.ocr_command:
+            return ToolResult(
+                content=(
+                    "SCREEN_OCR_COMMAND is not set. Configure a local OCR command that reads PNG bytes "
+                    "from stdin to enable local OCR screen text extraction."
+                )
+            )
+
+        try:
+            image = await capture_screenshot_in_memory()
+        except Exception:
+            return ToolResult(
+                content=(
+                    "Screen recording permission may be required before local OCR can read the screen. "
+                    "Allow Eyra or your terminal in System Settings > Privacy & Security > Screen Recording, then try again."
+                )
+            )
+
+        png = BytesIO()
+        image.save(png, format="PNG")
+        return await asyncio.to_thread(self._run_ocr, png.getvalue())
+
+    def _run_ocr(self, png_bytes: bytes) -> ToolResult:
+        argv = shlex.split(self.ocr_command)
+        if not argv:
+            return ToolResult(content="SCREEN_OCR_COMMAND is empty. Configure a local OCR command.")
+        try:
+            completed = subprocess.run(
+                argv,
+                input=png_bytes,
+                capture_output=True,
+                timeout=20,
+                check=False,
+            )
+        except FileNotFoundError:
+            return ToolResult(content=f"Local OCR command not found: {argv[0]}")
+        except subprocess.TimeoutExpired:
+            return ToolResult(content="Local OCR timed out after 20s. Try a faster OCR command or a smaller screen region.")
+
+        stdout = completed.stdout.decode("utf-8", errors="replace") if isinstance(completed.stdout, bytes) else completed.stdout
+        stderr = completed.stderr.decode("utf-8", errors="replace") if isinstance(completed.stderr, bytes) else completed.stderr
+        if completed.returncode != 0:
+            detail = _clip((stderr or stdout or "No error details.").strip(), 1000)
+            return ToolResult(content=f"Local OCR failed with exit code {completed.returncode}: {detail}")
+        return _json(
+            {
+                "ocr": "local",
+                "offlineByDefault": True,
+                "source": "screen",
+                "text": stdout.strip(),
+            }
+        )
+
+
 class ListProcessesTool(BaseTool):
     name = "list_processes"
     description = "List local processes by CPU usage for OS-status questions."
@@ -380,6 +451,104 @@ class ListProcessesTool(BaseTool):
             return ToolResult(content=f"Could not list processes: {completed.stderr.strip()}")
         lines = completed.stdout.splitlines()
         return ToolResult(content="\n".join(lines[: limit + 1]))
+
+
+class GetAccessibilityTreeTool(BaseTool):
+    name = "get_accessibility_tree"
+    description = (
+        "Read a bounded accessibility snapshot for the frontmost macOS app using local System Events. "
+        "Use this to ground UI actions before clicking or typing. Requires macOS Accessibility/Automation permission."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 100}},
+    }
+    costly = True
+
+    async def execute(self, limit: int = 50, **_) -> ToolResult:
+        limit = max(1, min(int(limit or 50), 100))
+        script = f"""
+set maxItems to {limit}
+tell application "System Events"
+  set frontProc to first application process whose frontmost is true
+  set appName to name of frontProc
+  set windowName to ""
+  try
+    set windowName to name of front window of frontProc
+  end try
+  set output to "app=" & appName & linefeed & "window=" & windowName
+  set itemCount to 0
+  try
+    repeat with itemRef in entire contents of front window of frontProc
+      if itemCount is greater than or equal to maxItems then exit repeat
+      set itemRole to ""
+      set itemTitle to ""
+      set enabledText to ""
+      try
+        set itemRole to role of itemRef
+      end try
+      try
+        set itemTitle to name of itemRef
+      end try
+      try
+        set enabledText to "enabled=" & ((enabled of itemRef) as text)
+      end try
+      if itemRole is not "" then
+        set output to output & linefeed & itemRole & "|" & itemTitle & "|" & enabledText
+        set itemCount to itemCount + 1
+      end if
+    end repeat
+  end try
+  return output
+end tell
+"""
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return self._error_result(completed.stderr)
+        return _json(self._parse_output(completed.stdout, limit))
+
+    def _error_result(self, stderr: str) -> ToolResult:
+        lowered = stderr.lower()
+        if "not authorized" in lowered or "not allowed" in lowered or "accessibility" in lowered:
+            return ToolResult(
+                content=(
+                    "Accessibility permission is required to inspect the frontmost app. "
+                    "Enable it for the terminal running Eyra in System Settings > Privacy & Security > Accessibility."
+                )
+            )
+        return ToolResult(content=f"Could not read accessibility tree: {_clip(stderr.strip() or 'unknown error', 800)}")
+
+    def _parse_output(self, stdout: str, limit: int) -> dict:
+        app = ""
+        window = ""
+        elements: list[dict[str, object]] = []
+        for line in stdout.splitlines():
+            if line.startswith("app="):
+                app = line.split("=", 1)[1]
+            elif line.startswith("window="):
+                window = line.split("=", 1)[1]
+            elif "|" in line and len(elements) < limit:
+                role, title, enabled = (line.split("|", 2) + ["", "", ""])[:3]
+                elements.append(
+                    {
+                        "role": role,
+                        "title": title,
+                        "enabled": enabled.split("=", 1)[1].lower() == "true" if enabled.startswith("enabled=") else None,
+                    }
+                )
+        return {
+            "frontmostApp": app,
+            "window": window,
+            "elementCount": len(elements),
+            "elements": elements,
+        }
 
 
 class GetLaunchAgentStatusTool(BaseTool):
@@ -506,6 +675,231 @@ class FetchUrlTool(BaseTool):
         return ToolResult(content=text)
 
 
+class ListOpenAppsTool(BaseTool):
+    name = "list_open_apps"
+    description = "List visible macOS applications. Local-only and read-only."
+    parameters = {"type": "object", "properties": {}}
+    costly = False
+
+    async def execute(self, **_) -> ToolResult:
+        script = """
+tell application "System Events"
+  set output to ""
+  repeat with proc in application processes whose visible is true
+    set output to output & name of proc & linefeed
+  end repeat
+  return output
+end tell
+"""
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return ToolResult(content=f"Could not list open apps: {completed.stderr.strip() or 'macOS permission denied.'}")
+        apps = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+        return _json({"apps": apps})
+
+
+class ListWindowsTool(BaseTool):
+    name = "list_windows"
+    description = "List window titles for a visible macOS application. Local-only and read-only."
+    parameters = {
+        "type": "object",
+        "properties": {"app": {"type": "string", "description": "Application name. Defaults to the frontmost app."}},
+    }
+    costly = False
+
+    async def execute(self, app: str = "", **_) -> ToolResult:
+        if not app.strip():
+            app = await self._frontmost_app()
+            if not app:
+                return ToolResult(content="Could not determine the frontmost app.")
+        script = f"""
+tell application "System Events"
+  if not (exists application process {json.dumps(app)}) then return ""
+  tell application process {json.dumps(app)}
+    set output to ""
+    repeat with win in windows
+      set output to output & name of win & linefeed
+    end repeat
+    return output
+  end tell
+end tell
+"""
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return ToolResult(content=f"Could not list windows for {app}: {completed.stderr.strip()}")
+        windows = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+        return _json({"app": app, "windows": windows})
+
+    async def _frontmost_app(self) -> str:
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            ["osascript", "-e", 'tell application "System Events" to get name of first application process whose frontmost is true'],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return completed.stdout.strip() if completed.returncode == 0 else ""
+
+
+class WindowActionTool(BaseTool):
+    name = "window_action"
+    description = (
+        "Close, minimize, zoom, fullscreen, move, or resize a macOS application window through System Events. "
+        "Requires server-side approval."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["close", "minimize", "zoom", "fullscreen", "move", "resize"],
+                "description": "Window action to perform.",
+            },
+            "app": {"type": "string", "description": "Application name. Defaults to the frontmost app."},
+            "window": {"type": "string", "description": "Window title. Defaults to the front window."},
+            "x": {"type": "integer", "description": "New window x position for move."},
+            "y": {"type": "integer", "description": "New window y position for move."},
+            "width": {"type": "integer", "description": "New window width for resize."},
+            "height": {"type": "integer", "description": "New window height for resize."},
+            "approval_id": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve this action."},
+        },
+        "required": ["action"],
+    }
+    costly = True
+    _ACTIONS = {"close", "minimize", "zoom", "fullscreen", "move", "resize"}
+
+    def __init__(self, approval_manager: ApprovalManager | None = None):
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(
+        self,
+        action: str = "",
+        app: str = "",
+        window: str = "",
+        x: int = 0,
+        y: int = 0,
+        width: int = 0,
+        height: int = 0,
+        confirmed: bool = False,
+        approval_id: str = "",
+        **_,
+    ) -> ToolResult:
+        action = action.strip().lower()
+        app = app.strip()
+        window = window.strip()
+        if action not in self._ACTIONS:
+            return ToolResult(content=f"Unsupported window action: {action or '(empty)'}")
+        if action == "move" and (x < 0 or y < 0):
+            return ToolResult(content="Window move needs non-negative x and y coordinates.")
+        if action == "resize" and (width <= 0 or height <= 0):
+            return ToolResult(content="Window resize needs positive width and height.")
+        details = {"action": action, "app": app or "frontmost", "window": window or "front", "x": x, "y": y}
+        if action == "resize":
+            details.update({"width": width, "height": height})
+        approval = _approval_or_result(
+            self._approvals,
+            tool_name=self.name,
+            title="window action",
+            details=details,
+            approval_id=approval_id,
+        )
+        if approval is not None:
+            return approval
+        target_app = app or await self._frontmost_app()
+        if not target_app:
+            return ToolResult(content="Could not determine the frontmost app.")
+        script = self._script(action, target_app, window, x, y, width, height)
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return ToolResult(content=f"Could not {action} window: {completed.stderr.strip()}")
+        return ToolResult(content=f"Window {action} applied: {target_app} / {window or 'front window'}")
+
+    async def _frontmost_app(self) -> str:
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            ["osascript", "-e", 'tell application "System Events" to get name of first application process whose frontmost is true'],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return completed.stdout.strip() if completed.returncode == 0 else ""
+
+    def _script(self, action: str, app: str, window: str, x: int, y: int, width: int, height: int) -> str:
+        win_ref = f'window {json.dumps(window)}' if window else "front window"
+        if action == "close":
+            command = "perform action \"AXClose\""
+        elif action == "minimize":
+            command = 'set value of attribute "AXMinimized" to true'
+        elif action == "zoom":
+            command = 'set value of attribute "AXZoomButton" to true'
+        elif action == "fullscreen":
+            command = "perform action \"AXRaise\"\n    keystroke \"f\" using {control down, command down}"
+        elif action == "move":
+            command = f"set position to {{{int(x)}, {int(y)}}}"
+        else:
+            command = f"set size to {{{int(width)}, {int(height)}}}"
+        return f"""
+tell application "System Events"
+  tell application process {json.dumps(app)}
+    tell {win_ref}
+      {command}
+    end tell
+  end tell
+end tell
+"""
+
+
+class ActivateAppTool(BaseTool):
+    name = "activate_app"
+    description = "Bring a running macOS application to the foreground. Local-only."
+    parameters = {
+        "type": "object",
+        "properties": {"name": {"type": "string", "description": "Application name, e.g. Finder."}},
+        "required": ["name"],
+    }
+    costly = True
+
+    async def execute(self, name: str = "", **_) -> ToolResult:
+        if not name.strip():
+            return ToolResult(content="Missing application name.")
+        script = f'tell application "System Events" to set frontmost of application process {json.dumps(name)} to true'
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return ToolResult(content=f"Could not activate {name}: {completed.stderr.strip()}")
+        return ToolResult(content=f"Activated app: {name}")
+
+
 class OpenAppTool(BaseTool):
     name = "open_app"
     description = "Open a macOS application by name. Requires server-side user approval."
@@ -548,6 +942,325 @@ class OpenAppTool(BaseTool):
         return ToolResult(content=f"Opened app: {name}")
 
 
+class QuitAppTool(BaseTool):
+    name = "quit_app"
+    description = "Quit a macOS application. Requires server-side user approval."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Application name, e.g. Preview."},
+            "approval_id": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve this action."},
+        },
+        "required": ["name"],
+    }
+    costly = True
+
+    def __init__(self, approval_manager: ApprovalManager | None = None):
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(self, name: str = "", confirmed: bool = False, approval_id: str = "", **_) -> ToolResult:
+        if not name.strip():
+            return ToolResult(content="Missing application name.")
+        approval = _approval_or_result(
+            self._approvals,
+            tool_name=self.name,
+            title="quit application",
+            details={"name": name},
+            approval_id=approval_id,
+        )
+        if approval is not None:
+            return approval
+        script = f'tell application {json.dumps(name)} to quit'
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return ToolResult(content=f"Could not quit {name}: {completed.stderr.strip()}")
+        return ToolResult(content=f"Quit app: {name}")
+
+
+class UiClickTool(BaseTool):
+    name = "ui_click"
+    description = (
+        "Click a screen coordinate using local macOS automation. Requires user approval because the target app "
+        "may perform actions."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "x": {"type": "integer", "minimum": 0},
+            "y": {"type": "integer", "minimum": 0},
+            "approval_id": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve this action."},
+        },
+        "required": ["x", "y"],
+    }
+    costly = True
+
+    def __init__(self, approval_manager: ApprovalManager | None = None):
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(self, x: int = 0, y: int = 0, confirmed: bool = False, approval_id: str = "", **_) -> ToolResult:
+        x = max(0, int(x))
+        y = max(0, int(y))
+        approval = _approval_or_result(
+            self._approvals,
+            tool_name=self.name,
+            title="UI click",
+            details={"x": x, "y": y},
+            approval_id=approval_id,
+        )
+        if approval is not None:
+            return approval
+        cliclick = shutil.which("cliclick")
+        if not cliclick:
+            return ToolResult(content="UI click needs cliclick. Install with: brew install cliclick")
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            [cliclick, f"c:{x},{y}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return ToolResult(content=f"Could not click {x},{y}: {completed.stderr.strip()}")
+        return ToolResult(content=f"Clicked: {x},{y}")
+
+
+class UiScrollTool(BaseTool):
+    name = "ui_scroll"
+    description = "Scroll the current UI using local macOS automation. Requires user approval."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "direction": {"type": "string", "enum": ["up", "down", "left", "right"]},
+            "amount": {"type": "integer", "minimum": 1, "maximum": 20},
+            "approval_id": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve this action."},
+        },
+        "required": ["direction"],
+    }
+    costly = True
+
+    def __init__(self, approval_manager: ApprovalManager | None = None):
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(
+        self,
+        direction: str = "down",
+        amount: int = 3,
+        confirmed: bool = False,
+        approval_id: str = "",
+        **_,
+    ) -> ToolResult:
+        direction = direction.lower().strip()
+        if direction not in {"up", "down", "left", "right"}:
+            return ToolResult(content="direction must be one of: up, down, left, right.")
+        amount = max(1, min(int(amount or 3), 20))
+        approval = _approval_or_result(
+            self._approvals,
+            tool_name=self.name,
+            title="UI scroll",
+            details={"direction": direction, "amount": amount},
+            approval_id=approval_id,
+        )
+        if approval is not None:
+            return approval
+        cliclick = shutil.which("cliclick")
+        if not cliclick:
+            return ToolResult(content="UI scroll needs cliclick. Install with: brew install cliclick")
+        dx, dy = {
+            "up": (0, amount),
+            "down": (0, -amount),
+            "left": (amount, 0),
+            "right": (-amount, 0),
+        }[direction]
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            [cliclick, f"w:{dx},{dy}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return ToolResult(content=f"Could not scroll {direction}: {completed.stderr.strip()}")
+        return ToolResult(content=f"Scrolled {direction} by {amount}.")
+
+
+class UiDragTool(BaseTool):
+    name = "ui_drag"
+    description = "Drag from one screen coordinate to another using local macOS automation. Requires user approval."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "start_x": {"type": "integer", "minimum": 0},
+            "start_y": {"type": "integer", "minimum": 0},
+            "end_x": {"type": "integer", "minimum": 0},
+            "end_y": {"type": "integer", "minimum": 0},
+            "approval_id": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve this action."},
+        },
+        "required": ["start_x", "start_y", "end_x", "end_y"],
+    }
+    costly = True
+
+    def __init__(self, approval_manager: ApprovalManager | None = None):
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(
+        self,
+        start_x: int = 0,
+        start_y: int = 0,
+        end_x: int = 0,
+        end_y: int = 0,
+        confirmed: bool = False,
+        approval_id: str = "",
+        **_,
+    ) -> ToolResult:
+        start_x = max(0, int(start_x))
+        start_y = max(0, int(start_y))
+        end_x = max(0, int(end_x))
+        end_y = max(0, int(end_y))
+        approval = _approval_or_result(
+            self._approvals,
+            tool_name=self.name,
+            title="UI drag",
+            details={"start_x": start_x, "start_y": start_y, "end_x": end_x, "end_y": end_y},
+            approval_id=approval_id,
+        )
+        if approval is not None:
+            return approval
+        cliclick = shutil.which("cliclick")
+        if not cliclick:
+            return ToolResult(content="UI drag needs cliclick. Install with: brew install cliclick")
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            [
+                cliclick,
+                f"m:{start_x},{start_y}",
+                f"dd:{start_x},{start_y}",
+                f"m:{end_x},{end_y}",
+                f"du:{end_x},{end_y}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return ToolResult(content=f"Could not drag: {completed.stderr.strip()}")
+        return ToolResult(content=f"Dragged: {start_x},{start_y} -> {end_x},{end_y}")
+
+
+class UiTypeTextTool(BaseTool):
+    name = "ui_type_text"
+    description = "Type text into the focused UI element using local macOS automation. Requires user approval."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string"},
+            "approval_id": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve this action."},
+        },
+        "required": ["text"],
+    }
+    costly = True
+
+    def __init__(self, approval_manager: ApprovalManager | None = None):
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(self, text: str = "", confirmed: bool = False, approval_id: str = "", **_) -> ToolResult:
+        approval = _approval_or_result(
+            self._approvals,
+            tool_name=self.name,
+            title="UI text entry",
+            details={"text_length": len(text), "text_preview": text[:80]},
+            approval_id=approval_id,
+        )
+        if approval is not None:
+            return approval
+        script = 'tell application "System Events" to keystroke ' + json.dumps(text)
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return ToolResult(content=f"Could not type text: {completed.stderr.strip()}")
+        return ToolResult(content=f"Typed text ({len(text)} characters).")
+
+
+class PressHotkeyTool(BaseTool):
+    name = "press_hotkey"
+    description = "Press a keyboard shortcut using local macOS automation. Requires user approval."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "key": {"type": "string", "description": "Single key such as s, return, escape, or tab."},
+            "modifiers": {
+                "type": "array",
+                "items": {"type": "string", "enum": ["command", "option", "control", "shift"]},
+            },
+            "approval_id": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve this action."},
+        },
+        "required": ["key"],
+    }
+    costly = True
+
+    def __init__(self, approval_manager: ApprovalManager | None = None):
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(
+        self,
+        key: str = "",
+        modifiers: list[str] | None = None,
+        confirmed: bool = False,
+        approval_id: str = "",
+        **_,
+    ) -> ToolResult:
+        key = str(key).strip().lower()
+        modifiers = [str(mod).strip().lower() for mod in (modifiers or []) if str(mod).strip()]
+        if not key:
+            return ToolResult(content="Missing hotkey key.")
+        approval = _approval_or_result(
+            self._approvals,
+            tool_name=self.name,
+            title="hotkey",
+            details={"key": key, "modifiers": modifiers},
+            approval_id=approval_id,
+        )
+        if approval is not None:
+            return approval
+        using = ""
+        if modifiers:
+            using = " using {" + ", ".join(f"{mod} down" for mod in modifiers) + "}"
+        script = f'tell application "System Events" to keystroke {json.dumps(key)}{using}'
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return ToolResult(content=f"Could not press hotkey: {completed.stderr.strip()}")
+        combo = "+".join([*modifiers, key])
+        return ToolResult(content=f"Pressed hotkey: {combo}")
+
+
 class ShowNotificationTool(BaseTool):
     name = "show_notification"
     description = "Show a local macOS notification for the user."
@@ -575,6 +1288,65 @@ class ShowNotificationTool(BaseTool):
         if completed.returncode != 0:
             return ToolResult(content=f"Could not show notification: {completed.stderr.strip()}")
         return ToolResult(content="Notification shown.")
+
+
+class RunShortcutTool(BaseTool):
+    name = "run_shortcut"
+    description = "Run a local macOS Shortcut by name. Requires server-side approval."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Shortcut name."},
+            "input_text": {"type": "string", "description": "Optional text piped to the shortcut through stdin."},
+            "approval_id": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve this action."},
+        },
+        "required": ["name"],
+    }
+    costly = True
+
+    def __init__(self, approval_manager: ApprovalManager | None = None):
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(
+        self,
+        name: str = "",
+        input_text: str = "",
+        confirmed: bool = False,
+        approval_id: str = "",
+        **_,
+    ) -> ToolResult:
+        name = name.strip()
+        if not name:
+            return ToolResult(content="Missing shortcut name.")
+        shortcuts = shutil.which("shortcuts")
+        if not shortcuts:
+            return ToolResult(content="macOS shortcuts command is not available on this system.")
+        details = {"name": name, "input_length": len(input_text)}
+        approval = _approval_or_result(
+            self._approvals,
+            tool_name=self.name,
+            title="run shortcut",
+            details=details,
+            approval_id=approval_id,
+        )
+        if approval is not None:
+            return approval
+        argv = [shortcuts, "run", name]
+        run_kwargs = {
+            "capture_output": True,
+            "text": True,
+            "timeout": 30,
+            "check": False,
+        }
+        if input_text:
+            argv.extend(["--input-path", "-"])
+            run_kwargs["input"] = input_text
+        completed = await asyncio.to_thread(subprocess.run, argv, **run_kwargs)
+        if completed.returncode != 0:
+            return ToolResult(content=f"Could not run shortcut {name}: {completed.stderr.strip()}")
+        output = completed.stdout.strip()
+        return ToolResult(content=f"Shortcut ran: {name}" + (f"\n{output}" if output else ""))
 
 
 class SetClipboardTool(BaseTool):

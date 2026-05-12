@@ -59,22 +59,38 @@ WEB_UI_ENABLED=true uv run python -m web.server
 Eyra runs the same backend, model, voice, screen, and capability preflight before serving the Web UI. Then open the tokenized URL printed by Eyra. Set `WEB_UI_HOST=0.0.0.0` only when you intentionally want access from other devices on your network.
 By default, every non-health Web UI endpoint requires a session token, including localhost. Keep that URL private.
 
+For one shared terminal and browser runtime, start the terminal app with Web enabled:
+
+```bash
+WEB_UI_ENABLED=true eyra
+```
+
+That shared Web frontend uses the terminal-owned approvals, jobs, task events, trigger state, tools, browser session, and operation history. Running `eyra-web` or `uv run python -m web.server` directly still starts a standalone Web runtime and reports that mode in `/api/health`.
+
 ---
 
 ## What it does
 
 - Live session: one terminal process stays open for typed and spoken input.
 - Responsive coordinator: typed and voice input remain available while workers handle long tasks.
-- Background tasks: long PDF, file, screen, website, and multi-tool work has an id, lifecycle, progress, final result, failure, or cancellation.
+- Background tasks: long PDF, file, screen, website, and multi-tool work has an id, lifecycle, progress, final result, failure, or cancellation. Jobs, logs, and operation ledger entries are persisted locally in SQLite.
+- Local triggers: one-time “when this file appears, move it”, “remind me in 10 minutes to …”, and recurring “every 30 minutes remind me to …” triggers run as bounded background tasks, with definitions and status persisted locally.
 - Voice: Local Whisper handles transcription and speech; Silero VAD decides when you finished speaking.
 - Model routing: one configured model by default, with experimental complexity routing when you turn it on.
 - Local tools: screenshot, time, clipboard, system info, frontmost app, sandboxed Finder selection, PDF text extraction, and sandboxed filesystem access through function calling.
-- Optional OS tools: command execution, URL fetch, process listing, system snapshots, file metadata/search, LaunchAgent status/management, app opening, notifications, and clipboard writes. These stay off until `OS_TOOLS_ENABLED=true` or `NETWORK_TOOLS_ENABLED=true` for URL/network work.
+- Optional OS tools: command execution, URL fetch, process listing, system snapshots, accessibility-tree snapshots, local OCR screen text extraction, file metadata/search, LaunchAgent status/management, app opening, notifications, approved Shortcut execution, and clipboard writes. These stay off until `OS_TOOLS_ENABLED=true` or `NETWORK_TOOLS_ENABLED=true` for URL/network work.
+- Optional UI actions: approved coordinate click, scroll, drag, focused text entry, and hotkey tools are available only when `OS_TOOLS_ENABLED=true`.
+- Optional app/window control: list visible apps, list app windows, activate apps, quit apps with approval, and apply approved window actions such as close, minimize, zoom, fullscreen, move, and resize when `OS_TOOLS_ENABLED=true`.
 - Optional MCP tools: list stdio MCP servers from `MCP_CONFIG_PATH` and call tools only after action-specific approval.
 - Optional agent delegation: inspect Codex/OpenClaw availability and sessions, read bounded redacted session content, use Codex/OpenClaw-compatible tool names, and hand complex work to terminal agents when `AGENT_TOOLS_ENABLED=true`.
-- Optional Web UI: a compact browser interface for text chat, event-driven task status, task cancellation, Local Whisper voice turns, and local voice feedback from a phone or another system.
+- Coding jobs: when agent tools are enabled, “Start a coding job with Codex to …” creates an owned background task, waits for server-side approval, then runs the bounded terminal-agent bridge.
+- Dictation: “Start dictation”, “End dictation”, and “Cancel dictation” capture text locally without model routing. Dictation can save directly to a sandboxed file and supports simple “Literal …” spelling for filenames, codes, and exact text.
+- Corrections: after a failed direct file move/copy/remove, “No, I meant …” can safely retry the same local action with the corrected target name.
+- Operator loop evidence: direct file moves record observe → plan → act → verify → recover details in the local operation ledger, including post-action checks and recovery guidance when verification fails.
+- Optional Web UI: a compact browser interface for text chat, event-driven task status, task cancellation, Local Whisper voice turns, and local voice feedback from a phone or another system. When launched from `eyra`, it shares the terminal runtime; `eyra-web` remains standalone.
 - Optional Realtime voice: online browser voice can use OpenAI Realtime when `REALTIME_VOICE_ENABLED=true` and an OpenAI key is configured.
-- Filesystem safety: common folders are available by default, access stays sandboxed, existing files are not overwritten unless the user explicitly confirms or approves the exact overwrite, binary reads and edits return a clean message, and moves/copies check destination conflicts.
+- Filesystem safety: common folders are available by default, access stays sandboxed, existing files are not overwritten unless the user explicitly confirms or approves the exact overwrite, binary reads and edits return a clean message, moves/copies/renames/duplicates check destination conflicts, append/prepend/compare are bounded text-file operations, zip compression/extraction stays inside the sandbox, and remove/delete requests move items to macOS Trash by default.
+- Capability and privacy reporting: ask “What can you control?”, “Are you local right now?”, or “What would leave my machine?” to get a local runtime snapshot of model, voice, screen, filesystem, Web, Realtime, network, OS, MCP, and agent capability state.
 - Network tools: weather and browser access stay disabled until `NETWORK_TOOLS_ENABLED=true`.
 - Provider support: Ollama, LM Studio, vLLM, OpenRouter, Groq, OpenAI, or any compatible `/v1/chat/completions` endpoint.
 - Image handling: screenshots stay in memory and are never written to disk.
@@ -88,18 +104,37 @@ Eyra runs one live session with a typed channel, a voice channel, a coordinator,
 
 - Voice: [Local Whisper](https://github.com/gabrimatic/local-whisper) handles ASR through Qwen3-ASR and TTS through Kokoro. Eyra records microphone audio with sounddevice, classifies 32ms frames with Silero VAD, and transcribes after a pause.
 - Interruption: Eyra can stop speech output immediately through the shared interrupt path; run `/voice-test` for the physical microphone interruption check on your Mac.
+- Hands-free status: say “Stop” to interrupt speech output, or “Show status” to read the local runtime status without typing `/status`.
 - Coordinator: quick local intents such as task status, cancellation, disabled-network refusals, time checks, and common file actions are handled immediately.
 - Background workers: long or tool-heavy requests are accepted as tasks and run through a worker pipeline. Each task keeps metadata: id, title, original request, state, progress, result, error, tool/network/filesystem/vision flags, and cancellation state.
-- Runtime recovery: `/voice on` rechecks Local Whisper and enables whichever side is ready. ASR and TTS are tracked separately, so speech can keep working while input is still loading.
+- Runtime recovery: `/voice on` rechecks Local Whisper and enables whichever side is ready. ASR and TTS are tracked separately, so speech can keep working while microphone input is unavailable or still loading.
 - Typed input: keyboard input is always available and feeds the same conversation as voice.
-- Tool use: the model can call local function tools for screenshot, time, clipboard, system info, macOS context, PDF extraction, and filesystem work. OS command tools, MCP bridges, agent session inspection, agent delegation, weather, URL fetch, and browser tools are available only after you opt in.
-- Web UI: `eyra-web` runs the same preflight checks before serving, uses the shared intent rules and tool registry, and serves a small local UI with task APIs, approval APIs, auth, and event-driven task updates. Terminal `eyra` stays the main live loop; if `WEB_UI_ENABLED=true`, terminal status points you to the separate `eyra-web` process.
+- Tool use: the model can call local function tools for screenshot, time, clipboard, system info, macOS context, PDF extraction, and filesystem work. OS command tools, UI actions, MCP bridges, agent session inspection, agent delegation, weather, URL fetch, and browser tools are available only after you opt in.
+- Web UI: `WEB_UI_ENABLED=true eyra` starts a browser frontend attached to the terminal-owned runtime. `eyra-web` runs the same preflight checks as a standalone Web runtime. Both use the shared intent rules and tool registry, persist jobs and triggers to the same local stores when configured paths match, and serve a small local UI with task, job-log, artifact, trigger pause/resume/cancel, approval, auth, and event-driven task APIs.
 - Realtime voice: browser Realtime voice is an online option. Eyra mints server-side ephemeral client secrets and never puts the standard OpenAI API key in browser code. Realtime tools are off by default and use a small allowlist when explicitly enabled.
 - Model routing: complexity routing is experimental and off by default. When enabled, `ComplexityScorer` dispatches requests to Simple, Moderate, or Complex tiers.
-- File actions: common move, copy, create, overwrite, and direct read requests use deterministic sandboxed tool calls before involving the model. Existing files are protected until you explicitly say to overwrite.
+- File actions: common move, copy, rename, duplicate, create, overwrite, trash, restore, zip/unzip, and direct read requests use deterministic sandboxed tool calls before involving the model. Existing files are protected until you explicitly say to overwrite, and irreversible deletion requires exact approval.
+- Operation ledger: direct local file changes are recorded with target, action type, risk level, result, and undo metadata where possible. Ask “What changed?” or run `/operations` to inspect recent changes.
+- Operator verification: direct moves verify that the source was removed and the destination exists, and failed moves keep recovery guidance for correction or retry.
+- Undo: “Undo that” reverses recent reversible file operations, including direct moves, Trash moves, and created copies.
+- Capability snapshot: `/capabilities` and matching natural phrases report current control surfaces and the privacy boundary without asking the model.
+- Context snapshot: `/context` and “What is happening?” report the current goal, working directory, recent jobs, and recent changes from local state.
+- Voice approvals: “Approve that”, “Reject that”, “yes”, and “no” resolve a single pending approval locally. If more than one approval is pending, Eyra reads the ids and asks you to choose.
+- Voice options: when a direct file request matches multiple local targets, Eyra reads numbered options. Say “Read the options” to repeat them or “Choose number two” to continue hands-free.
+- Reference grounding: “Move the latest downloaded file to Documents” resolves the newest file in Downloads locally, records the operation, and keeps undo metadata.
+- Named folders: deterministic file commands understand Desktop, Documents, Downloads, Pictures, Movies, Music, and `/tmp`; sandbox roots still decide which of those paths are allowed.
+- Pause/resume: “Pause that” pauses the latest queued task before it starts, and “Resume that” resumes the latest paused task.
+- Triggers: say “When report.pdf appears in my Downloads, move it to Documents.”, “Remind me in 10 minutes to stretch.”, or “Every 30 minutes remind me to stretch.” Inspect triggers with `/triggers` and manage them with `/trigger pause|resume|cancel <id>`.
+- Coding jobs: say “Start a coding job with Codex to update the README.” to create an approved, cancellable terminal-agent task. Ask “What is the coding agent doing?” for status.
+- Dictation: say “Start dictation” to capture text locally, or “Start dictation to a file named note.txt in my Documents.” to save the final text when you say “End dictation.” Use “Cancel dictation” to discard it.
+- Corrections: if a direct file target was wrong and the action failed, say “No, I meant correct-file.txt” to retry that same local action with the corrected name.
+- Triggers: say “When report.pdf appears in my Downloads, move it to Documents”, “Remind me in 10 minutes to stretch”, or “Every 30 minutes remind me to stretch.” Use `/triggers` and `/trigger pause|resume|cancel <id>` to manage local triggers.
 - PDF handling: PDF workers extract text locally first, then summarize the extracted text. If no embedded text is available, Eyra reports that the PDF appears scanned or image-only.
 - Screen handling: screen requests are controller-owned. Eyra captures the screenshot locally, keeps it in memory, then sends it to `VISION_MODEL` (or `MODEL` when `VISION_MODEL` is empty). The vision model does not need native tool calling.
+- Browser actions: when network tools are enabled, Eyra can open pages, click elements, take page screenshots, fill form fields without submitting them, download files after approval to a sandboxed destination, and upload sandboxed local files only after approval.
 - Tool fallback: deterministic controller actions such as time checks, task commands, common file moves/copies/creates/reads, PDF extraction, and screen capture can run without native model tool calling. Open-ended model-driven tool loops still require a tool-capable model and fail clearly when the selected model cannot call tools.
+- Planning: common voice-to-computer requests are normalized into typed task specs with target references, required context, capabilities, actions, risk, verification, and rollback metadata before local execution when a deterministic plan applies.
+- Privacy boundary: capability snapshots include action-specific decisions for model calls, network tools, and Realtime voice, including whether data leaves the machine, what data class leaves, where it goes, and whether the path is allowed by current settings.
 - Approvals: risky OS, LaunchAgent, clipboard, command, MCP-call, agent-delegation, and model-driven overwrite actions use server-side, action-specific approvals. A model-provided `confirmed=true` value is ignored.
 
 ### Preflight
@@ -128,10 +163,21 @@ When `USE_MOCK_CLIENT=true`, backend and model checks are skipped on purpose so 
 | `/goal <text>` | Set session context that guides future replies |
 | `/mode fast\|balanced\|best` | Set quality mode |
 | `/status` | Show current runtime state |
+| `/capabilities` | Show current control surfaces and privacy boundary |
+| `/context` | Show current local context, recent jobs, and recent changes |
 | `/tasks` | Show active tasks and recent completed, failed, or cancelled tasks |
+| `/tasks clear-completed` | Clear completed, failed, and cancelled task/job rows |
 | `/task <id>` | Show detailed task state, progress, result, and error |
+| `/task logs <id>` | Show durable local job logs |
+| `/task artifacts <id>` | Show durable local job artifacts |
+| `/task retry <id>` | Retry a failed, cancelled, or blocked deterministic local job |
+| `/operations` | Show recent local operation ledger entries |
+| `/triggers` | Show local trigger definitions and status |
+| `/trigger pause\|resume\|cancel <id>` | Pause, resume, or cancel a local trigger |
 | `/cancel <id>` | Cancel a queued or running task |
 | `/cancel all` | Cancel all queued or running tasks |
+| `/pause <id>` | Pause a queued task before it starts |
+| `/resume <id>` | Resume a paused queued task |
 | `/approvals` | Show pending risky-action approvals |
 | `/approve <id>` | Approve one exact pending action |
 | `/reject <id>` | Reject one pending action |
@@ -140,7 +186,13 @@ When `USE_MOCK_CLIENT=true`, backend and model checks are skipped on purpose so 
 
 Unknown commands are caught locally and never sent to the model.
 
-The Web UI is a separate process:
+To attach the Web UI to the terminal-owned runtime:
+
+```bash
+WEB_UI_ENABLED=true eyra
+```
+
+To run a standalone Web runtime:
 
 ```bash
 WEB_UI_ENABLED=true uv run python -m web.server
@@ -226,12 +278,18 @@ MAX_WORKER_TOOL_STEPS=8
 TOOL_TIMEOUT_SECONDS=30
 MODEL_CONCURRENCY=1
 TASK_STATUS_UPDATES=true
+JOB_STORE_PATH=~/.local/share/eyra/jobs.sqlite3
+TRIGGER_STORE_PATH=~/.local/share/eyra/triggers.sqlite3
+TRIGGER_CHECK_INTERVAL_SECONDS=0.5
+TRIGGER_TIMEOUT_SECONDS=300
 
 # Optional network tools. Keep false for the local-first default.
 NETWORK_TOOLS_ENABLED=false
 
 # Optional OS, agent, MCP, and network tools. Keep false for the local-first default.
 OS_TOOLS_ENABLED=false
+# Optional local OCR command for screen text extraction. Must read PNG bytes from stdin.
+SCREEN_OCR_COMMAND=
 AGENT_TOOLS_ENABLED=false
 MCP_TOOLS_ENABLED=false
 MCP_CONFIG_PATH=~/.config/eyra/mcp.json
@@ -268,6 +326,8 @@ FILESYSTEM_DEFAULT_PATH=~/Documents
 
 `VISION_MODEL` lets you keep a tool-capable text model and a separate vision model. Example: `MODEL=qwen3:4b` for normal local tool work and `VISION_MODEL=gemma3:4b` for screen questions. If `API_BASE_URL` points to a remote provider, screenshots sent to `VISION_MODEL` leave the machine because you configured that provider.
 
+`SCREEN_OCR_COMMAND` is optional and local-only. When set, `extract_screen_text` captures a screenshot in memory, sends PNG bytes to that command on stdin, and returns the command's text output. Leave it empty unless you have installed a local OCR command that supports stdin.
+
 `WEB_UI_REQUIRE_TOKEN=auto` means all non-health Web UI endpoints require a token. `WEB_UI_REQUIRE_TOKEN=false` is allowed only on localhost. `0.0.0.0` or any non-localhost bind always requires a token. `WEB_UI_TOKEN` can provide your own high-entropy token; if empty, Eyra generates a session token at startup.
 
 `WEB_UI_MAX_REQUEST_BYTES` applies to chat requests, task APIs, and browser audio uploads. Raise it only when you intentionally want longer browser voice turns or larger local requests.
@@ -290,9 +350,12 @@ Default behavior: no telemetry, no analytics, no remote browsing, and no remote 
 | wh transcribe (local-whisper) | Subprocess, local |
 | wh whisper (local-whisper) | Subprocess, local |
 | Screenshots | In-memory; never written to disk; sent only to the configured vision model for screen tasks |
+| Screen OCR | Disabled by default; when configured, captures the screen in memory and pipes PNG bytes to a local OCR command |
 | macOS context | Frontmost app and sandbox-filtered Finder selection, local only |
+| Accessibility tree | Disabled by default; local System Events snapshot only when `OS_TOOLS_ENABLED=true` and macOS permissions allow it |
 | PDF extraction | Local files under the filesystem sandbox; text extraction only, no online OCR |
-| Background task state | In-memory for the current session |
+| Background task state | Local SQLite job store plus in-memory active task state |
+| Trigger definitions | Local SQLite trigger store |
 | OS command tools | Disabled by default; local only when enabled |
 | MCP stdio tools | Disabled by default; local server processes from `MCP_CONFIG_PATH` |
 | Agent session tools | Disabled by default; read bounded, redacted local Codex/OpenClaw session files when enabled |
@@ -300,8 +363,10 @@ Default behavior: no telemetry, no analytics, no remote browsing, and no remote 
 | Realtime voice | Disabled by default; contacts OpenAI only when enabled and used; standard API key stays server-side |
 | Web UI | Disabled by default; localhost-only by default; token required for non-localhost binds |
 | Weather/browser tools | Disabled by default; contact remote sites only when `NETWORK_TOOLS_ENABLED=true` and a tool is used. Weather requires an explicit location and does not use remote IP geolocation. |
+| Browser downloads | Disabled by default with browser tools; when enabled, each download needs server-side approval and saves only under the filesystem sandbox. |
+| Browser uploads | Disabled by default with browser tools; when enabled, each upload needs server-side approval and can attach only sandboxed local files. |
 
-Data leaves your machine only when you choose a remote AI provider, enable Realtime voice, or turn on network tools. A remote `API_BASE_URL` receives prompts, tool results, PDF text summaries, and screenshots that are sent to the configured model because that provider was explicitly configured. Realtime voice sends browser audio/text to OpenAI only when explicitly enabled and used. Network tools send the requested URL, search query, or weather location to the relevant remote service.
+Data leaves your machine only when you choose a remote AI provider, enable Realtime voice, or turn on network tools. A remote `API_BASE_URL` receives prompts, tool results, PDF text summaries, and screenshots that are sent to the configured model because that provider was explicitly configured. Realtime voice sends browser audio/text to OpenAI only when explicitly enabled and used. Network tools send the requested URL, search query, or weather location to the relevant remote service. `/capabilities` includes concrete privacy-boundary decisions for common model, network, and Realtime paths.
 
 ---
 

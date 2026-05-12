@@ -10,13 +10,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Durable local job store backed by SQLite, including persisted job rows, job logs, and operation ledger entries.
+- `JOB_STORE_PATH` setting for the local durable job database.
+- `/operations` and “What changed?” support for inspecting recent local operation ledger entries.
+- Sandboxed `move_to_trash` and `restore_from_trash` filesystem tools.
+- Runtime capability and privacy-boundary snapshots for `/capabilities`, “What can you control?”, Web health, and the `discover_capabilities` tool.
+- On-demand local context snapshots for `/context` and “What is happening?” with current goal, working directory, recent jobs, and recent changes.
+- Hands-free approval and rejection phrases for a single pending approval, with disambiguation when multiple approvals are waiting.
+- Hands-free “Stop” and “Show status” phrases for interrupting speech output and reading the runtime status card without typing slash commands.
+- `/pause`, `/resume`, “Pause that”, and “Resume that” support for queued tasks.
+- `/task logs <id>` and `/task artifacts <id>` support for inspecting durable local job logs and artifacts from the terminal.
+- `/task retry <id>` support for retrying failed, cancelled, or blocked deterministic local jobs from their original request.
+- `/tasks clear-completed` support for clearing completed, failed, and cancelled in-memory task rows plus matching durable job rows.
+- Web APIs for durable job logs, job artifacts, and clearing completed task/job rows.
+- “Undo that” support for reversible direct file moves, Trash operations, and created copies.
+- OS-gated UI action tools for approved coordinate clicks, focused text entry, and hotkeys.
+- Browser form-field filling without submit when network/browser tools are enabled.
+- One-time local file-appears triggers, backed by SQLite and visible through `/triggers`.
 - Shared intent detection for terminal and Web UI requests, so screen, filesystem, network, PDF, and background-task decisions stay aligned across both surfaces.
 - Event-driven Web UI task updates through a local event stream, replacing the browser-side task polling loop.
+- Web runtime creation and API listing for the same persisted one-time file triggers as the terminal runtime.
+- Voice/Web-created coding jobs that wait for server-side approval before running the bounded Codex/OpenClaw terminal-agent bridge.
+- Pause, resume, and cancel support for local triggers in the terminal and Web API.
+- Local dictation mode for terminal and Web, including save-to-file, cancel, and simple literal spelling support.
+- Bounded voice correction for failed direct file actions through “No, I meant …”.
+- Observe → plan → act → verify → recover ledger evidence for direct local file moves.
+- Approved browser downloads to sandboxed local destinations when network/browser tools are enabled.
+- Approved browser file uploads from sandboxed local paths when network/browser tools are enabled.
+- OS-gated accessibility tree snapshots for grounding frontmost-app UI actions when macOS permissions allow it.
+- OS-gated local OCR screen text extraction through `SCREEN_OCR_COMMAND`, with screenshots piped in memory to a local stdin-based OCR command.
+- Typed local action schemas and deterministic task specs for common file, UI, screen, and coding requests.
+- OS-gated app/window control tools for listing open apps, listing windows, activating apps, and quitting apps with approval.
+- Approval-gated `window_action` tool for closing, minimizing, zooming, fullscreening, moving, and resizing macOS windows through System Events when OS tools are enabled.
+- Approval-gated `run_shortcut` tool for running local macOS Shortcuts by name, with optional stdin text, when OS tools are enabled.
+- OS-gated UI scroll and drag tools using approval-gated local coordinate automation.
+- Direct “Open Downloads/Documents/Desktop/tmp” handling through the sandboxed local open-path flow, with operation ledger records.
+- Voice-readable file disambiguation for ambiguous direct file requests: Eyra can read numbered matches and apply “Choose number two” style selections.
+- Deterministic “latest downloaded file” grounding for direct file moves, using the newest file in Downloads with operation ledger and undo metadata.
+- Deterministic named-folder handling for Pictures, Movies, and Music when those folders are included in the filesystem sandbox.
+- Terminal-owned Web UI runtime sharing when `WEB_UI_ENABLED=true eyra` is used, so Web approvals, jobs, task events, triggers, tools, browser session, and operation state point at the same runtime objects as the terminal session.
+- Action-specific privacy boundary decisions for local model calls, remote model providers, disabled network tools, and online Realtime voice paths.
+- One-time local reminder triggers through terminal and Web requests such as “Remind me in 10 minutes to stretch,” persisted in the local trigger store and cancellable through existing trigger controls.
+- Recurring local reminder triggers through terminal and Web requests such as “Every 30 minutes remind me to stretch,” persisted in the local trigger store with fire counts and cancellable through existing trigger controls.
+- Sandboxed structured file tools for appending to files, prepending to files, and comparing two text files with a bounded unified diff.
+- Sandboxed file rename, duplicate, zip compression, and zip extraction tools, including destination-conflict checks and zip path traversal refusal.
+- High-risk `delete_permanently` filesystem tool for irreversible deletion, protected by exact server-side approval and sandbox-root refusal. Normal remove/delete still uses Trash by default.
 
 ### Changed
 
+- Terminal and Web background tasks now mirror compatibility task rows into the durable local job store.
+- Direct deterministic file moves, copies, writes, and trash actions now record operation metadata with undo instructions where possible.
 - `eyra-web` now runs startup/provider setup and full preflight before serving, then passes real model, tool, vision, and screen capability results into the Web UI runtime.
 - Web UI local PDF tasks now use the same controller-owned local extraction path before asking the model to summarize.
+- `eyra-web` remains a standalone Web runtime, while `WEB_UI_ENABLED=true eyra` starts a shared Web frontend attached to the terminal-owned runtime.
+- Capability snapshots now include concrete privacy-boundary examples that name the action, data classes, destination, opt-in requirement, and whether the action is currently allowed.
+- `/voice on` and startup preflight now probe Local Whisper microphone readiness separately from speech output, keep speech available if input fails, and report speech-only state honestly.
+- Shared Web health now uses runtime preflight evidence instead of settings-only capability guesses.
+- Sandboxed moves now use copy plus unlink instead of filesystem rename so protected-folder or iCloud-backed paths do not hang on macOS.
 
 ### Fixed
 
@@ -24,6 +74,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Web UI screen requests now fail clearly when the configured vision model is not vision-capable.
 - `WEB_UI_MAX_REQUEST_BYTES` now applies to browser audio uploads as well as JSON API requests.
 - `eyra-web` now reports host/port bind failures cleanly instead of showing a traceback.
+- Screen intent detection now catches plain phrases such as “what am I looking at?”
+- Bare-domain requests such as `example.com` now hit the network-disabled refusal path when network tools are off.
+- `open_path` now bounds the macOS `open` handoff so terminal sessions do not hang waiting for Finder.
+- File-appears triggers in terminal and Web now wait for real path existence instead of failing early with “Not a file.”
+- Web capability and privacy questions now use deterministic local runtime answers instead of model chat.
 
 ## [4.0.0] - 2026-05-11
 

@@ -7,15 +7,18 @@ import contextlib
 import hmac
 import json
 import queue
+import re
 import secrets
 import shutil
 import socketserver
 import subprocess
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -24,6 +27,9 @@ from typing import Any
 from chat.complexity_scorer import ComplexityScorer
 from chat.message_handler import process_task_stream
 from chat.session_state import InteractionStyle, QualityMode
+from runtime.capabilities import build_capability_snapshot, format_capability_answer
+from runtime.coding_jobs import approval_id_from_text, parse_coding_job_request
+from runtime.dictation import DictationState, dictation_command, parse_dictation_target
 from runtime.intents import (
     extract_pdf_path,
     needs_screen_context,
@@ -33,10 +39,13 @@ from runtime.intents import (
     should_background_task,
     task_title,
 )
+from runtime.jobs import DurableJobStore, RiskLevel
 from runtime.models import PreflightResult
 from runtime.preflight import PreflightManager
+from runtime.shared import RuntimeSharedState
 from runtime.tasks import BackgroundTask, BackgroundTaskManager, TaskStatus
 from runtime.tooling import build_tool_registry
+from runtime.triggers import TriggerStatus, TriggerStore
 from runtime.vision import analyze_screen, vision_model_name
 from tools.approval import ApprovalManager
 from tools.browser import BrowserSession
@@ -56,10 +65,36 @@ class EyraThreadingHTTPServer(ThreadingHTTPServer):
         self.server_port = int(port)
 
 
-def build_health_payload(settings: Settings) -> dict[str, Any]:
+@dataclass
+class WebServerHandle:
+    """Owned background Web UI server."""
+
+    server: EyraThreadingHTTPServer
+    thread: threading.Thread
+    runtime: "WebAssistantRuntime"
+    web_session_token: str
+    realtime_tool_token: str
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+
+
+def build_health_payload(
+    settings: Settings,
+    runtime_scope: str = "standalone",
+    preflight: PreflightResult | None = None,
+) -> dict[str, Any]:
+    capabilities = build_capability_snapshot(settings, preflight=preflight)
     return {
         "status": "ok",
         "offlineByDefault": True,
+        "runtime": {
+            "scope": runtime_scope,
+            "sharedState": runtime_scope == "shared",
+        },
+        "capabilities": capabilities,
         "web": {
             "enabled": settings.WEB_UI_ENABLED,
             "host": settings.WEB_UI_HOST,
@@ -119,28 +154,67 @@ def _task_payload(task: BackgroundTask) -> dict[str, Any]:
     }
 
 
-class WebAssistantRuntime:
-    """Standalone assistant runtime for the built-in Web UI."""
+def _trigger_payload(trigger) -> dict[str, Any]:
+    return {
+        "id": trigger.id,
+        "title": trigger.title,
+        "kind": trigger.kind,
+        "status": trigger.status.value,
+        "condition": trigger.condition,
+        "action": trigger.action,
+        "createdAt": trigger.created_at,
+        "updatedAt": trigger.updated_at,
+        "completedAt": trigger.completed_at,
+        "error": trigger.last_error,
+    }
 
-    def __init__(self, settings: Settings, preflight: PreflightResult | None = None):
+
+class WebAssistantRuntime:
+    """Assistant runtime for the built-in Web UI."""
+
+    def __init__(
+        self,
+        settings: Settings,
+        preflight: PreflightResult | None = None,
+        shared: RuntimeSharedState | None = None,
+    ):
         self.settings = settings
-        self.scorer = ComplexityScorer()
-        self.conversation: list[dict[str, str]] = []
-        self.browser_session = BrowserSession()
-        self.approvals = ApprovalManager()
-        self.registry = build_tool_registry(
-            settings,
-            browser_session=self.browser_session,
-            approval_manager=self.approvals,
-        )
+        self.runtime_scope = "shared" if shared is not None else "standalone"
+        self._owns_components = shared is None
+        self.dictation = DictationState()
+        if shared is not None:
+            self.scorer = shared.scorer
+            self.conversation = shared.conversation
+            self.browser_session = shared.browser_session
+            self.approvals = shared.approvals
+            self.registry = shared.registry
+            self.job_store = shared.job_store
+            self.trigger_store = shared.trigger_store
+            self.task_manager = shared.task_manager
+        else:
+            self.scorer = ComplexityScorer()
+            self.conversation: list[dict[str, str]] = []
+            self.browser_session = BrowserSession()
+            self.approvals = ApprovalManager()
+            self.registry = build_tool_registry(
+                settings,
+                browser_session=self.browser_session,
+                approval_manager=self.approvals,
+            )
+            self.job_store = DurableJobStore(settings.JOB_STORE_PATH)
+            self.trigger_store = TriggerStore(settings.TRIGGER_STORE_PATH)
+            self.task_manager = BackgroundTaskManager(
+                max_concurrent=max(1, int(settings.MAX_BACKGROUND_TASKS)),
+                task_timeout_seconds=max(1, int(settings.TASK_TIMEOUT_SECONDS)),
+                on_event=self._on_task_event,
+                job_store=self.job_store,
+                source_frontend="web",
+            )
         self.model_semaphore = asyncio.Semaphore(max(1, int(settings.MODEL_CONCURRENCY)))
         self._task_event_subscribers: set[queue.Queue[dict[str, Any]]] = set()
         self._task_event_lock = threading.Lock()
-        self.task_manager = BackgroundTaskManager(
-            max_concurrent=max(1, int(settings.MAX_BACKGROUND_TASKS)),
-            task_timeout_seconds=max(1, int(settings.TASK_TIMEOUT_SECONDS)),
-            on_event=self._on_task_event,
-        )
+        if shared is not None:
+            self.task_manager.add_event_listener(self._on_task_event)
         self.preflight = preflight or PreflightResult(
             backend_reachable=True,
             models_ready=settings.all_model_names,
@@ -176,6 +250,23 @@ class WebAssistantRuntime:
                     "images, or use a main MODEL with vision support."
                 )
             }
+        if re.search(
+            r"\b(what can you control|what can you do|what permissions do you need|are you local|what would leave my machine)\b",
+            text,
+            re.I,
+        ):
+            snapshot = build_capability_snapshot(self.settings, preflight=self.preflight)
+            return {"reply": format_capability_answer(snapshot)}
+        dictation_result = await self._handle_dictation_input(text)
+        if dictation_result is not None:
+            return dictation_result
+        self.conversation.append({"role": "user", "content": text})
+        coding_result = await self._handle_direct_coding_job_intent(text)
+        if coding_result is not None:
+            return coding_result
+        trigger_result = await self._handle_direct_trigger_intent(text)
+        if trigger_result is not None:
+            return trigger_result
         if requires_model_driven_tools(text) and not self._tool_actions_available():
             return {
                 "reply": (
@@ -183,7 +274,6 @@ class WebAssistantRuntime:
                     "recognized controller-owned actions still work with the selected model."
                 )
             }
-        self.conversation.append({"role": "user", "content": text})
         if self.settings.BACKGROUND_TASKS_ENABLED and should_background_task(text):
             task = self.task_manager.create_task(
                 title=task_title(text),
@@ -198,6 +288,31 @@ class WebAssistantRuntime:
             return {"reply": f"Task {task.id} accepted: {task.title}", "taskId": task.id}
         reply = await self._chat(text, voice_mode)
         return {"reply": reply}
+
+    async def _handle_dictation_input(self, text: str) -> dict[str, Any] | None:
+        command = dictation_command(text)
+        if command == "start":
+            target = parse_dictation_target(text, self._path_in_named_folder)
+            self.dictation.start(target_path=target)
+            reply = f"Dictation started for {target}" if target else "Dictation started."
+            return {"reply": reply}
+        if not self.dictation.active:
+            return None
+        if command == "cancel":
+            self.dictation.clear()
+            return {"reply": "Dictation cancelled."}
+        if command == "end":
+            content = self.dictation.text()
+            target = self.dictation.target_path
+            self.dictation.clear()
+            if target:
+                result = await self.registry.execute("write_file", json.dumps({"path": target, "content": content}))
+                if result.content.startswith(("Created:", "Updated:")):
+                    return {"reply": f"Dictation saved: {target}"}
+                return {"reply": f"Could not save dictation: {result.content}"}
+            return {"reply": f"Dictation ended.\n{content or '(empty)'}"}
+        self.dictation.append(text)
+        return {"reply": "Captured dictation."}
 
     def _tool_actions_available(self) -> bool:
         model = self.settings.WORKER_MODEL or self.settings.MODEL
@@ -262,6 +377,311 @@ class WebAssistantRuntime:
                     task.mark_progress("Preparing final answer")
         return "".join(chunks).strip() or "Task finished."
 
+    async def _handle_direct_coding_job_intent(self, text: str) -> dict[str, Any] | None:
+        request = parse_coding_job_request(text)
+        if request is None:
+            return None
+        if not self.settings.AGENT_TOOLS_ENABLED:
+            return {"reply": "Agent tools are disabled. Enable AGENT_TOOLS_ENABLED=true before starting coding jobs."}
+
+        agent, instruction = request
+        task = self.task_manager.create_task(
+            title=f"Coding job: {instruction[:72]}",
+            original_request=text,
+            worker=lambda task: self._run_coding_job_task(task, agent=agent, instruction=instruction),
+            used_tools=True,
+            required_filesystem=True,
+            normalized_task_spec={
+                "task_type": "coding.agent_job",
+                "agent": agent,
+                "instruction": instruction,
+                "approval_required": True,
+            },
+            risk_level=RiskLevel.MEDIUM_RISK_CHANGE,
+        )
+        return {"reply": f"Coding job {task.id} accepted with {agent}", "taskId": task.id}
+
+    async def _run_coding_job_task(self, task: BackgroundTask, *, agent: str, instruction: str) -> str:
+        tool_name = "run_codex_task" if agent == "codex" else "run_openclaw_agent"
+        task.mark_progress(f"Waiting for approval to run {agent}")
+        pending = await self.registry.execute(
+            tool_name,
+            json.dumps({"task": instruction, "cwd": self.settings.FILESYSTEM_DEFAULT_PATH}),
+        )
+        approval_id = approval_id_from_text(pending.content)
+        if not approval_id:
+            if pending.content.startswith(f"{agent} is not installed"):
+                raise RuntimeError(pending.content)
+            return pending.content
+
+        while not task.cancellation_requested:
+            approval = self.approvals.get(approval_id)
+            if approval is None:
+                raise RuntimeError("Coding job approval expired.")
+            if approval.rejected:
+                raise RuntimeError("Coding job rejected.")
+            if approval.approved:
+                task.mark_progress(f"Running coding job with {agent}")
+                result = await self.registry.execute(
+                    tool_name,
+                    json.dumps(
+                        {
+                            "task": instruction,
+                            "cwd": self.settings.FILESYSTEM_DEFAULT_PATH,
+                            "approval_id": approval_id,
+                        }
+                    ),
+                )
+                if "exit_code=0" in result.content:
+                    return result.content
+                raise RuntimeError(result.content)
+            await asyncio.sleep(0.05)
+        return "Coding job cancelled."
+
+    async def _handle_direct_trigger_intent(self, text: str) -> dict[str, Any] | None:
+        stripped = " ".join(text.strip().split())
+        recurring_match = re.fullmatch(
+            r"every\s+(?P<amount>\d+(?:\.\d+)?)\s*(?P<unit>seconds?|minutes?|hours?)\s+remind\s+me\s+to\s+(?P<message>.+?)\.?",
+            stripped,
+            re.I,
+        )
+        if recurring_match:
+            amount = float(recurring_match.group("amount"))
+            unit = recurring_match.group("unit").lower()
+            multiplier = 3600 if unit.startswith("hour") else 60 if unit.startswith("minute") else 1
+            interval_seconds = amount * multiplier
+            message = recurring_match.group("message").strip().strip("'\"")
+            next_fire_at = time.time() + interval_seconds
+            trigger = self.trigger_store.create_recurring_timer_trigger(
+                title=f"Recurring reminder: {message}",
+                interval_seconds=interval_seconds,
+                next_fire_at=next_fire_at,
+                action={"type": "notify", "message": message},
+                original_request=text,
+            )
+            task = self.task_manager.create_task(
+                title=trigger.title,
+                original_request=text,
+                worker=lambda task: self._run_recurring_timer_trigger(task, trigger.id),
+                used_tools=False,
+                normalized_task_spec={
+                    "task_type": "trigger.timer.recurring_reminder",
+                    "trigger_id": trigger.id,
+                    "message": message,
+                    "interval_seconds": interval_seconds,
+                    "next_fire_at": next_fire_at,
+                },
+                risk_level=RiskLevel.READ_ONLY,
+            )
+            return {
+                "reply": f"Recurring reminder {trigger.id} created as task {task.id}",
+                "taskId": task.id,
+                "triggerId": trigger.id,
+            }
+
+        reminder_match = re.fullmatch(
+            r"remind\s+me\s+in\s+(?P<amount>\d+(?:\.\d+)?)\s*(?P<unit>seconds?|minutes?|hours?)\s+to\s+(?P<message>.+?)\.?",
+            stripped,
+            re.I,
+        )
+        if reminder_match:
+            amount = float(reminder_match.group("amount"))
+            unit = reminder_match.group("unit").lower()
+            multiplier = 3600 if unit.startswith("hour") else 60 if unit.startswith("minute") else 1
+            message = reminder_match.group("message").strip().strip("'\"")
+            fire_at = time.time() + amount * multiplier
+            trigger = self.trigger_store.create_timer_trigger(
+                title=f"Reminder: {message}",
+                fire_at=fire_at,
+                action={"type": "notify", "message": message},
+                original_request=text,
+            )
+            task = self.task_manager.create_task(
+                title=trigger.title,
+                original_request=text,
+                worker=lambda task: self._run_timer_trigger(task, trigger.id),
+                used_tools=False,
+                normalized_task_spec={
+                    "task_type": "trigger.timer.reminder",
+                    "trigger_id": trigger.id,
+                    "message": message,
+                    "fire_at": fire_at,
+                },
+                risk_level=RiskLevel.READ_ONLY,
+            )
+            return {"reply": f"Reminder {trigger.id} created as task {task.id}", "taskId": task.id, "triggerId": trigger.id}
+
+        trigger_match = re.fullmatch(
+            r"when\s+(?P<name>.+?)\s+appears\s+in\s+(?:my\s+)?(?P<src>desktop|documents|downloads|tmp|/tmp),?"
+            r"\s+move\s+(?:it|that|the file)\s+to\s+(?:my\s+)?(?P<dest>desktop|documents|downloads|tmp|/tmp)\.?",
+            stripped,
+            re.I,
+        )
+        if not trigger_match:
+            return None
+
+        name = trigger_match.group("name").strip().strip("'\"")
+        source = self._path_in_named_folder(trigger_match.group("src"), name)
+        destination = self._path_in_named_folder(trigger_match.group("dest"), name)
+        trigger = self.trigger_store.create_file_exists_trigger(
+            title=f"Move {name} when it appears",
+            source_path=source,
+            action={"type": "file.move", "destination": destination},
+            original_request=text,
+        )
+        task = self.task_manager.create_task(
+            title=trigger.title,
+            original_request=text,
+            worker=lambda task: self._run_file_exists_trigger(task, trigger.id),
+            required_filesystem=True,
+            used_tools=True,
+        )
+        return {"reply": f"Trigger {trigger.id} created as task {task.id}", "taskId": task.id, "triggerId": trigger.id}
+
+    async def _run_timer_trigger(self, task: BackgroundTask, trigger_id: str) -> str:
+        trigger = self.trigger_store.get_trigger(trigger_id)
+        if trigger is None:
+            return "Trigger was not found."
+        fire_at = float(trigger.condition.get("fire_at", 0.0))
+        message = str(trigger.action.get("message", "")).strip()
+        if trigger.action.get("type") != "notify" or not message or fire_at <= 0:
+            error = "Reminder trigger action is not supported."
+            self.trigger_store.mark_failed(trigger_id, error)
+            raise RuntimeError(error)
+
+        interval_seconds = max(0.01, float(self.settings.TRIGGER_CHECK_INTERVAL_SECONDS))
+        task.mark_progress(f"Waiting for reminder {trigger_id}")
+        while time.time() < fire_at:
+            if task.cancellation_requested:
+                self.trigger_store.mark_cancelled(trigger_id)
+                return "Reminder cancelled."
+            current = self.trigger_store.get_trigger(trigger_id)
+            if current is None:
+                raise RuntimeError("Reminder trigger was deleted.")
+            if current.status == TriggerStatus.CANCELLED:
+                return "Reminder cancelled."
+            if current.status == TriggerStatus.PAUSED:
+                task.mark_progress(f"Paused reminder {trigger_id}")
+                await asyncio.sleep(interval_seconds)
+                continue
+            await asyncio.sleep(min(interval_seconds, max(0.0, fire_at - time.time())))
+
+        current = self.trigger_store.get_trigger(trigger_id)
+        if current is not None and current.status == TriggerStatus.CANCELLED:
+            return "Reminder cancelled."
+        self.trigger_store.mark_completed(trigger_id)
+        task.mark_progress(f"Reminder fired: {message}")
+        return f"Reminder: {message}"
+
+    async def _run_recurring_timer_trigger(self, task: BackgroundTask, trigger_id: str) -> str:
+        trigger = self.trigger_store.get_trigger(trigger_id)
+        if trigger is None:
+            return "Trigger was not found."
+        message = str(trigger.action.get("message", "")).strip()
+        interval_seconds = float(trigger.condition.get("interval_seconds", 0.0))
+        next_fire_at = float(trigger.condition.get("next_fire_at", 0.0))
+        if trigger.action.get("type") != "notify" or not message or interval_seconds <= 0 or next_fire_at <= 0:
+            error = "Recurring reminder trigger action is not supported."
+            self.trigger_store.mark_failed(trigger_id, error)
+            raise RuntimeError(error)
+
+        check_interval = max(0.01, float(self.settings.TRIGGER_CHECK_INTERVAL_SECONDS))
+        timeout_seconds = max(interval_seconds, float(self.settings.TRIGGER_TIMEOUT_SECONDS))
+        deadline = time.monotonic() + timeout_seconds
+        task.mark_progress(f"Waiting for recurring reminder {trigger_id}")
+        while time.monotonic() < deadline:
+            if task.cancellation_requested:
+                self.trigger_store.mark_cancelled(trigger_id)
+                return "Recurring reminder cancelled."
+            current = self.trigger_store.get_trigger(trigger_id)
+            if current is None:
+                raise RuntimeError("Recurring reminder trigger was deleted.")
+            if current.status == TriggerStatus.CANCELLED:
+                return "Recurring reminder cancelled."
+            if current.status == TriggerStatus.PAUSED:
+                task.mark_progress(f"Paused recurring reminder {trigger_id}")
+                await asyncio.sleep(check_interval)
+                continue
+            next_fire_at = float(current.condition.get("next_fire_at", next_fire_at))
+            if time.time() >= next_fire_at:
+                fired_at = time.time()
+                next_fire_at = fired_at + interval_seconds
+                self.trigger_store.record_recurring_fire(trigger_id, last_fire_at=fired_at, next_fire_at=next_fire_at)
+                task.mark_progress(f"Recurring reminder fired: {message}")
+            await asyncio.sleep(min(check_interval, max(0.0, next_fire_at - time.time())))
+
+        self.trigger_store.mark_cancelled(trigger_id)
+        return "Recurring reminder reached its local timeout and stopped."
+
+    async def _run_file_exists_trigger(self, task: BackgroundTask, trigger_id: str) -> str:
+        trigger = self.trigger_store.get_trigger(trigger_id)
+        if trigger is None:
+            return "Trigger was not found."
+        source = str(trigger.condition.get("path", ""))
+        destination = str(trigger.action.get("destination", ""))
+        if trigger.action.get("type") != "file.move" or not source or not destination:
+            message = "Trigger action is not supported."
+            self.trigger_store.mark_failed(trigger_id, message)
+            raise RuntimeError(message)
+
+        timeout_seconds = max(1.0, float(self.settings.TRIGGER_TIMEOUT_SECONDS))
+        interval_seconds = max(0.01, float(self.settings.TRIGGER_CHECK_INTERVAL_SECONDS))
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        task.mark_progress(f"Waiting for {source}")
+        try:
+            while asyncio.get_running_loop().time() < deadline:
+                if task.cancellation_requested:
+                    self.trigger_store.mark_cancelled(trigger_id)
+                    return "Trigger cancelled."
+                current = self.trigger_store.get_trigger(trigger_id)
+                if current is None:
+                    raise RuntimeError("Trigger was deleted.")
+                if current.status == TriggerStatus.CANCELLED:
+                    return "Trigger cancelled."
+                if current.status == TriggerStatus.PAUSED:
+                    task.mark_progress(f"Paused trigger {trigger_id}")
+                    await asyncio.sleep(interval_seconds)
+                    continue
+                if Path(source).expanduser().exists():
+                    moved = await self.registry.execute(
+                        "move_path",
+                        json.dumps({"source": source, "destination": destination, "overwrite": False}),
+                    )
+                    success = moved.content.startswith("Moved:")
+                    self.job_store.record_operation(
+                        job_id=task.id,
+                        user_request=trigger.original_request,
+                        normalized_action={"type": "trigger.file.move", "trigger_id": trigger.id},
+                        capability="filesystem.trigger",
+                        target=destination,
+                        before_state={"source": source, "destination": destination},
+                        after_state={"source": source, "destination": destination},
+                        risk_level=RiskLevel.LOW_RISK_CHANGE,
+                        success=success,
+                        undo={"type": "file.move", "source": destination, "destination": source} if success else {},
+                        error=None if success else moved.content,
+                    )
+                    if success:
+                        self.trigger_store.mark_completed(trigger_id)
+                        return moved.content
+                    self.trigger_store.mark_failed(trigger_id, moved.content)
+                    raise RuntimeError(moved.content)
+                await asyncio.sleep(interval_seconds)
+        except asyncio.CancelledError:
+            self.trigger_store.mark_cancelled(trigger_id)
+            raise
+
+        message = f"Trigger timed out after {int(timeout_seconds)} seconds."
+        self.trigger_store.mark_failed(trigger_id, message)
+        raise RuntimeError(message)
+
+    @staticmethod
+    def _path_in_named_folder(folder: str, name: str) -> str:
+        folder_key = folder.strip().lower()
+        if folder_key in {"tmp", "/tmp"}:
+            return f"/tmp/{name}"
+        return f"~/{folder_key.title()}/{name}"
+
     async def _run_direct_pdf_task(self, task: BackgroundTask, text: str, voice_mode: str) -> str | None:
         if "pdf" not in text.lower():
             return None
@@ -304,11 +724,65 @@ class WebAssistantRuntime:
     async def list_tasks(self) -> dict[str, Any]:
         return {"tasks": [_task_payload(task) for task in self.task_manager.list_tasks(include_recent=True)]}
 
+    async def list_triggers(self) -> dict[str, Any]:
+        return {"triggers": [_trigger_payload(trigger) for trigger in self.trigger_store.list_triggers()]}
+
+    async def update_trigger(self, trigger_id: str, action: str) -> dict[str, Any]:
+        if action == "pause":
+            trigger = self.trigger_store.mark_paused(trigger_id)
+        elif action == "resume":
+            trigger = self.trigger_store.mark_active(trigger_id)
+        elif action == "cancel":
+            trigger = self.trigger_store.mark_cancelled(trigger_id)
+        else:
+            return {"error": "Unsupported trigger action.", "status": "bad_request"}
+        if trigger is None:
+            return {"error": "No trigger found.", "status": "missing"}
+        return {"trigger": _trigger_payload(trigger)}
+
     async def task_detail(self, task_id: str) -> dict[str, Any]:
         task = self.task_manager.get_task(task_id)
         if task is None:
-            return {"error": "No task found."}
+            job = self.job_store.get_job(task_id)
+            if job is None:
+                return {"error": "No task found."}
+            return {
+                "job": {
+                    "id": job.id,
+                    "title": job.title,
+                    "status": job.status.value,
+                    "request": job.original_user_input,
+                    "result": job.final_result,
+                    "error": job.error,
+                }
+            }
         return {"task": _task_payload(task)}
+
+    async def job_logs(self, job_id: str) -> dict[str, Any]:
+        return {
+            "logs": [
+                {
+                    "id": entry.id,
+                    "jobId": entry.job_id,
+                    "timestamp": entry.timestamp,
+                    "level": entry.level,
+                    "message": entry.message,
+                    "data": entry.data,
+                }
+                for entry in self.job_store.list_logs(job_id, limit=50)
+            ]
+        }
+
+    async def job_artifacts(self, job_id: str) -> dict[str, Any]:
+        job = self.job_store.get_job(job_id)
+        if job is None:
+            return {"error": "No job found.", "status": "missing"}
+        return {"artifacts": job.artifacts}
+
+    async def clear_completed_tasks(self) -> dict[str, Any]:
+        memory_count = self.task_manager.clear_terminal_tasks()
+        store_count = self.job_store.clear_terminal_jobs()
+        return {"cleared": max(memory_count, store_count)}
 
     async def cancel_task(self, task_id: str) -> dict[str, Any]:
         task = self.task_manager.get_task(task_id)
@@ -364,11 +838,16 @@ class WebAssistantRuntime:
                     subscriber.put_nowait(payload)
 
     async def shutdown(self) -> None:
-        await self.task_manager.shutdown()
-        await self.browser_session.close()
+        if self._owns_components:
+            await self.task_manager.shutdown()
+            await self.browser_session.close()
+            self.trigger_store.close()
+            self.job_store.close()
 
     def close(self) -> None:
         try:
+            if not self._owns_components:
+                self.task_manager.remove_event_listener(self._on_task_event)
             self.run_sync(self.shutdown(), timeout=10)
         finally:
             self._loop.call_soon_threadsafe(self._loop.stop)
@@ -871,7 +1350,14 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             self._send(200, render_index_html(self.settings), "text/html; charset=utf-8")
             return
         if parsed.path == "/api/health":
-            self._send_json(200, build_health_payload(self.settings))
+            self._send_json(
+                200,
+                build_health_payload(
+                    self.settings,
+                    runtime_scope=self.runtime.runtime_scope,
+                    preflight=self.runtime.preflight,
+                ),
+            )
             return
         if parsed.path == "/favicon.ico":
             self._send(204, "", "image/x-icon")
@@ -885,6 +1371,24 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             if not self._authorized():
                 return
             self._send_json(200, self.runtime.run_sync(self.runtime.list_tasks()))
+            return
+        job_logs_match = re.fullmatch(r"/api/job/([^/]+)/logs", parsed.path)
+        if job_logs_match:
+            if not self._authorized():
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.job_logs(job_logs_match.group(1))))
+            return
+        job_artifacts_match = re.fullmatch(r"/api/job/([^/]+)/artifacts", parsed.path)
+        if job_artifacts_match:
+            if not self._authorized():
+                return
+            payload = self.runtime.run_sync(self.runtime.job_artifacts(job_artifacts_match.group(1)))
+            self._send_json(200 if "artifacts" in payload else 404, payload)
+            return
+        if parsed.path == "/api/triggers":
+            if not self._authorized():
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.list_triggers()))
             return
         if parsed.path == "/api/approvals":
             if not self._authorized():
@@ -909,6 +1413,8 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             "/api/realtime-session",
             "/api/realtime-tool-call",
             "/api/cancel",
+            "/api/tasks/clear-completed",
+            "/api/trigger",
             "/api/approve",
             "/api/reject",
         } and not self._authorized():
@@ -920,6 +1426,8 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             "/api/realtime-session",
             "/api/realtime-tool-call",
             "/api/cancel",
+            "/api/tasks/clear-completed",
+            "/api/trigger",
             "/api/approve",
             "/api/reject",
         } and self._reject_if_too_large(
@@ -950,6 +1458,25 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
                 return
             result = self.runtime.run_sync(self.runtime.cancel_task(task_id))
             self._send_json(200 if result.get("status") != "missing" else 404, result)
+            return
+        if parsed.path == "/api/tasks/clear-completed":
+            self._send_json(200, self.runtime.run_sync(self.runtime.clear_completed_tasks()))
+            return
+        if parsed.path == "/api/trigger":
+            payload = self._read_json()
+            trigger_id = str(payload.get("triggerId", "")).strip()
+            action = str(payload.get("action", "")).strip().lower()
+            if not trigger_id or not action:
+                self._send_json(400, {"error": "triggerId and action are required."})
+                return
+            result = self.runtime.run_sync(self.runtime.update_trigger(trigger_id, action))
+            status = result.get("status")
+            if status == "missing":
+                self._send_json(404, result)
+            elif status == "bad_request":
+                self._send_json(400, result)
+            else:
+                self._send_json(200, result)
             return
         if parsed.path == "/api/approve":
             payload = self._read_json()
@@ -1300,6 +1827,53 @@ def _web_preflight_problem(preflight: PreflightResult) -> str | None:
     return None
 
 
+def _build_handler(
+    *,
+    settings: Settings,
+    runtime: WebAssistantRuntime,
+    web_session_token: str,
+    realtime_tool_token: str,
+):
+    return type(
+        "EyraWebHandler",
+        (_EyraWebHandler,),
+        {
+            "settings": settings,
+            "runtime": runtime,
+            "web_session_token": web_session_token,
+            "realtime_tool_token": realtime_tool_token,
+        },
+    )
+
+
+def start_web_server_in_thread(
+    settings: Settings,
+    *,
+    runtime: WebAssistantRuntime,
+    web_session_token: str = "",
+    realtime_tool_token: str = "",
+) -> WebServerHandle:
+    """Start the Web UI in a background thread with the provided runtime."""
+    web_session_token = web_session_token or settings.WEB_UI_TOKEN.strip() or secrets.token_urlsafe(32)
+    realtime_tool_token = realtime_tool_token or secrets.token_urlsafe(32)
+    handler = _build_handler(
+        settings=settings,
+        runtime=runtime,
+        web_session_token=web_session_token,
+        realtime_tool_token=realtime_tool_token,
+    )
+    server = EyraThreadingHTTPServer((settings.WEB_UI_HOST, settings.WEB_UI_PORT), handler)
+    thread = threading.Thread(target=server.serve_forever, name="eyra-web-ui", daemon=True)
+    thread.start()
+    return WebServerHandle(
+        server=server,
+        thread=thread,
+        runtime=runtime,
+        web_session_token=web_session_token,
+        realtime_tool_token=realtime_tool_token,
+    )
+
+
 def run_web_server(settings: Settings, preflight: PreflightResult | None = None) -> None:
     preflight = preflight or asyncio.run(PreflightManager(settings).run())
     problem = _web_preflight_problem(preflight)
@@ -1310,15 +1884,11 @@ def run_web_server(settings: Settings, preflight: PreflightResult | None = None)
     web_session_token = settings.WEB_UI_TOKEN.strip() or secrets.token_urlsafe(32)
     realtime_tool_token = secrets.token_urlsafe(32)
     runtime = WebAssistantRuntime(settings, preflight=preflight)
-    handler = type(
-        "EyraWebHandler",
-        (_EyraWebHandler,),
-        {
-            "settings": settings,
-            "runtime": runtime,
-            "web_session_token": web_session_token,
-            "realtime_tool_token": realtime_tool_token,
-        },
+    handler = _build_handler(
+        settings=settings,
+        runtime=runtime,
+        web_session_token=web_session_token,
+        realtime_tool_token=realtime_tool_token,
     )
     try:
         server = EyraThreadingHTTPServer((settings.WEB_UI_HOST, settings.WEB_UI_PORT), handler)
@@ -1327,6 +1897,7 @@ def run_web_server(settings: Settings, preflight: PreflightResult | None = None)
         print(f"Could not start Eyra web UI on {settings.WEB_UI_HOST}:{settings.WEB_UI_PORT}: {e}")
         return
     print(f"Eyra web UI: http://{settings.WEB_UI_HOST}:{settings.WEB_UI_PORT}")
+    print(f"Eyra web UI runtime: {runtime.runtime_scope}")
     if web_auth_required(settings):
         print(f"Eyra web UI token URL: http://{settings.WEB_UI_HOST}:{settings.WEB_UI_PORT}/?token={web_session_token}")
     try:

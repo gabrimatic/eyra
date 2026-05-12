@@ -259,11 +259,15 @@ class PreflightManager:
             # Process is alive — now wait for ASR to be ready
             print(f"  {DIM}› Waiting for Local Whisper ASR...{NC}", end="", flush=True)
             if self._wait_for_asr_ready(wh_bin, max_wait=15):
-                result.listening_available = True
-                if speech_requested:
-                    print(f"\r  {GREEN}✓{NC} Local Whisper: ready (voice input + speech)   ")
+                if self._probe_microphone_ready(wh_bin):
+                    result.listening_available = True
+                    if speech_requested:
+                        print(f"\r  {GREEN}✓{NC} Local Whisper: ready (voice input + speech)   ")
+                    else:
+                        print(f"\r  {GREEN}✓{NC} Local Whisper: ready (voice input)   ")
                 else:
-                    print(f"\r  {GREEN}✓{NC} Local Whisper: ready (voice input)   ")
+                    print(f"\r  {YELLOW}⚠{NC} Local Whisper: microphone input failed   ")
+                    print(f"    {DIM}Check microphone permission/input device, then run /voice on again.{NC}")
             else:
                 print(f"\r  {YELLOW}⚠{NC} Local Whisper: running but ASR not ready   ")
                 print(f"    {DIM}ASR model may still be loading. Restart: wh restart{NC}")
@@ -275,6 +279,42 @@ class PreflightManager:
         if not available:
             result.wh_bin = None
         return available
+
+    @staticmethod
+    def _probe_microphone_ready(wh_bin: str) -> bool:
+        """Run a bounded Local Whisper listen probe so voice input readiness is real.
+
+        ASR readiness alone only proves file transcription works. Hands-free Eyra
+        also needs the microphone path. A one-second listen may return no text on
+        a healthy quiet room, but it must not return Local Whisper's microphone
+        failure.
+        """
+        try:
+            proc = subprocess.run(
+                [wh_bin, "listen", "1", "--raw"],
+                capture_output=True,
+                timeout=5,
+                text=True,
+            )
+        except subprocess.TimeoutExpired:
+            return False
+        except Exception:
+            return False
+        output = f"{proc.stdout or ''}\n{proc.stderr or ''}".lower()
+        hard_failures = (
+            "microphone error",
+            "service is busy",
+            "service not ready",
+            "cannot connect",
+            "connection closed",
+            "no audio captured",
+            "recording ended unexpectedly",
+        )
+        if any(marker in output for marker in hard_failures):
+            return False
+        # "No speech detected" is a healthy quiet-room probe: the microphone
+        # opened, recorded, and reached the ASR pipeline.
+        return True
 
     @staticmethod
     def _wait_for_asr_ready(wh_bin: str, max_wait: int = 15) -> bool:

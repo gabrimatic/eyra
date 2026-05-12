@@ -1,8 +1,10 @@
 """Tests for the built-in web UI helpers."""
 
+import json
 import os
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
@@ -10,6 +12,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from runtime.jobs import JobStatus
+from runtime.models import PreflightResult
+from runtime.shared import RuntimeSharedState
+from runtime.tasks import TaskStatus
 from utils.settings import Settings
 from web.server import (
     WebAssistantRuntime,
@@ -32,9 +38,35 @@ class TestWebServerHelpers:
         payload = build_health_payload(Settings(WEB_UI_ENABLED=True, REALTIME_VOICE_ENABLED=False))
 
         assert payload["status"] == "ok"
+        assert payload["runtime"]["scope"] == "standalone"
         assert payload["web"]["enabled"] is True
         assert payload["voice"]["localWhisper"] is True
         assert payload["voice"]["realtime"] is False
+        assert payload["capabilities"]["localFirst"] is True
+        assert payload["capabilities"]["privacy"]["leavesMachineByDefault"] is False
+
+    def test_health_payload_can_report_shared_runtime_scope(self):
+        payload = build_health_payload(Settings(WEB_UI_ENABLED=True), runtime_scope="shared")
+
+        assert payload["runtime"]["scope"] == "shared"
+
+    def test_health_payload_uses_preflight_for_backend_and_model_capabilities(self):
+        settings = Settings(WEB_UI_ENABLED=True)
+        preflight = PreflightResult(
+            backend_reachable=True,
+            models_ready=[settings.MODEL],
+            tool_capable_models=[],
+            tool_capability_checked_models=[settings.MODEL],
+            vision_capable_models=[settings.MODEL],
+            vision_capability_checked_models=[settings.MODEL],
+            screen_capture_available=True,
+        )
+
+        payload = build_health_payload(settings, preflight=preflight)
+
+        assert payload["capabilities"]["models"]["backendReady"] is True
+        assert payload["capabilities"]["models"]["mainToolCalling"] == "no"
+        assert payload["capabilities"]["models"]["visionImages"] == "yes"
 
     def test_index_html_has_phone_ready_controls(self):
         html = render_index_html(Settings(WEB_UI_ENABLED=True, REALTIME_VOICE_ENABLED=True))
@@ -215,6 +247,47 @@ class TestWebServerHelpers:
 
         assert loop.is_closed()
 
+    def test_web_runtime_can_share_terminal_owned_state(self, tmp_path):
+        from runtime.models import PreflightResult
+
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+            FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+            TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+        )
+        preflight = PreflightResult(backend_reachable=True, models_ready=[settings.MODEL])
+        shared = RuntimeSharedState.create(settings, preflight=preflight, source_frontend="terminal")
+        runtime = WebAssistantRuntime(settings, preflight=preflight, shared=shared)
+
+        async def create_shared_task():
+            async def worker(task):
+                return "shared task done"
+
+            task = shared.task_manager.create_task("Terminal task", "created by terminal", worker)
+            await shared.task_manager.wait_for_task(task.id)
+            return task.id
+
+        try:
+            approval = shared.approvals.request("run_command", "shell command", {"command": "echo hi"})
+            task_id = runtime.run_sync(create_shared_task())
+            listed = runtime.run_sync(runtime.list_approvals())
+            tasks = runtime.run_sync(runtime.list_tasks())
+            runtime.close()
+
+            assert runtime.runtime_scope == "shared"
+            assert runtime.approvals is shared.approvals
+            assert runtime.job_store is shared.job_store
+            assert runtime.task_manager is shared.task_manager
+            assert listed["approvals"][0]["id"] == approval.id
+            assert tasks["tasks"][0]["id"] == task_id
+            assert shared.job_store.get_job(task_id) is not None
+        finally:
+            shared.close()
+
     def test_web_runtime_refuses_open_ended_tool_task_without_tool_capable_model(self, tmp_path):
         from runtime.models import PreflightResult
 
@@ -238,6 +311,18 @@ class TestWebServerHelpers:
         assert "requires a model with native tool calling" in result["reply"]
         assert tasks["tasks"] == []
         runtime.close()
+
+    def test_web_runtime_capability_question_is_local_not_model_chat(self):
+        settings = Settings(USE_MOCK_CLIENT=True, LIVE_LISTENING_ENABLED=False, LIVE_SPEECH_ENABLED=False)
+        runtime = WebAssistantRuntime(settings)
+
+        try:
+            result = runtime.run_sync(runtime.handle_message("What would leave my machine?"))
+        finally:
+            runtime.close()
+
+        assert "Leaves machine by default" in result["reply"]
+        assert "This is a mock response" not in result["reply"]
 
     def test_web_runtime_refuses_screen_task_without_vision_capable_model(self):
         from runtime.models import PreflightResult
@@ -277,6 +362,418 @@ class TestWebServerHelpers:
         assert listed["approvals"][0]["id"] == approval.id
         assert approved["approved"] is True
         runtime.close()
+
+    def test_web_runtime_file_appears_trigger_moves_file_when_created(self, tmp_path):
+        desktop = tmp_path / "Desktop"
+        downloads = tmp_path / "Downloads"
+        documents = tmp_path / "Documents"
+        for folder in (desktop, downloads, documents):
+            folder.mkdir()
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            FILESYSTEM_ALLOWED_PATHS=",".join(str(p) for p in (desktop, downloads, documents, tmp_path)),
+            FILESYSTEM_DEFAULT_PATH=str(documents),
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+            TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+            TRIGGER_CHECK_INTERVAL_SECONDS=0.01,
+            TRIGGER_TIMEOUT_SECONDS=2,
+        )
+        runtime = WebAssistantRuntime(settings)
+        runtime._path_in_named_folder = lambda folder, name: str((tmp_path / folder.title() / name))
+        source = downloads / "eyra-web-trigger.txt"
+        destination = documents / "eyra-web-trigger.txt"
+
+        try:
+            result = runtime.run_sync(
+                runtime.handle_message("When eyra-web-trigger.txt appears in my Downloads, move it to Documents.")
+            )
+            source.write_text("trigger me")
+            runtime.run_sync(runtime.task_manager.wait_for_task(result["taskId"]), timeout=3)
+            triggers = runtime.run_sync(runtime.list_triggers())
+            task = runtime.task_manager.get_task(result["taskId"])
+        finally:
+            runtime.close()
+
+        assert "Trigger" in result["reply"]
+        assert task.status.value == "completed"
+        assert not source.exists()
+        assert destination.read_text() == "trigger me"
+        assert triggers["triggers"][0]["status"] == "completed"
+
+    def test_web_runtime_direct_trigger_works_when_model_lacks_tools(self, tmp_path):
+        desktop = tmp_path / "Desktop"
+        downloads = tmp_path / "Downloads"
+        documents = tmp_path / "Documents"
+        for folder in (desktop, downloads, documents):
+            folder.mkdir()
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            FILESYSTEM_ALLOWED_PATHS=",".join(str(p) for p in (desktop, downloads, documents, tmp_path)),
+            FILESYSTEM_DEFAULT_PATH=str(documents),
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+            TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+            TRIGGER_CHECK_INTERVAL_SECONDS=0.01,
+            TRIGGER_TIMEOUT_SECONDS=2,
+        )
+        preflight = PreflightResult(
+            backend_reachable=True,
+            models_ready=[settings.MODEL],
+            tool_capable_models=[],
+            tool_capability_checked_models=[settings.MODEL],
+        )
+        runtime = WebAssistantRuntime(settings, preflight=preflight)
+        runtime._path_in_named_folder = lambda folder, name: str((tmp_path / folder.title() / name))
+        source = downloads / "eyra-web-trigger-no-tools.txt"
+        destination = documents / "eyra-web-trigger-no-tools.txt"
+
+        try:
+            result = runtime.run_sync(
+                runtime.handle_message("When eyra-web-trigger-no-tools.txt appears in my Downloads, move it to Documents.")
+            )
+            time.sleep(0.05)
+            task = runtime.task_manager.get_task(result["taskId"])
+            assert task.status in {TaskStatus.QUEUED, TaskStatus.RUNNING}
+            source.write_text("trigger me")
+            runtime.run_sync(runtime.task_manager.wait_for_task(result["taskId"]), timeout=3)
+            task = runtime.task_manager.get_task(result["taskId"])
+        finally:
+            runtime.close()
+
+        assert "Trigger" in result["reply"]
+        assert task.status.value == "completed"
+        assert not source.exists()
+        assert destination.read_text() == "trigger me"
+
+    def test_web_runtime_reminder_trigger_completes_after_delay(self, tmp_path):
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+            TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+        )
+        runtime = WebAssistantRuntime(settings)
+
+        try:
+            result = runtime.run_sync(runtime.handle_message("Remind me in 0.01 seconds to stretch."))
+            runtime.run_sync(runtime.task_manager.wait_for_task(result["taskId"]), timeout=3)
+            tasks = runtime.run_sync(runtime.list_tasks())
+            triggers = runtime.run_sync(runtime.list_triggers())
+        finally:
+            runtime.close()
+
+        assert "Reminder" in result["reply"]
+        assert tasks["tasks"][0]["status"] == "completed"
+        assert tasks["tasks"][0]["result"] == "Reminder: stretch"
+        assert triggers["triggers"][0]["kind"] == "timer"
+        assert triggers["triggers"][0]["status"] == "completed"
+
+    def test_web_runtime_recurring_reminder_runs_until_cancelled(self, tmp_path):
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+            TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+            TRIGGER_CHECK_INTERVAL_SECONDS=0.01,
+        )
+        runtime = WebAssistantRuntime(settings)
+
+        try:
+            result = runtime.run_sync(runtime.handle_message("Every 0.01 seconds remind me to stretch."))
+            trigger_id = result["triggerId"]
+            for _ in range(50):
+                triggers = runtime.run_sync(runtime.list_triggers())
+                if triggers["triggers"][0]["condition"].get("fire_count", 0) >= 2:
+                    break
+                time.sleep(0.01)
+            runtime.run_sync(runtime.update_trigger(trigger_id, "cancel"))
+            runtime.run_sync(runtime.task_manager.wait_for_task(result["taskId"]), timeout=3)
+            tasks = runtime.run_sync(runtime.list_tasks())
+            triggers = runtime.run_sync(runtime.list_triggers())
+        finally:
+            runtime.close()
+
+        assert "Recurring reminder" in result["reply"]
+        assert tasks["tasks"][0]["status"] == "completed"
+        assert tasks["tasks"][0]["result"] == "Recurring reminder cancelled."
+        assert triggers["triggers"][0]["kind"] == "recurring_timer"
+        assert triggers["triggers"][0]["condition"]["fire_count"] >= 2
+        assert triggers["triggers"][0]["status"] == "cancelled"
+
+    def test_web_runtime_coding_job_waits_for_approval_then_runs_agent(self, tmp_path):
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            AGENT_TOOLS_ENABLED=True,
+            FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+            FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+            TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+        )
+        runtime = WebAssistantRuntime(settings)
+        created = {}
+
+        class FakeProcess:
+            returncode = 0
+
+            async def communicate(self):
+                return b"web coding done", b""
+
+        async def fake_create_subprocess_exec(*argv, cwd=None, stdout=None, stderr=None):
+            created["argv"] = argv
+            created["cwd"] = cwd
+            return FakeProcess()
+
+        try:
+            with patch("tools.operator.shutil.which", return_value="/usr/bin/codex"):
+                with patch("tools.operator.asyncio.create_subprocess_exec", fake_create_subprocess_exec):
+                    result = runtime.run_sync(
+                        runtime.handle_message("Start a coding job with Codex to update the README.")
+                    )
+                    approvals = runtime.run_sync(runtime.list_approvals())
+                    approved = runtime.run_sync(runtime.approve(approvals["approvals"][0]["id"]))
+                    runtime.run_sync(runtime.task_manager.wait_for_task(result["taskId"]), timeout=3)
+                    tasks = runtime.run_sync(runtime.list_tasks())
+        finally:
+            runtime.close()
+
+        assert "Coding job" in result["reply"]
+        assert approved["approved"] is True
+        assert tasks["tasks"][0]["status"] == "completed"
+        assert "web coding done" in tasks["tasks"][0]["result"]
+        assert created["argv"] == ("/usr/bin/codex", "exec", "update the README")
+
+    def test_web_runtime_refuses_coding_job_when_agent_tools_are_disabled(self, tmp_path):
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            AGENT_TOOLS_ENABLED=False,
+            FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+            FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+            TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+        )
+        runtime = WebAssistantRuntime(settings)
+
+        try:
+            result = runtime.run_sync(runtime.handle_message("Start a coding job with Codex to update the README."))
+            tasks = runtime.run_sync(runtime.list_tasks())
+        finally:
+            runtime.close()
+
+        assert "Agent tools are disabled" in result["reply"]
+        assert tasks["tasks"] == []
+
+    def test_web_runtime_dictation_captures_text_without_model_response(self, tmp_path):
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+            TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+        )
+        runtime = WebAssistantRuntime(settings)
+
+        try:
+            start = runtime.run_sync(runtime.handle_message("Start dictation."))
+            captured = runtime.run_sync(runtime.handle_message("The first line."))
+            ended = runtime.run_sync(runtime.handle_message("End dictation."))
+        finally:
+            runtime.close()
+
+        assert "Dictation started" in start["reply"]
+        assert "Captured" in captured["reply"]
+        assert "Dictation ended" in ended["reply"]
+        assert "The first line." in ended["reply"]
+        assert "This is a mock response" not in ended["reply"]
+
+    def test_web_runtime_dictation_saves_to_file(self, tmp_path):
+        documents = tmp_path / "Documents"
+        documents.mkdir()
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            FILESYSTEM_ALLOWED_PATHS=str(documents),
+            FILESYSTEM_DEFAULT_PATH=str(documents),
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+            TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+        )
+        runtime = WebAssistantRuntime(settings)
+        runtime._path_in_named_folder = lambda folder, name: str((tmp_path / folder.title() / name))
+        target = documents / "web-dictation.txt"
+
+        try:
+            runtime.run_sync(runtime.handle_message("Start dictation to a file named web-dictation.txt in my Documents."))
+            runtime.run_sync(runtime.handle_message("Saved from the web runtime."))
+            ended = runtime.run_sync(runtime.handle_message("End dictation."))
+        finally:
+            runtime.close()
+
+        assert "Dictation saved" in ended["reply"]
+        assert target.read_text() == "Saved from the web runtime."
+
+    def test_web_api_lists_persisted_triggers(self, tmp_path):
+        settings = Settings(
+            WEB_UI_HOST="127.0.0.1",
+            WEB_UI_REQUIRE_TOKEN="true",
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+            TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+        )
+        runtime = WebAssistantRuntime(settings)
+        runtime.trigger_store.create_file_exists_trigger(
+            title="Move web download",
+            source_path=str(tmp_path / "Downloads" / "a.txt"),
+            action={"type": "file.move", "destination": str(tmp_path / "Documents" / "a.txt")},
+            original_request="When a.txt appears in Downloads, move it to Documents.",
+        )
+        handler = type(
+            "TestEyraWebHandler",
+            (_EyraWebHandler,),
+            {
+                "settings": settings,
+                "runtime": runtime,
+                "web_session_token": "secret-token",
+                "realtime_tool_token": "rt-secret",
+            },
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            request = urllib.request.Request(base + "/api/triggers", headers={"X-Eyra-Web-Token": "secret-token"})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                payload = json.loads(response.read().decode())
+        finally:
+            server.shutdown()
+            server.server_close()
+            runtime.close()
+
+        assert payload["triggers"][0]["title"] == "Move web download"
+
+    def test_web_api_updates_trigger_status(self, tmp_path):
+        settings = Settings(
+            WEB_UI_HOST="127.0.0.1",
+            WEB_UI_REQUIRE_TOKEN="true",
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+            TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+        )
+        runtime = WebAssistantRuntime(settings)
+        trigger = runtime.trigger_store.create_file_exists_trigger(
+            title="Move web download",
+            source_path=str(tmp_path / "Downloads" / "a.txt"),
+            action={"type": "file.move", "destination": str(tmp_path / "Documents" / "a.txt")},
+            original_request="When a.txt appears in Downloads, move it to Documents.",
+        )
+        handler = type(
+            "TestEyraWebHandler",
+            (_EyraWebHandler,),
+            {
+                "settings": settings,
+                "runtime": runtime,
+                "web_session_token": "secret-token",
+                "realtime_tool_token": "rt-secret",
+            },
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            request = urllib.request.Request(
+                base + "/api/trigger",
+                method="POST",
+                data=json.dumps({"triggerId": trigger.id, "action": "pause"}).encode(),
+                headers={"Content-Type": "application/json", "X-Eyra-Web-Token": "secret-token"},
+            )
+            with urllib.request.urlopen(request, timeout=5) as response:
+                payload = json.loads(response.read().decode())
+        finally:
+            server.shutdown()
+            server.server_close()
+            runtime.close()
+
+        assert payload["trigger"]["status"] == "paused"
+
+    def test_web_api_exposes_job_logs_artifacts_and_clear_completed(self, tmp_path):
+        settings = Settings(
+            WEB_UI_HOST="127.0.0.1",
+            WEB_UI_REQUIRE_TOKEN="true",
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+            TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+        )
+        runtime = WebAssistantRuntime(settings)
+        job = runtime.job_store.create_job(
+            title="Web durable job",
+            original_user_input="Do web durable work",
+            source_frontend="web",
+        )
+        runtime.job_store.update_job(
+            job.id,
+            status=JobStatus.COMPLETED,
+            artifacts=[{"type": "file", "path": "/tmp/web-result.txt"}],
+        )
+        runtime.job_store.record_log(job.id, "Web job started.")
+        handler = type(
+            "TestEyraWebHandler",
+            (_EyraWebHandler,),
+            {
+                "settings": settings,
+                "runtime": runtime,
+                "web_session_token": "secret-token",
+                "realtime_tool_token": "rt-secret",
+            },
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            logs_request = urllib.request.Request(
+                base + f"/api/job/{job.id}/logs",
+                headers={"X-Eyra-Web-Token": "secret-token"},
+            )
+            with urllib.request.urlopen(logs_request, timeout=5) as response:
+                logs_payload = json.loads(response.read().decode())
+            artifacts_request = urllib.request.Request(
+                base + f"/api/job/{job.id}/artifacts",
+                headers={"X-Eyra-Web-Token": "secret-token"},
+            )
+            with urllib.request.urlopen(artifacts_request, timeout=5) as response:
+                artifacts_payload = json.loads(response.read().decode())
+            clear_request = urllib.request.Request(
+                base + "/api/tasks/clear-completed",
+                method="POST",
+                data=b"{}",
+                headers={"X-Eyra-Web-Token": "secret-token", "Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(clear_request, timeout=5) as response:
+                clear_payload = json.loads(response.read().decode())
+        finally:
+            server.shutdown()
+            server.server_close()
+            runtime.close()
+
+        assert logs_payload["logs"][0]["message"] == "Web job started."
+        assert artifacts_payload["artifacts"][0]["path"] == "/tmp/web-result.txt"
+        assert clear_payload["cleared"] == 1
 
     def test_web_api_rejects_unauthorized_requests_when_token_required(self):
         settings = Settings(

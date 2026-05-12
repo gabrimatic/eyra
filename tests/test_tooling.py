@@ -23,6 +23,14 @@ class TestBuildToolRegistry:
         assert "get_current_time" in names
         assert "take_screenshot" in names
         assert "read_file" in names
+        assert "append_file" in names
+        assert "prepend_file" in names
+        assert "compare_files" in names
+        assert "rename_path" in names
+        assert "duplicate_path" in names
+        assert "compress_path" in names
+        assert "uncompress_archive" in names
+        assert "delete_permanently" in names
         assert "run_command" not in names
         assert "run_agent_task" not in names
         assert "call_mcp_tool" not in names
@@ -42,12 +50,26 @@ class TestBuildToolRegistry:
         names = _tool_names(registry)
         assert "run_command" in names
         assert "fetch_url" in names
+        assert "fill_form_field" in names
         assert "list_processes" in names
         assert "get_system_snapshot" in names
         assert "get_launch_agent_status" in names
+        assert "get_accessibility_tree" in names
+        assert "extract_screen_text" in names
+        assert "list_open_apps" in names
+        assert "list_windows" in names
+        assert "window_action" in names
         assert "manage_launch_agent" in names
+        assert "activate_app" in names
         assert "open_app" in names
+        assert "quit_app" in names
+        assert "ui_click" in names
+        assert "ui_scroll" in names
+        assert "ui_drag" in names
+        assert "ui_type_text" in names
+        assert "press_hotkey" in names
         assert "show_notification" in names
+        assert "run_shortcut" in names
         assert "set_clipboard_text" in names
         assert "get_agent_status" in names
         assert "list_agent_sessions" in names
@@ -62,3 +84,5 @@ class TestBuildToolRegistry:
         assert "list_mcp_tools" in names
         assert "call_mcp_tool" in names
         assert "web_search" in names
+        assert "download_file" in names
+        assert "upload_file" in names

@@ -1,9 +1,12 @@
 """Filesystem tools — read, write, edit, move, copy, and open local paths."""
 
 import asyncio
+import difflib
 import hashlib
 import logging
 import shutil
+import uuid
+import zipfile
 from pathlib import Path
 
 from tools.approval import GLOBAL_APPROVAL_MANAGER, ApprovalManager, approval_required_message
@@ -290,6 +293,143 @@ class EditFileTool(BaseTool):
         return ToolResult(content=f"Edited {p.name}: replaced {count} occurrence{'s' if count != 1 else ''}.")
 
 
+class AppendFileTool(BaseTool):
+    name = "append_file"
+    description = "Append text to an existing sandboxed text file."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Absolute, ~, or relative path to the file."},
+            "content": {"type": "string", "description": "Text to append."},
+        },
+        "required": ["path", "content"],
+    }
+    costly = False
+
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+
+    async def execute(self, path: str = "", content: str = "", **_) -> ToolResult:
+        try:
+            return await asyncio.to_thread(self._run, path, content)
+        except PermissionError as e:
+            return ToolResult(content=str(e))
+        except Exception as e:
+            logger.error("append_file failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Filesystem error: {e}")
+
+    def _run(self, path: str, content: str) -> ToolResult:
+        p = _resolve(path, self._roots, self._default_path)
+        if not p.is_file():
+            return ToolResult(content=f"Not a file: {p}")
+        try:
+            existing = p.read_text()
+        except UnicodeDecodeError:
+            return ToolResult(content=f"Cannot append to {p.name}: file appears to be binary, not text.")
+        p.write_text(existing + content)
+        return ToolResult(content=f"Appended to: {p} ({_human_size(len(content.encode()))})")
+
+
+class PrependFileTool(BaseTool):
+    name = "prepend_file"
+    description = "Prepend text to an existing sandboxed text file."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Absolute, ~, or relative path to the file."},
+            "content": {"type": "string", "description": "Text to prepend."},
+        },
+        "required": ["path", "content"],
+    }
+    costly = False
+
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+
+    async def execute(self, path: str = "", content: str = "", **_) -> ToolResult:
+        try:
+            return await asyncio.to_thread(self._run, path, content)
+        except PermissionError as e:
+            return ToolResult(content=str(e))
+        except Exception as e:
+            logger.error("prepend_file failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Filesystem error: {e}")
+
+    def _run(self, path: str, content: str) -> ToolResult:
+        p = _resolve(path, self._roots, self._default_path)
+        if not p.is_file():
+            return ToolResult(content=f"Not a file: {p}")
+        try:
+            existing = p.read_text()
+        except UnicodeDecodeError:
+            return ToolResult(content=f"Cannot prepend to {p.name}: file appears to be binary, not text.")
+        p.write_text(content + existing)
+        return ToolResult(content=f"Prepended to: {p} ({_human_size(len(content.encode()))})")
+
+
+class CompareFilesTool(BaseTool):
+    name = "compare_files"
+    description = "Compare two sandboxed text files and return a bounded unified diff."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "left_path": {"type": "string", "description": "First file path."},
+            "right_path": {"type": "string", "description": "Second file path."},
+        },
+        "required": ["left_path", "right_path"],
+    }
+    costly = False
+
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+
+    async def execute(self, left_path: str = "", right_path: str = "", **_) -> ToolResult:
+        try:
+            return await asyncio.to_thread(self._run, left_path, right_path)
+        except PermissionError as e:
+            return ToolResult(content=str(e))
+        except Exception as e:
+            logger.error("compare_files failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Filesystem error: {e}")
+
+    def _read_text_file(self, path: str) -> tuple[Path, str] | ToolResult:
+        p = _resolve(path, self._roots, self._default_path)
+        if not p.is_file():
+            return ToolResult(content=f"Not a file: {p}")
+        if p.stat().st_size > _MAX_READ_BYTES:
+            return ToolResult(content=f"Cannot compare {p.name}: file is larger than {_MAX_READ_BYTES // 1000}KB.")
+        data = p.read_bytes()
+        if b"\x00" in data:
+            return ToolResult(content=f"Cannot compare {p.name}: file appears to be binary, not text.")
+        try:
+            return p, data.decode("utf-8")
+        except UnicodeDecodeError:
+            return ToolResult(content=f"Cannot compare {p.name}: file appears to be binary, not text.")
+
+    def _run(self, left_path: str, right_path: str) -> ToolResult:
+        left = self._read_text_file(left_path)
+        if isinstance(left, ToolResult):
+            return left
+        right = self._read_text_file(right_path)
+        if isinstance(right, ToolResult):
+            return right
+        left_file, left_text = left
+        right_file, right_text = right
+        if left_text == right_text:
+            return ToolResult(content=f"Files are identical: {left_file} and {right_file}")
+        diff = difflib.unified_diff(
+            left_text.splitlines(),
+            right_text.splitlines(),
+            fromfile=left_file.name,
+            tofile=right_file.name,
+            lineterm="",
+        )
+        return ToolResult(content="\n".join(list(diff)[:400]))
+
+
 class ListDirectoryTool(BaseTool):
     name = "list_directory"
     description = (
@@ -480,7 +620,12 @@ class MovePathTool(BaseTool):
             else:
                 dest.unlink()
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dest))
+        if src.is_dir():
+            shutil.copytree(src, dest)
+            shutil.rmtree(src)
+        else:
+            shutil.copy2(src, dest)
+            src.unlink()
         return ToolResult(content=f"Moved: {src} -> {dest}")
 
 
@@ -581,6 +726,340 @@ class CopyPathTool(BaseTool):
         return ToolResult(content=f"Copied: {src} -> {dest}")
 
 
+class RenamePathTool(BaseTool):
+    name = "rename_path"
+    description = "Rename a sandboxed file or folder in place. The new name cannot include path separators."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File or folder to rename."},
+            "new_name": {"type": "string", "description": "New filename only, not a path."},
+        },
+        "required": ["path", "new_name"],
+    }
+    costly = False
+
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+
+    async def execute(self, path: str = "", new_name: str = "", **_) -> ToolResult:
+        try:
+            return await asyncio.to_thread(self._run, path, new_name)
+        except PermissionError as e:
+            return ToolResult(content=str(e))
+        except Exception as e:
+            logger.error("rename_path failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Filesystem error: {e}")
+
+    def _run(self, path: str, new_name: str) -> ToolResult:
+        source = _resolve(path, self._roots, self._default_path)
+        new_name = new_name.strip()
+        if not source.exists():
+            return ToolResult(content=f"Path does not exist: {source}")
+        if not new_name or "/" in new_name or "\\" in new_name or new_name in {".", ".."}:
+            return ToolResult(content="New name must not contain path separators.")
+        destination = _resolve(str(source.parent / new_name), self._roots, self._default_path)
+        if destination.exists():
+            return ToolResult(content=f"Destination already exists: {destination}")
+        source.rename(destination)
+        return ToolResult(content=f"Renamed: {source} -> {destination}")
+
+
+class DuplicatePathTool(BaseTool):
+    name = "duplicate_path"
+    description = "Duplicate a sandboxed file or folder. If destination is omitted, uses '<name> copy'."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File or folder to duplicate."},
+            "destination": {"type": "string", "description": "Optional duplicate destination."},
+        },
+        "required": ["path"],
+    }
+    costly = False
+
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+
+    async def execute(self, path: str = "", destination: str = "", **_) -> ToolResult:
+        try:
+            return await asyncio.to_thread(self._run, path, destination)
+        except PermissionError as e:
+            return ToolResult(content=str(e))
+        except Exception as e:
+            logger.error("duplicate_path failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Filesystem error: {e}")
+
+    def _default_duplicate_path(self, source: Path) -> Path:
+        if source.is_dir():
+            candidate = source.with_name(f"{source.name} copy")
+        else:
+            candidate = source.with_name(f"{source.stem} copy{source.suffix}")
+        if not candidate.exists():
+            return candidate
+        for index in range(2, 1000):
+            if source.is_dir():
+                candidate = source.with_name(f"{source.name} copy {index}")
+            else:
+                candidate = source.with_name(f"{source.stem} copy {index}{source.suffix}")
+            if not candidate.exists():
+                return candidate
+        raise FileExistsError("Could not find an available duplicate name.")
+
+    def _run(self, path: str, destination: str) -> ToolResult:
+        source = _resolve(path, self._roots, self._default_path)
+        if not source.exists():
+            return ToolResult(content=f"Path does not exist: {source}")
+        dest = _resolve(destination, self._roots, self._default_path) if destination else self._default_duplicate_path(source)
+        if dest.exists():
+            return ToolResult(content=f"Destination already exists: {dest}")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_dir():
+            shutil.copytree(source, dest)
+        else:
+            shutil.copy2(source, dest)
+        return ToolResult(content=f"Duplicated: {source} -> {dest}")
+
+
+class CompressPathTool(BaseTool):
+    name = "compress_path"
+    description = "Compress a sandboxed file or folder to a zip archive."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "source": {"type": "string", "description": "File or folder to compress."},
+            "destination": {"type": "string", "description": "Destination .zip archive path."},
+        },
+        "required": ["source", "destination"],
+    }
+    costly = False
+
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+
+    async def execute(self, source: str = "", destination: str = "", **_) -> ToolResult:
+        try:
+            return await asyncio.to_thread(self._run, source, destination)
+        except PermissionError as e:
+            return ToolResult(content=str(e))
+        except Exception as e:
+            logger.error("compress_path failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Filesystem error: {e}")
+
+    def _run(self, source: str, destination: str) -> ToolResult:
+        src = _resolve(source, self._roots, self._default_path)
+        dest = _resolve(destination, self._roots, self._default_path)
+        if not src.exists():
+            return ToolResult(content=f"Source does not exist: {src}")
+        if dest.exists():
+            return ToolResult(content=f"Destination already exists: {dest}")
+        if dest.suffix.lower() != ".zip":
+            return ToolResult(content="Compression destination must end with .zip.")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        base_name = str(dest.with_suffix(""))
+        archive_path = shutil.make_archive(base_name, "zip", root_dir=src.parent, base_dir=src.name)
+        return ToolResult(content=f"Compressed: {src} -> {archive_path}")
+
+
+class UncompressArchiveTool(BaseTool):
+    name = "uncompress_archive"
+    description = "Uncompress a sandboxed zip archive into a new sandboxed destination folder."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "archive": {"type": "string", "description": "Zip archive to extract."},
+            "destination": {"type": "string", "description": "Destination folder that must not already exist."},
+        },
+        "required": ["archive", "destination"],
+    }
+    costly = False
+
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+
+    async def execute(self, archive: str = "", destination: str = "", **_) -> ToolResult:
+        try:
+            return await asyncio.to_thread(self._run, archive, destination)
+        except PermissionError as e:
+            return ToolResult(content=str(e))
+        except Exception as e:
+            logger.error("uncompress_archive failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Filesystem error: {e}")
+
+    def _run(self, archive: str, destination: str) -> ToolResult:
+        archive_path = _resolve(archive, self._roots, self._default_path)
+        dest = _resolve(destination, self._roots, self._default_path)
+        if not archive_path.is_file():
+            return ToolResult(content=f"Not a file: {archive_path}")
+        if archive_path.suffix.lower() != ".zip":
+            return ToolResult(content="Only .zip archives are supported.")
+        if dest.exists():
+            return ToolResult(content=f"Destination already exists: {dest}")
+        dest.mkdir(parents=True, exist_ok=False)
+        try:
+            with zipfile.ZipFile(archive_path) as zf:
+                for member in zf.infolist():
+                    target = (dest / member.filename).resolve()
+                    if not (target == dest or dest in target.parents):
+                        shutil.rmtree(dest)
+                        return ToolResult(content="Archive contains a path outside the destination. Extraction refused.")
+                zf.extractall(dest)
+        except zipfile.BadZipFile:
+            shutil.rmtree(dest)
+            return ToolResult(content=f"Not a valid zip archive: {archive_path}")
+        return ToolResult(content=f"Uncompressed: {archive_path} -> {dest}")
+
+
+class MoveToTrashTool(BaseTool):
+    name = "move_to_trash"
+    description = (
+        "Move a sandboxed file or folder to the user's macOS Trash instead of deleting it permanently. "
+        "Use this for remove/delete requests by default."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Sandboxed file or folder to move to Trash."},
+        },
+        "required": ["path"],
+    }
+    costly = False
+
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+        self._trash = (Path.home() / ".Trash").resolve()
+
+    async def execute(self, path: str = "", **_) -> ToolResult:
+        try:
+            return await asyncio.to_thread(self._run, path)
+        except PermissionError as e:
+            return ToolResult(content=str(e))
+        except Exception as e:
+            logger.error("move_to_trash failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Filesystem error: {e}")
+
+    def _run(self, path: str) -> ToolResult:
+        source = _resolve(path, self._roots, self._default_path)
+        if not source.exists():
+            return ToolResult(content=f"Path does not exist: {source}")
+        self._trash.mkdir(parents=True, exist_ok=True)
+        destination = self._unique_trash_path(source.name)
+        shutil.move(str(source), str(destination))
+        return ToolResult(content=f"Moved to Trash: {source} -> {destination}")
+
+    def _unique_trash_path(self, name: str) -> Path:
+        candidate = self._trash / name
+        if not candidate.exists():
+            return candidate
+        stem = candidate.stem
+        suffix = candidate.suffix
+        return self._trash / f"{stem}-{uuid.uuid4().hex[:8]}{suffix}"
+
+
+class RestoreFromTrashTool(BaseTool):
+    name = "restore_from_trash"
+    description = "Restore a file or folder from macOS Trash to a sandboxed destination path."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "trash_path": {"type": "string", "description": "Path under ~/.Trash returned by move_to_trash."},
+            "destination": {"type": "string", "description": "Sandboxed restore destination."},
+        },
+        "required": ["trash_path", "destination"],
+    }
+    costly = False
+
+    def __init__(self, allowed_roots: tuple[Path, ...] = (), default_path: Path | None = None):
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+        self._trash = (Path.home() / ".Trash").resolve()
+
+    async def execute(self, trash_path: str = "", destination: str = "", **_) -> ToolResult:
+        try:
+            return await asyncio.to_thread(self._run, trash_path, destination)
+        except PermissionError as e:
+            return ToolResult(content=str(e))
+        except Exception as e:
+            logger.error("restore_from_trash failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Filesystem error: {e}")
+
+    def _run(self, trash_path: str, destination: str) -> ToolResult:
+        source = Path(trash_path).expanduser().resolve()
+        if not (source == self._trash or self._trash in source.parents):
+            return ToolResult(content=f"Access denied: trash_path must be under {self._trash}")
+        if not source.exists():
+            return ToolResult(content=f"Trash item does not exist: {source}")
+        dest = _resolve(destination, self._roots, self._default_path)
+        if dest.exists():
+            return ToolResult(content=f"Destination already exists: {dest}. Choose a different restore path.")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(dest))
+        return ToolResult(content=f"Restored: {source} -> {dest}")
+
+
+class DeletePermanentlyTool(BaseTool):
+    name = "delete_permanently"
+    description = (
+        "Permanently delete a sandboxed file or folder. This is irreversible and always requires server-side "
+        "approval. Prefer move_to_trash for normal remove/delete requests."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Sandboxed file or folder to permanently delete."},
+            "approval_id": {"type": "string", "description": "Server-issued approval id for this exact deletion."},
+        },
+        "required": ["path"],
+    }
+    costly = False
+
+    def __init__(
+        self,
+        allowed_roots: tuple[Path, ...] = (),
+        default_path: Path | None = None,
+        approval_manager: ApprovalManager | None = None,
+    ):
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(self, path: str = "", approval_id: str = "", **_) -> ToolResult:
+        try:
+            return await asyncio.to_thread(self._run, path, approval_id)
+        except PermissionError as e:
+            return ToolResult(content=str(e))
+        except Exception as e:
+            logger.error("delete_permanently failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Filesystem error: {e}")
+
+    def _run(self, path: str, approval_id: str) -> ToolResult:
+        target = _resolve(path, self._roots, self._default_path)
+        if not target.exists():
+            return ToolResult(content=f"Path does not exist: {target}")
+        if any(target == root for root in self._roots):
+            return ToolResult(content=f"Refusing to permanently delete a sandbox root: {target}")
+        details = {"path": str(target), "irreversible": True}
+        approval = _approval_or_result(
+            self._approvals,
+            tool_name=self.name,
+            title="permanent deletion",
+            details=details,
+            approval_id=approval_id,
+        )
+        if approval is not None:
+            return approval
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+        return ToolResult(content=f"Permanently deleted: {target}")
+
+
 class OpenPathTool(BaseTool):
     name = "open_path"
     description = "Open an allowed file or folder with the default macOS app."
@@ -608,7 +1087,12 @@ class OpenPathTool(BaseTool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await proc.communicate()
+            try:
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=3)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return ToolResult(content=f"Opened: {p}")
             if proc.returncode != 0:
                 detail = stderr.decode(errors="replace").strip()
                 return ToolResult(content=f"Could not open {p}: {detail or 'open failed'}")

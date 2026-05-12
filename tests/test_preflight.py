@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import subprocess
 import sys
 from unittest.mock import AsyncMock, patch
 
@@ -131,13 +132,15 @@ class TestPreflightBackend:
             with patch("runtime.preflight.PreflightManager._wh_is_running", return_value=True):
                 with patch("runtime.preflight.PreflightManager._start_wh_service", return_value=True):
                     with patch("runtime.preflight.PreflightManager._wait_for_asr_ready") as asr_probe:
-                        _run(manager.check_local_whisper(result))
+                        with patch("runtime.preflight.PreflightManager._probe_microphone_ready") as mic_probe:
+                            _run(manager.check_local_whisper(result))
 
         assert result.wh_available is True
         assert result.speech_available is True
         assert result.listening_available is False
         assert result.wh_bin == "/opt/wh"
         asr_probe.assert_not_called()
+        mic_probe.assert_not_called()
 
     def test_listening_only_preflight_disables_voice_when_asr_is_not_ready(self):
         settings = Settings(LIVE_LISTENING_ENABLED=True, LIVE_SPEECH_ENABLED=False)
@@ -169,6 +172,38 @@ class TestPreflightBackend:
         assert result.listening_available is False
         assert result.wh_bin == "/opt/wh"
 
+    def test_combined_voice_keeps_speech_when_microphone_probe_fails(self):
+        settings = Settings(LIVE_LISTENING_ENABLED=True, LIVE_SPEECH_ENABLED=True)
+        manager = PreflightManager(settings)
+        result = _run(_check_wh_with(
+            manager,
+            resolve="/opt/wh",
+            running=True,
+            asr_ready=True,
+            mic_ready=False,
+        ))
+
+        assert result.wh_available is True
+        assert result.speech_available is True
+        assert result.listening_available is False
+        assert result.wh_bin == "/opt/wh"
+
+    def test_listening_only_preflight_disables_voice_when_microphone_probe_fails(self):
+        settings = Settings(LIVE_LISTENING_ENABLED=True, LIVE_SPEECH_ENABLED=False)
+        manager = PreflightManager(settings)
+        result = _run(_check_wh_with(
+            manager,
+            resolve="/opt/wh",
+            running=True,
+            asr_ready=True,
+            mic_ready=False,
+        ))
+
+        assert result.wh_available is False
+        assert result.speech_available is False
+        assert result.listening_available is False
+        assert result.wh_bin is None
+
 
 class TestModelPull:
     def test_pull_model_times_out_and_kills_process(self):
@@ -183,7 +218,51 @@ class TestModelPull:
         assert proc.killed is True
 
 
-async def _check_wh_with(manager: PreflightManager, resolve: str | None, running: bool, asr_ready: bool):
+class TestLocalWhisperMicrophoneProbe:
+    def test_quiet_room_no_speech_is_not_a_microphone_failure(self):
+        manager = PreflightManager(Settings())
+
+        completed = subprocess.CompletedProcess(
+            args=["wh", "listen", "1", "--raw"],
+            returncode=1,
+            stdout="",
+            stderr="Recording... (Ctrl+C to stop)\nNo speech detected\n",
+        )
+        with patch("runtime.preflight.subprocess.run", return_value=completed):
+            assert manager._probe_microphone_ready("/opt/wh") is True
+
+    def test_microphone_error_is_a_microphone_failure(self):
+        manager = PreflightManager(Settings())
+
+        completed = subprocess.CompletedProcess(
+            args=["wh", "listen", "1", "--raw"],
+            returncode=1,
+            stdout="",
+            stderr="Recording... (Ctrl+C to stop)\nMicrophone error\n",
+        )
+        with patch("runtime.preflight.subprocess.run", return_value=completed):
+            assert manager._probe_microphone_ready("/opt/wh") is False
+
+    def test_no_audio_captured_is_a_microphone_failure(self):
+        manager = PreflightManager(Settings())
+
+        completed = subprocess.CompletedProcess(
+            args=["wh", "listen", "1", "--raw"],
+            returncode=1,
+            stdout="",
+            stderr="Recording... (Ctrl+C to stop)\nNo audio captured\n",
+        )
+        with patch("runtime.preflight.subprocess.run", return_value=completed):
+            assert manager._probe_microphone_ready("/opt/wh") is False
+
+
+async def _check_wh_with(
+    manager: PreflightManager,
+    resolve: str | None,
+    running: bool,
+    asr_ready: bool,
+    mic_ready: bool = True,
+):
     from runtime.models import PreflightResult
 
     result = PreflightResult()
@@ -191,5 +270,6 @@ async def _check_wh_with(manager: PreflightManager, resolve: str | None, running
         with patch("runtime.preflight.PreflightManager._wh_is_running", return_value=running):
             with patch("runtime.preflight.PreflightManager._start_wh_service", return_value=True):
                 with patch("runtime.preflight.PreflightManager._wait_for_asr_ready", return_value=asr_ready):
-                    await manager.check_local_whisper(result)
+                    with patch("runtime.preflight.PreflightManager._probe_microphone_ready", return_value=mic_ready):
+                        await manager.check_local_whisper(result)
     return result

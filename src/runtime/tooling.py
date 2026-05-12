@@ -3,26 +3,48 @@
 from pathlib import Path
 
 from tools.approval import ApprovalManager
-from tools.browser import BrowserSession, ClickElementTool, OpenUrlTool, PageScreenshotTool, WebSearchTool
+from tools.browser import (
+    BrowserSession,
+    ClickElementTool,
+    DownloadFileTool,
+    FillFormFieldTool,
+    OpenUrlTool,
+    PageScreenshotTool,
+    UploadFileTool,
+    WebSearchTool,
+)
 from tools.clipboard import ClipboardTool
 from tools.filesystem import (
+    AppendFileTool,
+    CompareFilesTool,
+    CompressPathTool,
     CopyPathTool,
     CreateDirectoryTool,
+    DeletePermanentlyTool,
+    DuplicatePathTool,
     EditFileTool,
     ListDirectoryTool,
     MovePathTool,
+    MoveToTrashTool,
     OpenPathTool,
+    PrependFileTool,
     ReadFileTool,
+    RenamePathTool,
+    RestoreFromTrashTool,
     RevealPathTool,
+    UncompressArchiveTool,
     WriteFileTool,
     parse_allowed_roots,
 )
 from tools.macos_context import FinderSelectionTool, FrontmostAppTool
 from tools.mcp_stdio import CallMcpTool, ListMcpTools
 from tools.operator import (
+    ActivateAppTool,
     DiscoverCapabilitiesTool,
+    ExtractScreenTextTool,
     FetchUrlTool,
     FileInfoTool,
+    GetAccessibilityTreeTool,
     GetAgentSessionContentTool,
     GetAgentStatusTool,
     GetCodexSessionContentTool,
@@ -32,17 +54,27 @@ from tools.operator import (
     GetVoiceContextTool,
     ListAgentSessionsTool,
     ListCodexSessionsTool,
+    ListOpenAppsTool,
     ListOpenClawSessionsTool,
     ListProcessesTool,
+    ListWindowsTool,
     ManageLaunchAgentTool,
     OpenAppTool,
+    PressHotkeyTool,
+    QuitAppTool,
     RunAgentTaskTool,
     RunCodexTaskTool,
     RunCommandTool,
     RunOpenClawAgentTool,
+    RunShortcutTool,
     SearchFilesTool,
     SetClipboardTool,
     ShowNotificationTool,
+    UiClickTool,
+    UiDragTool,
+    UiScrollTool,
+    UiTypeTextTool,
+    WindowActionTool,
 )
 from tools.pdf import ReadPdfTool
 from tools.registry import ToolRegistry
@@ -73,6 +105,13 @@ def build_tool_registry(
     fs_default = Path(settings.FILESYSTEM_DEFAULT_PATH)
     registry.register(FinderSelectionTool(allowed_roots=fs_roots, default_path=fs_default))
     registry.register(ReadFileTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(AppendFileTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(PrependFileTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(CompareFilesTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(RenamePathTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(DuplicatePathTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(CompressPathTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(UncompressArchiveTool(allowed_roots=fs_roots, default_path=fs_default))
     registry.register(
         WriteFileTool(
             allowed_roots=fs_roots,
@@ -102,6 +141,11 @@ def build_tool_registry(
     )
     registry.register(OpenPathTool(allowed_roots=fs_roots, default_path=fs_default))
     registry.register(RevealPathTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(MoveToTrashTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(RestoreFromTrashTool(allowed_roots=fs_roots, default_path=fs_default))
+    registry.register(
+        DeletePermanentlyTool(allowed_roots=fs_roots, default_path=fs_default, approval_manager=approval_manager)
+    )
     registry.register(ReadPdfTool(allowed_roots=fs_roots, default_path=fs_default))
 
     if settings.NETWORK_TOOLS_ENABLED:
@@ -111,6 +155,23 @@ def build_tool_registry(
         registry.register(WebSearchTool(session=session))
         registry.register(OpenUrlTool(session=session))
         registry.register(ClickElementTool(session=session))
+        registry.register(
+            DownloadFileTool(
+                session=session,
+                allowed_roots=fs_roots,
+                default_path=fs_default,
+                approval_manager=approval_manager,
+            )
+        )
+        registry.register(FillFormFieldTool(session=session))
+        registry.register(
+            UploadFileTool(
+                session=session,
+                allowed_roots=fs_roots,
+                default_path=fs_default,
+                approval_manager=approval_manager,
+            )
+        )
         registry.register(PageScreenshotTool(session=session))
 
     if settings.OS_TOOLS_ENABLED:
@@ -119,10 +180,23 @@ def build_tool_registry(
         registry.register(SearchFilesTool(allowed_roots=fs_roots, default_path=fs_default))
         registry.register(ListProcessesTool())
         registry.register(GetSystemSnapshotTool())
+        registry.register(GetAccessibilityTreeTool())
+        registry.register(ExtractScreenTextTool(ocr_command=settings.SCREEN_OCR_COMMAND))
+        registry.register(ListOpenAppsTool())
+        registry.register(ListWindowsTool())
+        registry.register(WindowActionTool(approval_manager=approval_manager))
         registry.register(GetLaunchAgentStatusTool())
         registry.register(ManageLaunchAgentTool(approval_manager=approval_manager))
+        registry.register(ActivateAppTool())
         registry.register(OpenAppTool(approval_manager=approval_manager))
+        registry.register(QuitAppTool(approval_manager=approval_manager))
+        registry.register(UiClickTool(approval_manager=approval_manager))
+        registry.register(UiScrollTool(approval_manager=approval_manager))
+        registry.register(UiDragTool(approval_manager=approval_manager))
+        registry.register(UiTypeTextTool(approval_manager=approval_manager))
+        registry.register(PressHotkeyTool(approval_manager=approval_manager))
         registry.register(ShowNotificationTool())
+        registry.register(RunShortcutTool(approval_manager=approval_manager))
         registry.register(SetClipboardTool(approval_manager=approval_manager))
 
     if settings.AGENT_TOOLS_ENABLED:

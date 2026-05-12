@@ -125,3 +125,59 @@ class TestBackgroundTaskManager:
             assert detail.status == TaskStatus.CANCELLED
 
         _run(run())
+
+    def test_pause_and_resume_queued_task_before_it_starts(self):
+        async def run():
+            manager = BackgroundTaskManager(max_concurrent=1, task_timeout_seconds=5)
+            blocker_started = asyncio.Event()
+            release_blocker = asyncio.Event()
+            second_started = asyncio.Event()
+
+            async def blocker(task):
+                blocker_started.set()
+                await release_blocker.wait()
+                return "first"
+
+            async def worker(task):
+                second_started.set()
+                return "second"
+
+            blocker_task = manager.create_task("Blocker", "wait", blocker)
+            await blocker_started.wait()
+            task = manager.create_task("Second", "run later", worker)
+
+            assert manager.pause_task(task.id) is True
+            assert task.status == TaskStatus.PAUSED
+            release_blocker.set()
+            await manager.wait_for_task(blocker_task.id)
+            await asyncio.sleep(0.05)
+            assert second_started.is_set() is False
+
+            assert manager.resume_task(task.id) is True
+            await manager.wait_for_task(task.id)
+            assert second_started.is_set() is True
+            assert task.status == TaskStatus.COMPLETED
+
+        _run(run())
+
+    def test_events_fan_out_to_multiple_listeners(self):
+        async def run():
+            primary_events = []
+            listener_events = []
+            manager = BackgroundTaskManager(on_event=lambda task, event: primary_events.append(event))
+            manager.add_event_listener(lambda task, event: listener_events.append((task.id, event)))
+
+            async def worker(task):
+                return "ok"
+
+            task = manager.create_task("Shared event task", "run shared event task", worker)
+            await manager.wait_for_task(task.id)
+            await manager.shutdown()
+            return task, primary_events, listener_events
+
+        task, primary_events, listener_events = _run(run())
+
+        assert "accepted" in primary_events
+        assert "completed" in primary_events
+        assert (task.id, "accepted") in listener_events
+        assert (task.id, "completed") in listener_events

@@ -6,9 +6,12 @@ import logging
 import re
 import subprocess
 import sys
+from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
+from tools.approval import GLOBAL_APPROVAL_MANAGER, ApprovalManager, approval_required_message
 from tools.base import BaseTool, ToolResult
+from tools.filesystem import _DEFAULT_ALLOWED_ROOTS, _resolve
 
 logger = logging.getLogger(__name__)
 
@@ -324,6 +327,54 @@ class ClickElementTool(BaseTool):
             return ToolResult(content=f"Could not click '{selector}': element not found or not clickable.")
 
 
+class FillFormFieldTool(BaseTool):
+    name = "fill_form_field"
+    description = (
+        "Fill a text field, textarea, or editable element on the current browser page without submitting the form. "
+        "Call this when the user asks to enter text but not submit."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "selector": {
+                "type": "string",
+                "description": "CSS selector, label text, placeholder text, or accessible name for the field.",
+            },
+            "value": {"type": "string", "description": "Text to place in the field."},
+        },
+        "required": ["selector", "value"],
+    }
+    costly = True
+
+    def __init__(self, session: BrowserSession | None = None):
+        self._session = session or BrowserSession()
+
+    async def execute(self, selector: str = "", value: str = "", **_) -> ToolResult:
+        if not selector:
+            return ToolResult(content="Missing 'selector'.")
+        if value == "":
+            return ToolResult(content="Missing 'value'.")
+        try:
+            page = await self._session.page()
+        except RuntimeError as e:
+            return ToolResult(content=str(e))
+        try:
+            locator = page.locator(selector).first
+            if await locator.count() == 0:
+                locator = page.get_by_label(selector).first
+            if await locator.count() == 0:
+                locator = page.get_by_placeholder(selector).first
+            if await locator.count() == 0:
+                locator = page.get_by_role("textbox", name=selector).first
+            if await locator.count() == 0:
+                return ToolResult(content=f"Could not find form field: {selector}")
+            await locator.fill(value, timeout=5000)
+            return ToolResult(content=f"Filled {selector} ({len(value)} characters). No submit action was taken.")
+        except Exception as e:
+            logger.error("fill_form_field failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Could not fill '{selector}'. The field may not be editable.")
+
+
 class PageScreenshotTool(BaseTool):
     name = "page_screenshot"
     description = (
@@ -358,3 +409,159 @@ class PageScreenshotTool(BaseTool):
         except Exception as e:
             logger.error("page_screenshot failed: %s", e, exc_info=True)
             return ToolResult(content="Failed to take page screenshot. The page may have crashed or timed out.")
+
+
+class DownloadFileTool(BaseTool):
+    name = "download_file"
+    description = (
+        "Click a download link or button on the current browser page and save the downloaded file to an allowed "
+        "local filesystem path. Requires server-side user approval for the exact selector and destination."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "selector": {
+                "type": "string",
+                "description": "CSS selector or visible text for the download link/button.",
+            },
+            "destination": {
+                "type": "string",
+                "description": "Allowed local destination file path. Relative paths resolve under FILESYSTEM_DEFAULT_PATH.",
+            },
+            "approval_id": {"type": "string", "description": "Server-issued approval id for this exact download."},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve downloads."},
+        },
+        "required": ["selector", "destination"],
+    }
+    costly = True
+
+    def __init__(
+        self,
+        session: BrowserSession | None = None,
+        allowed_roots: tuple[Path, ...] = (),
+        default_path: Path | None = None,
+        approval_manager: ApprovalManager | None = None,
+    ):
+        self._session = session or BrowserSession()
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(
+        self,
+        selector: str = "",
+        destination: str = "",
+        approval_id: str = "",
+        confirmed: bool = False,
+        **_,
+    ) -> ToolResult:
+        if not selector:
+            return ToolResult(content="Missing 'selector'.")
+        if not destination:
+            return ToolResult(content="Missing 'destination'.")
+        try:
+            dest = _resolve(destination, self._roots, self._default_path)
+        except (PermissionError, ValueError) as e:
+            return ToolResult(content=str(e))
+
+        details = {"selector": selector, "destination": str(dest)}
+        if not approval_id or not self._approvals.consume(approval_id, self.name, "browser download", details):
+            approval = self._approvals.request(self.name, "browser download", details)
+            return ToolResult(content=approval_required_message(approval))
+
+        try:
+            page = await self._session.page()
+        except RuntimeError as e:
+            return ToolResult(content=str(e))
+        try:
+            locator = page.locator(selector).first
+            if await locator.count() == 0:
+                locator = page.get_by_role("link", name=selector).first
+            if await locator.count() == 0:
+                locator = page.get_by_text(selector, exact=False).first
+            if await locator.count() == 0:
+                return ToolResult(content=f"Could not find download target: {selector}")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            async with page.expect_download(timeout=15000) as download_info:
+                await locator.click(timeout=5000, no_wait_after=True)
+            download_value = download_info.value
+            download = await download_value if hasattr(download_value, "__await__") else download_value
+            await download.save_as(str(dest))
+            suggested = getattr(download, "suggested_filename", "")
+            suffix = f" (suggested name: {suggested})" if suggested else ""
+            return ToolResult(content=f"Downloaded: {dest}{suffix}")
+        except Exception as e:
+            logger.error("download_file failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Could not download from '{selector}'. The page may not have started a download.")
+
+
+class UploadFileTool(BaseTool):
+    name = "upload_file"
+    description = (
+        "Attach a local file to a file input on the current browser page. Requires server-side user approval "
+        "for the exact selector and sandboxed file path."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "selector": {"type": "string", "description": "CSS selector for the file input."},
+            "path": {
+                "type": "string",
+                "description": "Allowed local file path to upload. Relative paths resolve under FILESYSTEM_DEFAULT_PATH.",
+            },
+            "approval_id": {"type": "string", "description": "Server-issued approval id for this exact upload."},
+            "confirmed": {"type": "boolean", "description": "Ignored. Models cannot approve uploads."},
+        },
+        "required": ["selector", "path"],
+    }
+    costly = True
+
+    def __init__(
+        self,
+        session: BrowserSession | None = None,
+        allowed_roots: tuple[Path, ...] = (),
+        default_path: Path | None = None,
+        approval_manager: ApprovalManager | None = None,
+    ):
+        self._session = session or BrowserSession()
+        self._roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
+        self._default_path = default_path.expanduser().resolve() if default_path else None
+        self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+
+    async def execute(
+        self,
+        selector: str = "",
+        path: str = "",
+        approval_id: str = "",
+        confirmed: bool = False,
+        **_,
+    ) -> ToolResult:
+        if not selector:
+            return ToolResult(content="Missing 'selector'.")
+        if not path:
+            return ToolResult(content="Missing 'path'.")
+        try:
+            source = _resolve(path, self._roots, self._default_path)
+        except (PermissionError, ValueError) as e:
+            return ToolResult(content=str(e))
+        if not source.is_file():
+            return ToolResult(content=f"Not a file: {source}")
+
+        details = {"selector": selector, "path": str(source)}
+        if not approval_id or not self._approvals.consume(approval_id, self.name, "browser file upload", details):
+            approval = self._approvals.request(self.name, "browser file upload", details)
+            return ToolResult(content=approval_required_message(approval))
+
+        try:
+            page = await self._session.page()
+        except RuntimeError as e:
+            return ToolResult(content=str(e))
+        try:
+            locator = page.locator(selector).first
+            if await locator.count() == 0:
+                return ToolResult(content=f"Could not find upload field: {selector}")
+            await locator.set_input_files(str(source), timeout=5000)
+            return ToolResult(content=f"Uploaded: {source} into {selector}. No submit action was taken.")
+        except Exception as e:
+            logger.error("upload_file failed: %s", e, exc_info=True)
+            return ToolResult(content=f"Could not upload '{source}'. The field may not accept files.")

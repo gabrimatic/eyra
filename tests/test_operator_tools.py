@@ -8,26 +8,41 @@ import sys
 from asyncio.subprocess import PIPE
 from unittest.mock import patch
 
+from PIL import Image
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from tools.approval import ApprovalManager
 from tools.operator import (
+    ActivateAppTool,
     DiscoverCapabilitiesTool,
+    ExtractScreenTextTool,
     FetchUrlTool,
     FileInfoTool,
+    GetAccessibilityTreeTool,
     GetAgentSessionContentTool,
     GetAgentStatusTool,
     GetLaunchAgentStatusTool,
     GetSystemSnapshotTool,
     GetVoiceContextTool,
     ListAgentSessionsTool,
+    ListOpenAppsTool,
+    ListWindowsTool,
     ManageLaunchAgentTool,
     OpenAppTool,
+    PressHotkeyTool,
+    QuitAppTool,
     RunAgentTaskTool,
     RunCommandTool,
+    RunShortcutTool,
     SearchFilesTool,
     SetClipboardTool,
     ShowNotificationTool,
+    UiClickTool,
+    UiDragTool,
+    UiScrollTool,
+    UiTypeTextTool,
+    WindowActionTool,
 )
 from utils.settings import Settings
 
@@ -51,6 +66,8 @@ class TestDiscoverCapabilitiesTool:
         data = json.loads(result.content)
 
         assert data["offlineByDefault"] is True
+        assert data["capabilities"]["localFirst"] is True
+        assert data["capabilities"]["privacy"]["leavesMachineByDefault"] is True
         assert data["tools"]["os"] is True
         assert data["tools"]["agents"] is False
         assert data["tools"]["mcp"] is True
@@ -165,6 +182,236 @@ class TestFileInspectionTools:
 
 
 class TestMacOperatorTools:
+    def test_extract_screen_text_requires_configured_local_ocr_backend(self):
+        result = _run(ExtractScreenTextTool().execute())
+
+        assert "SCREEN_OCR_COMMAND" in result.content
+        assert "local OCR" in result.content
+
+    def test_extract_screen_text_pipes_in_memory_screenshot_to_local_ocr(self):
+        async def fake_capture():
+            return Image.new("RGB", (2, 2), "white")
+
+        with patch("tools.operator.capture_screenshot_in_memory", fake_capture):
+            with patch("tools.operator.subprocess.run") as run:
+                run.return_value.returncode = 0
+                run.return_value.stdout = "Hello screen\n"
+                run.return_value.stderr = ""
+
+                result = _run(ExtractScreenTextTool(ocr_command="ocr-local --stdin").execute())
+
+        assert "Hello screen" in result.content
+        assert run.call_args.kwargs["input"].startswith(b"\x89PNG")
+        assert run.call_args.kwargs["capture_output"] is True
+
+    def test_extract_screen_text_reports_permission_blocker_without_traceback(self):
+        async def fake_capture():
+            raise RuntimeError("screen permission denied")
+
+        with patch("tools.operator.capture_screenshot_in_memory", fake_capture):
+            result = _run(ExtractScreenTextTool(ocr_command="ocr-local").execute())
+
+        assert "Screen recording permission" in result.content
+        assert "traceback" not in result.content.lower()
+
+    def test_accessibility_tree_uses_system_events(self):
+        stdout = (
+            "app=Finder\n"
+            "window=Downloads\n"
+            "AXButton|Back|enabled=true\n"
+            "AXTextField|Search|enabled=true\n"
+        )
+        with patch("tools.operator.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = stdout
+            run.return_value.stderr = ""
+
+            result = _run(GetAccessibilityTreeTool().execute(limit=10))
+
+        data = json.loads(result.content)
+        assert data["frontmostApp"] == "Finder"
+        assert data["window"] == "Downloads"
+        assert data["elements"][0]["role"] == "AXButton"
+        assert data["elements"][0]["title"] == "Back"
+        assert run.call_args.args[0][0] == "osascript"
+
+    def test_accessibility_tree_reports_permission_blocker_without_traceback(self):
+        with patch("tools.operator.subprocess.run") as run:
+            run.return_value.returncode = 1
+            run.return_value.stdout = ""
+            run.return_value.stderr = "System Events got an error: Not authorized to send Apple events to System Events."
+
+            result = _run(GetAccessibilityTreeTool().execute())
+
+        assert "accessibility permission" in result.content.lower()
+        assert "traceback" not in result.content.lower()
+
+    def test_list_open_apps_returns_visible_app_names(self):
+        with patch("tools.operator.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = "Finder\nTerminal\n"
+            run.return_value.stderr = ""
+
+            result = _run(ListOpenAppsTool().execute())
+
+        data = json.loads(result.content)
+        assert data["apps"] == ["Finder", "Terminal"]
+        assert run.call_args.args[0][0] == "osascript"
+
+    def test_list_windows_returns_app_window_titles(self):
+        with patch("tools.operator.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = "Downloads\nDocuments\n"
+            run.return_value.stderr = ""
+
+            result = _run(ListWindowsTool().execute(app="Finder"))
+
+        data = json.loads(result.content)
+        assert data["app"] == "Finder"
+        assert data["windows"] == ["Downloads", "Documents"]
+
+    def test_window_action_requires_action_specific_approval(self):
+        manager = ApprovalManager(ttl_seconds=60)
+        tool = WindowActionTool(approval_manager=manager)
+
+        pending = _run(tool.execute(action="minimize", app="Finder", window="Downloads"))
+        approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+        assert manager.approve(approval_id) is True
+
+        with patch("tools.operator.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = ""
+            run.return_value.stderr = ""
+
+            result = _run(
+                tool.execute(action="minimize", app="Finder", window="Downloads", approval_id=approval_id)
+            )
+
+        assert result.content == "Window minimize applied: Finder / Downloads"
+        script = run.call_args.args[0][-1]
+        assert "set value of attribute \"AXMinimized\"" in script
+        assert "Downloads" in script
+
+    def test_window_action_refuses_unknown_action_before_approval(self):
+        manager = ApprovalManager(ttl_seconds=60)
+
+        result = _run(WindowActionTool(approval_manager=manager).execute(action="explode", app="Finder"))
+
+        assert "Unsupported window action" in result.content
+        assert manager.list_pending() == []
+
+    def test_activate_app_uses_system_events_without_approval(self):
+        with patch("tools.operator.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = ""
+            run.return_value.stderr = ""
+
+            result = _run(ActivateAppTool().execute(name="Finder"))
+
+        assert result.content == "Activated app: Finder"
+        assert "System Events" in run.call_args.args[0][-1]
+
+    def test_quit_app_requires_action_specific_approval(self):
+        manager = ApprovalManager(ttl_seconds=60)
+        tool = QuitAppTool(approval_manager=manager)
+
+        pending = _run(tool.execute(name="Preview"))
+        approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+        assert manager.approve(approval_id) is True
+
+        with patch("tools.operator.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = ""
+            run.return_value.stderr = ""
+
+            result = _run(tool.execute(name="Preview", approval_id=approval_id))
+
+        assert "Quit app: Preview" in result.content
+        assert "Approval required" in _run(tool.execute(name="Preview", approval_id=approval_id)).content
+
+    def test_ui_click_requires_confirmation(self):
+        result = _run(UiClickTool().execute(x=100, y=200))
+
+        assert "Approval required" in result.content
+
+    def test_ui_click_uses_cliclick_after_confirmation(self):
+        manager = ApprovalManager(ttl_seconds=60)
+        tool = UiClickTool(approval_manager=manager)
+        pending = _run(tool.execute(x=100, y=200))
+        approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+        assert manager.approve(approval_id) is True
+
+        with patch("tools.operator.shutil.which", return_value="/usr/local/bin/cliclick"):
+            with patch("tools.operator.subprocess.run") as run:
+                run.return_value.returncode = 0
+                run.return_value.stderr = ""
+
+                result = _run(tool.execute(x=100, y=200, approval_id=approval_id))
+
+        assert "Clicked: 100,200" in result.content
+        assert run.call_args.args[0] == ["/usr/local/bin/cliclick", "c:100,200"]
+
+    def test_ui_scroll_requires_confirmation_and_uses_cliclick(self):
+        manager = ApprovalManager(ttl_seconds=60)
+        tool = UiScrollTool(approval_manager=manager)
+        pending = _run(tool.execute(direction="down", amount=4))
+        approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+        assert manager.approve(approval_id) is True
+
+        with patch("tools.operator.shutil.which", return_value="/usr/local/bin/cliclick"):
+            with patch("tools.operator.subprocess.run") as run:
+                run.return_value.returncode = 0
+                run.return_value.stderr = ""
+
+                result = _run(tool.execute(direction="down", amount=4, approval_id=approval_id))
+
+        assert "Scrolled down by 4" in result.content
+        assert run.call_args.args[0] == ["/usr/local/bin/cliclick", "w:0,-4"]
+
+    def test_ui_drag_requires_confirmation_and_uses_cliclick(self):
+        manager = ApprovalManager(ttl_seconds=60)
+        tool = UiDragTool(approval_manager=manager)
+        pending = _run(tool.execute(start_x=10, start_y=20, end_x=30, end_y=40))
+        approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+        assert manager.approve(approval_id) is True
+
+        with patch("tools.operator.shutil.which", return_value="/usr/local/bin/cliclick"):
+            with patch("tools.operator.subprocess.run") as run:
+                run.return_value.returncode = 0
+                run.return_value.stderr = ""
+
+                result = _run(tool.execute(start_x=10, start_y=20, end_x=30, end_y=40, approval_id=approval_id))
+
+        assert "Dragged: 10,20 -> 30,40" in result.content
+        assert run.call_args.args[0] == [
+            "/usr/local/bin/cliclick",
+            "m:10,20",
+            "dd:10,20",
+            "m:30,40",
+            "du:30,40",
+        ]
+
+    def test_ui_type_text_requires_confirmation(self):
+        result = _run(UiTypeTextTool().execute(text="hello"))
+
+        assert "Approval required" in result.content
+
+    def test_press_hotkey_invokes_osascript_after_confirmation(self):
+        manager = ApprovalManager(ttl_seconds=60)
+        tool = PressHotkeyTool(approval_manager=manager)
+        pending = _run(tool.execute(key="s", modifiers=["command"]))
+        approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+        assert manager.approve(approval_id) is True
+
+        with patch("tools.operator.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stderr = ""
+
+            result = _run(tool.execute(key="s", modifiers=["command"], approval_id=approval_id))
+
+        assert "Pressed hotkey: command+s" in result.content
+        assert run.call_args.args[0][0] == "osascript"
+
     def test_set_clipboard_requires_confirmation(self):
         result = _run(SetClipboardTool().execute(text="hello"))
 
@@ -195,6 +442,31 @@ class TestMacOperatorTools:
 
         assert "Notification shown" in result.content
         assert run.call_args.args[0][0] == "osascript"
+
+    def test_run_shortcut_requires_approval_and_invokes_shortcuts_cli(self):
+        manager = ApprovalManager(ttl_seconds=60)
+        tool = RunShortcutTool(approval_manager=manager)
+        pending = _run(tool.execute(name="Resize Image", input_text="hello"))
+        approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+        assert manager.approve(approval_id) is True
+
+        with patch("tools.operator.shutil.which", return_value="/usr/bin/shortcuts"):
+            with patch("tools.operator.subprocess.run") as run:
+                run.return_value.returncode = 0
+                run.return_value.stdout = "ok"
+                run.return_value.stderr = ""
+
+                result = _run(tool.execute(name="Resize Image", input_text="hello", approval_id=approval_id))
+
+        assert "Shortcut ran: Resize Image" in result.content
+        assert run.call_args.args[0] == ["/usr/bin/shortcuts", "run", "Resize Image", "--input-path", "-"]
+        assert run.call_args.kwargs["input"] == "hello"
+
+    def test_run_shortcut_reports_missing_shortcuts_cli_without_approval(self):
+        with patch("tools.operator.shutil.which", return_value=None):
+            result = _run(RunShortcutTool().execute(name="Resize Image"))
+
+        assert "shortcuts command is not available" in result.content
 
     def test_open_app_requires_confirmation(self):
         result = _run(OpenAppTool().execute(name="Calculator"))
