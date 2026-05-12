@@ -14,7 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `JOB_STORE_PATH` setting for the local durable job database.
 - `/voice-diagnose` for bounded local microphone diagnostics, all-zero audio reporting, selected-device checks, VAD probing, Local Whisper socket checks, and generated WAV transcription checks.
 - `VOICE_INPUT_DEVICE`, `VOICE_SAMPLE_RATE`, `VOICE_DEBUG_RECORD_SECONDS`, and `VOICE_DIAGNOSTIC_SAVE_AUDIO` settings for microphone selection and diagnostics.
-- Local `scripts/certify_voice_to_computer.py` certification matrix for offline product-contract checks across voice diagnostics, durable jobs, task control, operation ledger, triggers, and disabled-by-default optional surfaces.
+- Local `scripts/certify_voice_to_computer.py` certification matrix for offline product-contract checks across voice diagnostics, durable jobs, task control, operation ledger, Web approvals, triggers, and disabled-by-default optional surfaces.
+- Opt-in certification rows for enabled browser, OS, and coding-agent approval paths without contacting remote services by default.
 - `/operations` and “What changed?” support for inspecting recent local operation ledger entries.
 - Sandboxed `move_to_trash` and `restore_from_trash` filesystem tools.
 - Runtime capability and privacy-boundary snapshots for `/capabilities`, “What can you control?”, Web health, and the `discover_capabilities` tool.

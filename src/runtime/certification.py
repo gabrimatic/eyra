@@ -150,6 +150,7 @@ def run_certification(settings: Settings | None = None, *, include_physical: boo
             _check_web_runtime_contracts(report, tmp_path)
             _check_enabled_browser_tool_contract(report, settings, tmp_path)
             _check_enabled_os_tool_contract(report, settings, tmp_path)
+            asyncio.run(_check_enabled_agent_coding_contract(report, settings, tmp_path))
         finally:
             trigger_store.close()
             job_store.close()
@@ -775,6 +776,7 @@ def _check_web_runtime_contracts(report: CertificationReport, tmp_path: Path) ->
     _guarded(report, "web_standalone_runtime", lambda: _check_web_standalone_runtime(web_root))
     _guarded(report, "web_shared_runtime", lambda: _check_web_shared_runtime(web_root))
     _guarded(report, "web_auth", lambda: _check_web_auth(web_root), command="GET /api/tasks")
+    _guarded(report, "web_approval_api", lambda: _check_web_approval_api(web_root), command="/api/approvals")
     _guarded(report, "web_event_stream", lambda: _check_web_event_stream(web_root), command="/api/events")
     _guarded(
         report,
@@ -892,6 +894,55 @@ async def _check_os_enabled_list_open_apps(settings: Settings, root: Path) -> st
     return "Enabled OS tool registry listed visible macOS applications."
 
 
+async def _check_enabled_agent_coding_contract(
+    report: CertificationReport,
+    settings: Settings,
+    tmp_path: Path,
+) -> None:
+    if not settings.AGENT_TOOLS_ENABLED:
+        report.add(
+            "agent_enabled_coding_approval",
+            "skipped",
+            "Agent bridge is disabled in settings.",
+            command="AGENT_TOOLS_ENABLED=true run_codex_task",
+        )
+        return
+    await _guarded_async(
+        report,
+        "agent_enabled_coding_approval",
+        lambda: _check_agent_coding_approval(settings, tmp_path / "agent-coding"),
+        command="run_codex_task",
+    )
+
+
+async def _check_agent_coding_approval(settings: Settings, root: Path) -> str:
+    from runtime.tooling import build_tool_registry
+
+    root.mkdir(parents=True, exist_ok=True)
+    approvals = ApprovalManager()
+    safe_settings = replace(
+        settings,
+        FILESYSTEM_ALLOWED_PATHS=str(root),
+        FILESYSTEM_DEFAULT_PATH=str(root),
+    )
+    registry = build_tool_registry(safe_settings, approval_manager=approvals)
+    names = {schema["function"]["name"] for schema in registry.to_openai_tools(include_costly=True)}
+    if "run_codex_task" not in names:
+        raise RuntimeError("run_codex_task was not registered while agent tools were enabled.")
+    result = await registry.execute(
+        "run_codex_task",
+        json.dumps({"task": "inspect README without changing files", "cwd": str(root)}),
+    )
+    pending = approvals.list_pending()
+    if "Approval required" not in result.content or len(pending) != 1:
+        raise RuntimeError("Coding agent bridge did not require server-side approval before execution.")
+    if pending[0].tool_name != "run_codex_task" or pending[0].details.get("agent") != "codex":
+        raise RuntimeError("Coding agent approval did not capture the exact Codex delegation action.")
+    if pending[0].approved or pending[0].consumed:
+        raise RuntimeError("Coding agent approval was unexpectedly approved or consumed.")
+    return "Enabled coding-agent bridge registered and required exact server-side approval before execution."
+
+
 def _web_cert_settings(root: Path) -> Settings:
     return Settings(
         USE_MOCK_CLIENT=True,
@@ -974,6 +1025,44 @@ def _check_web_auth(root: Path) -> str:
         if "tasks" not in payload:
             raise RuntimeError("Authorized Web API request did not return task payload.")
         return "Web API required an exact token for non-health endpoints."
+    finally:
+        handle.close()
+        runtime.close()
+
+
+def _check_web_approval_api(root: Path) -> str:
+    runtime, handle, base = _start_web_cert_server(root / "approvals")
+    try:
+        approve_me = runtime.approvals.request("run_command", "shell command", {"command": "echo approve"})
+        reject_me = runtime.approvals.request("run_command", "shell command", {"command": "echo reject"})
+        unauthorized = False
+        try:
+            urllib.request.urlopen(base + "/api/approvals", timeout=5)
+        except urllib.error.HTTPError as exc:
+            unauthorized = exc.code == 401
+        if not unauthorized:
+            raise RuntimeError("Web approvals API allowed an unauthenticated request.")
+
+        listed = _web_get_json(base + "/api/approvals", token=handle.web_session_token)
+        listed_ids = {row["id"] for row in listed.get("approvals", [])}
+        if {approve_me.id, reject_me.id} - listed_ids:
+            raise RuntimeError("Web approvals API did not list pending approvals.")
+
+        approved = _web_post_json(
+            base + "/api/approve",
+            {"approvalId": approve_me.id},
+            token=handle.web_session_token,
+        )
+        rejected = _web_post_json(
+            base + "/api/reject",
+            {"approvalId": reject_me.id},
+            token=handle.web_session_token,
+        )
+        if approved.get("approved") is not True or rejected.get("rejected") is not True:
+            raise RuntimeError("Web approval API did not mutate approval state.")
+        if not runtime.approvals.get(approve_me.id).approved or not runtime.approvals.get(reject_me.id).rejected:
+            raise RuntimeError("Web approval mutation did not reach the runtime approval manager.")
+        return "Web approvals API listed, approved, rejected, and required token auth."
     finally:
         handle.close()
         runtime.close()
