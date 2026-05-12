@@ -49,6 +49,7 @@ class TestStartupSelector:
         assert "REALTIME_ALLOWED_TOOLS=get_current_time" in content
         assert "VISION_MODEL=gemma3:4b" in content
         assert "REALTIME_VOICE_ENABLED=true" in content
+        assert "REALTIME_MODEL=gpt-realtime" in content
         assert "OPENAI_API_KEY=sk-test" in content
 
     def test_mock_client_env_skips_provider_setup(self, monkeypatch, tmp_path):

@@ -15,6 +15,15 @@ from chat.complexity_scorer import ComplexityScorer
 from chat.message_handler import process_task_stream
 from chat.session_state import InteractionStyle, QualityMode
 from clients.ai_client import THINK_END, THINK_START
+from runtime.intents import (
+    extract_pdf_path,
+    needs_screen_context,
+    requires_filesystem,
+    requires_model_driven_tools,
+    requires_network,
+    should_background_task,
+    task_title,
+)
 from runtime.models import LiveRuntimeState, PreflightResult, RuntimeStatus
 from runtime.preflight import PreflightManager
 from runtime.speech_controller import SpeechController
@@ -48,25 +57,6 @@ _QUIT_WORDS = {"quit", "exit", "bye", "goodbye", "q"}
 
 # Split streamed chunks on think-block sentinels so the renderer can style them.
 _THINK_SPLIT = re.compile(f"({re.escape(THINK_START)}|{re.escape(THINK_END)})")
-
-# Screen-intent detection: only match UI-specific nouns or
-# action verbs with a visual direct object.
-_UI_NOUNS = (
-    r"screen|display|window|app|browser|tab|"
-    r"button|menu|dialog|popup|modal|sidebar|toolbar|"
-    r"notification|icon|cursor|selection|highlight"
-)
-_SCREEN_CUES = re.compile(
-    rf"\b({_UI_NOUNS})\b"
-    r"|"
-    rf"\b(look(?:ing)?\s+at|show\s+me|read\s+the|text\s+on|code\s+on|what'?s\s+on)\s+(the\s+)?({_UI_NOUNS}|this|that|it|here)\b"
-    r"|"
-    r"\bwhat\s+(?:i'?m|i am)\s+looking\s+at\b"
-    r"|"
-    r"\b(what\s+is\s+(this|that)|what'?s\s+(this|that)|see\s+(this|that|here)|explain\s+(this|that))\b",
-    re.I,
-)
-
 
 def _settings_int(settings: Settings, name: str, default: int) -> int:
     value = getattr(settings, name, default)
@@ -554,7 +544,7 @@ class LiveSession:
     # ── Screen context detection ──────────────────────────────────────────
 
     def _needs_screen_context(self, text: str) -> bool:
-        return bool(_SCREEN_CUES.search(text))
+        return needs_screen_context(text)
 
     # ── User input handling ───────────────────────────────────────────────
 
@@ -778,32 +768,19 @@ class LiveSession:
         return f"~/{folder_key.title()}/{name}"
 
     def _should_background_task(self, text: str) -> bool:
-        lowered = text.lower()
-        if self._needs_screen_context(text) or self._requires_filesystem(text) or self._requires_network(text):
-            return True
-        return bool(re.search(
-            r"\b(summarize|read|open|move|copy|create|write|edit|organize|inspect|translate|pdf|file|folder|website)\b",
-            lowered,
-        ))
+        return should_background_task(text)
 
     def _requires_filesystem(self, text: str) -> bool:
-        return bool(re.search(r"\b(file|folder|pdf|desktop|documents|downloads|clipboard|move|copy|write|create|open|read)\b", text, re.I))
+        return requires_filesystem(text)
 
     def _requires_network(self, text: str) -> bool:
-        return bool(re.search(r"https?://|\b(website|web page|webpage|weather|browse|search the web)\b", text, re.I))
+        return requires_network(text)
 
     def _requires_model_driven_tools(self, text: str) -> bool:
-        if self._needs_screen_context(text):
-            return False
-        if re.search(r"\bpdf\b", text, re.I) and re.search(r"(?:~|/)[^\s'\"<>]+?\.pdf\b", text, re.I):
-            return False
-        return self._requires_filesystem(text) or self._requires_network(text)
+        return requires_model_driven_tools(text)
 
     def _task_title(self, text: str) -> str:
-        title = " ".join(text.strip().split())
-        if len(title) > 48:
-            title = title[:45].rstrip() + "..."
-        return title or "Task"
+        return task_title(text)
 
     async def _run_worker_task(
         self,
@@ -866,11 +843,10 @@ class LiveSession:
     ) -> str | None:
         if not re.search(r"\bpdf\b", text_content, re.I):
             return None
-        path_match = re.search(r"(?P<path>(?:~|/)[^\s'\"<>]+?\.pdf)\b", text_content, re.I)
-        if path_match is None:
+        pdf_path = extract_pdf_path(text_content)
+        if pdf_path is None:
             return None
 
-        pdf_path = path_match.group("path").rstrip(".,;:")
         task.mark_progress("Reading PDF locally")
         extracted = await self._tool_registry.execute("read_pdf", json.dumps({"path": pdf_path, "max_chars": 50000}))
         if "No extractable text found" in extracted.content or extracted.content.startswith(("Access denied:", "Not a file:", "Not a PDF file:", "Could not read PDF")):
