@@ -97,6 +97,8 @@ class RuntimeRouter:
         text = envelope.text
         if envelope.source.value == "realtime_voice":
             return ExecutionClass.REALTIME_VOICE_TURN
+        if self._requires_shell(text) or self._requires_os_automation(text) or self._requires_mcp(text):
+            return ExecutionClass.TOOL_ASSISTED_CHAT
         if needs_screen_context(text):
             return ExecutionClass.SCREEN_ANALYSIS
         if extract_pdf_path(text):
@@ -136,7 +138,43 @@ class RuntimeRouter:
                     caps.add(Capability.FILE_WRITE)
             if requires_network(envelope.text):
                 caps.add(Capability.NETWORK)
+            if RuntimeRouter._requires_shell(envelope.text):
+                caps.add(Capability.SHELL)
+            if RuntimeRouter._requires_os_automation(envelope.text):
+                caps.add(Capability.OS_AUTOMATION)
+            if RuntimeRouter._requires_mcp(envelope.text):
+                caps.add(Capability.MCP)
         return frozenset(caps)
+
+    @staticmethod
+    def _requires_shell(text: str) -> bool:
+        return bool(
+            re.search(
+                r"\b(run|execute)\s+(?:a\s+)?(?:shell\s+)?command\b|\bshell command\b|\bterminal command\b",
+                text,
+                re.I,
+            )
+        )
+
+    @staticmethod
+    def _requires_os_automation(text: str) -> bool:
+        return bool(
+            re.search(
+                r"\b(click|type|hotkey|keyboard shortcut|scroll|drag|window action|activate app|open app|quit app|launchagent)\b",
+                text,
+                re.I,
+            )
+        )
+
+    @staticmethod
+    def _requires_mcp(text: str) -> bool:
+        return bool(
+            re.search(
+                r"\bmcp\b|\bcall\s+\w+\s+tool\b|\blist\s+\w+\s+tools\b",
+                text,
+                re.I,
+            )
+        )
 
     @staticmethod
     def _risk_tier(text: str, execution_class: ExecutionClass) -> RiskTier:
@@ -147,9 +185,11 @@ class RuntimeRouter:
             return RiskTier.DESTRUCTIVE
         if execution_class == ExecutionClass.BROWSER_TASK:
             return RiskTier.NETWORKED
-        if re.search(r"\b(run command|shell|terminal command)\b", lowered):
+        if RuntimeRouter._requires_mcp(text):
+            return RiskTier.DELEGATED_AGENT
+        if RuntimeRouter._requires_shell(text):
             return RiskTier.SHELL_EXECUTION
-        if re.search(r"\b(click|type|hotkey|window|launchagent|quit app|open app)\b", lowered):
+        if RuntimeRouter._requires_os_automation(text):
             return RiskTier.OS_CONTROL
         if re.search(r"\b(write|edit|create|move|copy|rename|trash|remove|organize)\b", lowered):
             return RiskTier.LOCAL_WRITE

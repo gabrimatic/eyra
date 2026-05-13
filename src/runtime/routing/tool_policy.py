@@ -15,31 +15,42 @@ UTILITY_READ_ONLY = {
     "get_frontmost_app",
     "list_open_apps",
     "list_windows",
-    "get_agent_status",
-    "get_openclaw_status",
 }
 
-PRIVATE_READ = {
-    "read_clipboard",
+FILE_PRIVATE_READ = {
     "get_finder_selection",
     "read_file",
     "list_directory",
     "compare_files",
     "read_pdf",
-    "take_screenshot",
-    "extract_screen_text",
     "get_file_info",
     "search_files",
-    "get_system_snapshot",
+}
+
+SCREEN_PRIVATE_READ = {
+    "take_screenshot",
+    "extract_screen_text",
     "get_accessibility_tree",
+}
+
+SYSTEM_PRIVATE_READ = {
+    "read_clipboard",
+    "get_system_snapshot",
     "list_processes",
     "get_launch_agent_status",
+}
+
+AGENT_READ = {
+    "get_agent_status",
     "list_agent_sessions",
     "get_agent_session_content",
     "list_codex_sessions",
     "get_codex_session_content",
     "list_openclaw_sessions",
+    "get_openclaw_status",
 }
+
+PRIVATE_READ = FILE_PRIVATE_READ | SCREEN_PRIVATE_READ | SYSTEM_PRIVATE_READ | AGENT_READ
 
 LOCAL_WRITE = {
     "write_file",
@@ -116,22 +127,33 @@ def metadata_for_tool(tool: BaseTool) -> ToolMetadata:
             }),
         )
     if name in PRIVATE_READ:
-        capabilities = {Capability.FILE_READ}
-        if name in {"take_screenshot", "extract_screen_text", "get_accessibility_tree"}:
+        capabilities: set[Capability] = set()
+        allowed_execution_classes = {
+            ExecutionClass.TOOL_ASSISTED_CHAT,
+            ExecutionClass.BACKGROUND_TASK,
+            ExecutionClass.FILESYSTEM_ACTION,
+        }
+        if name in FILE_PRIVATE_READ:
+            capabilities.add(Capability.FILE_READ)
+        if name in SCREEN_PRIVATE_READ:
             capabilities.update({Capability.SCREEN_CAPTURE, Capability.VISION})
         if name == "read_pdf":
             capabilities.update({Capability.PDF_READ})
+        if name in SYSTEM_PRIVATE_READ:
+            capabilities.add(Capability.OS_AUTOMATION)
+        if name in AGENT_READ:
+            capabilities.add(Capability.AGENT_DELEGATION)
+            allowed_execution_classes = {
+                ExecutionClass.BACKGROUND_TASK,
+                ExecutionClass.CODING_AGENT_TASK,
+            }
         return ToolMetadata(
             name=name,
             capabilities=frozenset(capabilities),
             risk_tier=RiskTier.PRIVATE_READ,
             latency_cost="high" if getattr(tool, "costly", False) else "low",
             reads_private_data=True,
-            allowed_execution_classes=frozenset({
-                ExecutionClass.TOOL_ASSISTED_CHAT,
-                ExecutionClass.BACKGROUND_TASK,
-                ExecutionClass.FILESYSTEM_ACTION,
-            }),
+            allowed_execution_classes=frozenset(allowed_execution_classes),
         )
     if name in LOCAL_WRITE:
         return ToolMetadata(
@@ -197,7 +219,18 @@ def metadata_for_tool(tool: BaseTool) -> ToolMetadata:
             }),
         )
     if name in AGENT_MCP:
-        capability = Capability.MCP if name in {"list_mcp_tools", "call_mcp_tool"} else Capability.AGENT_DELEGATION
+        is_mcp_tool = name in {"list_mcp_tools", "call_mcp_tool"}
+        capability = Capability.MCP if is_mcp_tool else Capability.AGENT_DELEGATION
+        if is_mcp_tool:
+            allowed_execution_classes = {
+                ExecutionClass.TOOL_ASSISTED_CHAT,
+                ExecutionClass.BACKGROUND_TASK,
+            }
+        else:
+            allowed_execution_classes = {
+                ExecutionClass.CODING_AGENT_TASK,
+                ExecutionClass.BACKGROUND_TASK,
+            }
         return ToolMetadata(
             name=name,
             capabilities=frozenset({capability}),
@@ -206,10 +239,7 @@ def metadata_for_tool(tool: BaseTool) -> ToolMetadata:
             reads_private_data=True,
             mutates_state=name not in {"list_mcp_tools"},
             requires_approval=name not in {"list_mcp_tools"},
-            allowed_execution_classes=frozenset({
-                ExecutionClass.CODING_AGENT_TASK,
-                ExecutionClass.BACKGROUND_TASK,
-            }),
+            allowed_execution_classes=frozenset(allowed_execution_classes),
         )
     return ToolMetadata(
         name=name,
@@ -269,6 +299,9 @@ def _deny_reason(
 
     if execution_class == ExecutionClass.PDF_ANALYSIS:
         return "PDF extraction and summarization are controller-owned"
+
+    if Capability.SCREEN_CAPTURE in meta.capabilities:
+        return "screen capture is controller-owned"
 
     if meta.network_access and not settings.NETWORK_TOOLS_ENABLED:
         return "network tools are disabled"

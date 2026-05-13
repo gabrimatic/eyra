@@ -101,6 +101,34 @@ class TestRuntimeRouter:
         assert Capability.NETWORK in decision.required_capabilities
         assert "open_url" in decision.tool_policy.allowed_tool_names
 
+    def test_shell_command_routes_to_shell_policy(self):
+        disabled = _route("run command ls")
+        enabled = _route("run command ls", settings=Settings(OS_TOOLS_ENABLED=True))
+
+        assert disabled.execution_class == ExecutionClass.TOOL_ASSISTED_CHAT
+        assert Capability.SHELL in disabled.required_capabilities
+        assert disabled.risk_tier == RiskTier.SHELL_EXECUTION
+        assert "run_command" not in disabled.tool_policy.allowed_tool_names
+        assert "run_command" in enabled.tool_policy.allowed_tool_names
+
+    def test_os_action_routes_to_os_policy(self):
+        decision = _route("click the active dialog button", settings=Settings(OS_TOOLS_ENABLED=True))
+
+        assert decision.execution_class == ExecutionClass.TOOL_ASSISTED_CHAT
+        assert Capability.OS_AUTOMATION in decision.required_capabilities
+        assert decision.risk_tier == RiskTier.OS_CONTROL
+        assert "ui_click" in decision.tool_policy.allowed_tool_names
+
+    def test_mcp_request_routes_to_mcp_policy(self):
+        disabled = _route("list mcp tools")
+        enabled = _route("list mcp tools", settings=Settings(MCP_TOOLS_ENABLED=True))
+
+        assert disabled.execution_class == ExecutionClass.TOOL_ASSISTED_CHAT
+        assert Capability.MCP in disabled.required_capabilities
+        assert disabled.risk_tier == RiskTier.DELEGATED_AGENT
+        assert "list_mcp_tools" not in disabled.tool_policy.allowed_tool_names
+        assert "list_mcp_tools" in enabled.tool_policy.allowed_tool_names
+
     def test_terminal_and_web_parity_for_same_prompt(self):
         terminal = _route("summarize ~/Downloads/a.pdf", source=RequestSource.TERMINAL)
         web = _route("summarize ~/Downloads/a.pdf", source=RequestSource.WEB)

@@ -72,6 +72,39 @@ class TestToolPolicy:
         assert "web_search" in policy.allowed_tool_names
         assert "open_url" in policy.allowed_tool_names
 
+    def test_background_file_route_does_not_expose_unrelated_private_reads(self):
+        policy = _policy(
+            Settings(OS_TOOLS_ENABLED=True),
+            ExecutionClass.BACKGROUND_TASK,
+            {Capability.TEXT, Capability.NATIVE_TOOLS, Capability.FILE_READ, Capability.FILE_WRITE},
+            RiskTier.LOCAL_WRITE,
+        )
+
+        assert "read_file" in policy.allowed_tool_names
+        assert "write_file" in policy.allowed_tool_names
+        assert "read_clipboard" not in policy.allowed_tool_names
+        assert "take_screenshot" not in policy.allowed_tool_names
+        assert "extract_screen_text" not in policy.allowed_tool_names
+
+    def test_agent_read_tools_require_agent_route(self):
+        normal = _policy(
+            Settings(AGENT_TOOLS_ENABLED=True),
+            ExecutionClass.TOOL_ASSISTED_CHAT,
+            {Capability.TEXT, Capability.NATIVE_TOOLS},
+            RiskTier.LOW_READ_ONLY,
+        )
+        agent = _policy(
+            Settings(AGENT_TOOLS_ENABLED=True),
+            ExecutionClass.CODING_AGENT_TASK,
+            {Capability.TEXT, Capability.AGENT_DELEGATION},
+            RiskTier.DELEGATED_AGENT,
+        )
+
+        assert "get_agent_status" not in normal.allowed_tool_names
+        assert "list_agent_sessions" not in normal.allowed_tool_names
+        assert "get_agent_status" in agent.allowed_tool_names
+        assert "list_agent_sessions" in agent.allowed_tool_names
+
     def test_os_agent_and_mcp_tools_require_opt_in(self):
         disabled = _policy(
             Settings(OS_TOOLS_ENABLED=True, AGENT_TOOLS_ENABLED=True, MCP_TOOLS_ENABLED=True),
