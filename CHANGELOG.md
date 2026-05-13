@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/voice-diagnose` for bounded local microphone diagnostics, all-zero audio reporting, selected-device checks, VAD probing, Local Whisper socket checks, and generated WAV transcription checks.
 - `VOICE_INPUT_DEVICE`, `VOICE_SAMPLE_RATE`, `VOICE_DEBUG_RECORD_SECONDS`, and `VOICE_DIAGNOSTIC_SAVE_AUDIO` settings for microphone selection and diagnostics.
 - Local `scripts/certify_voice_to_computer.py` certification matrix for offline product-contract checks across voice diagnostics, durable jobs, task control, operation ledger, Web approvals, triggers, and disabled-by-default optional surfaces.
+- `--synthetic-mic` certification mode for virtual microphone barge-in tests through BlackHole or another system loopback input.
 - Opt-in certification rows for enabled browser, OS, MCP, and coding-agent approval paths without contacting remote services by default.
 - `/operations` and “What changed?” support for inspecting recent local operation ledger entries.
 - Sandboxed `move_to_trash` and `restore_from_trash` filesystem tools.
@@ -88,6 +89,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Voice diagnostics now skip unattended no-speech VAD and ASR checks instead of failing a healthy microphone capture with no human speech.
 - Voice diagnostics now probe alternate input devices after all-zero microphone capture and report the exact `VOICE_INPUT_DEVICE` value when another device delivers audio.
 - Voice diagnostics now stop cleanly when no input devices are reported and give recovery guidance for microphone connection, macOS permission, and remote audio forwarding.
+- `VOICE_INPUT_DEVICE=0` now selects input device index `0` in the live voice path instead of looking for a device named `0`.
 - Trash moves now use unique destination names so concurrent or repeated same-name deletes cannot overwrite another recoverable Trash item.
 
 ## [4.0.0] - 2026-05-11

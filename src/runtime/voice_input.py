@@ -47,6 +47,18 @@ SOCKET_PATH = Path.home() / ".whisper" / "cmd.sock"
 torch.set_num_threads(1)
 
 
+def _normalize_input_device(input_device: str | int | None) -> str | int | None:
+    """Keep device names intact, but treat numeric config values as indexes."""
+    if input_device in {"", None}:
+        return None
+    if isinstance(input_device, str):
+        stripped = input_device.strip()
+        if stripped.isdigit():
+            return int(stripped)
+        return stripped
+    return input_device
+
+
 def _int16_to_float32(frame: np.ndarray) -> torch.Tensor:
     """Convert int16 PCM to float32 tensor normalized to [-1, 1]."""
     return torch.from_numpy(frame.astype(np.float32) / 32768.0)
@@ -92,7 +104,7 @@ class VoiceInput:
         self._threshold = threshold
         self._silence_duration_ms = silence_duration_ms
         self._wh_bin = wh_bin or "wh"
-        self._input_device = input_device if input_device not in {"", None} else None
+        self._input_device = _normalize_input_device(input_device)
         self._cancel = threading.Event()
 
         # Warm up ONNX model to avoid first-inference latency

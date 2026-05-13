@@ -227,6 +227,37 @@ def test_local_whisper_diagnostic_skips_transcription_when_vad_skipped():
     assert "No detected speech" in report.check("transcription_returns_text").reason
 
 
+def test_synthetic_barge_in_probe_passes_when_audio_interrupts_tts():
+    from runtime.voice_diagnostics import VoiceDiagnostics
+
+    class FakeProcess:
+        returncode = None
+
+        def terminate(self):
+            self.returncode = -15
+
+        async def wait(self):
+            return self.returncode
+
+    class FakeVoiceInput:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def listen(self, on_speech_start=None):
+            if on_speech_start is not None:
+                on_speech_start()
+            return "hello from blackhole"
+
+    settings = Settings(VOICE_DEBUG_RECORD_SECONDS=1, VOICE_INPUT_DEVICE="0")
+
+    with patch("runtime.voice_diagnostics.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=FakeProcess()):
+        with patch("runtime.voice_diagnostics.VoiceInput", FakeVoiceInput):
+            report = _run(VoiceDiagnostics(settings=settings, wh_bin="/opt/wh").run_barge_in_probe(synthetic_mic=True))
+
+    assert report.check("tts_interrupt_by_mic_speech").status == "passed"
+    assert "Synthetic microphone audio interrupted TTS" in report.check("tts_interrupt_by_mic_speech").reason
+
+
 def test_voice_diagnose_command_prints_structured_report(capsys):
     from chat.complexity_scorer import ComplexityScorer
     from runtime.live_session import LiveSession

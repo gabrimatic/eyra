@@ -124,11 +124,11 @@ class VoiceDiagnostics:
         self._last_audio_path: str | None = None
         self._last_vad_speech_detected = False
 
-    async def run(self, *, include_physical_barge_in: bool = False) -> DiagnosticReport:
+    async def run(self, *, include_physical_barge_in: bool = False, synthetic_mic: bool = False) -> DiagnosticReport:
         report = await asyncio.to_thread(self.run_microphone_checks)
         report.extend(await asyncio.to_thread(self.run_local_whisper_checks))
         if include_physical_barge_in:
-            report.extend(await self.run_barge_in_probe())
+            report.extend(await self.run_barge_in_probe(synthetic_mic=synthetic_mic))
         else:
             report.add(
                 "tts_interrupt_by_mic_speech",
@@ -375,7 +375,7 @@ class VoiceDiagnostics:
             report.add("transcription_returns_text", "skipped", "No nonzero microphone audio was captured.")
         return report
 
-    async def run_barge_in_probe(self) -> DiagnosticReport:
+    async def run_barge_in_probe(self, *, synthetic_mic: bool = False) -> DiagnosticReport:
         report = DiagnosticReport("Barge-in diagnostics")
         interrupted = False
         proc = None
@@ -414,7 +414,13 @@ class VoiceDiagnostics:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(proc.wait(), timeout=2)
 
-        if interrupted and text:
+        if interrupted and text and synthetic_mic:
+            report.add(
+                "tts_interrupt_by_mic_speech",
+                "passed",
+                "Synthetic microphone audio interrupted TTS and ASR returned text.",
+            )
+        elif interrupted and text:
             report.add(
                 "tts_interrupt_by_mic_speech",
                 "failed",

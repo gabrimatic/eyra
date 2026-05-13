@@ -16,9 +16,18 @@ from utils.settings import Settings
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run local Eyra certification checks.")
     parser.add_argument("--include-physical", action="store_true", help="Label physical microphone/barge-in checks as requested.")
+    parser.add_argument(
+        "--synthetic-mic",
+        action="store_true",
+        help="Accept a configured virtual microphone, such as BlackHole, as the attended barge-in source.",
+    )
     args = parser.parse_args()
 
-    report = run_certification(Settings.load_from_env(), include_physical=args.include_physical)
+    report = run_certification(
+        Settings.load_from_env(),
+        include_physical=args.include_physical,
+        synthetic_mic=args.synthetic_mic,
+    )
     print(report.render())
     return 1 if report.failed else 0
 

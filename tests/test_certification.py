@@ -189,6 +189,52 @@ def test_certification_voice_failure_reason_includes_multiple_diagnostic_failure
     assert "alternate_input_device: No alternate input device delivered nonzero audio" in row.reason
 
 
+def test_certification_passes_synthetic_mic_flag_to_barge_in_diagnostics(tmp_path):
+    from runtime.certification import run_certification
+    from runtime.voice_diagnostics import DiagnosticCheck, DiagnosticReport
+    from utils.settings import Settings
+
+    settings = Settings(
+        LIVE_LISTENING_ENABLED=True,
+        LIVE_SPEECH_ENABLED=True,
+        JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+        TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+    )
+    report = DiagnosticReport(
+        title="Voice diagnostics",
+        checks=[
+            DiagnosticCheck("captured_audio", "passed", "Captured audio"),
+            DiagnosticCheck(
+                "tts_interrupt_by_mic_speech",
+                "passed",
+                "Synthetic microphone audio interrupted TTS and ASR returned text.",
+            ),
+        ],
+    )
+    seen_kwargs = {}
+
+    class FakeDiagnostics:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def run(self, **kwargs):
+            seen_kwargs.update(kwargs)
+            return report
+
+    import runtime.certification as certification
+
+    original = certification.VoiceDiagnostics
+    certification.VoiceDiagnostics = FakeDiagnostics
+    try:
+        result = run_certification(settings=settings, include_physical=True, synthetic_mic=True)
+    finally:
+        certification.VoiceDiagnostics = original
+
+    row = next(row for row in result.rows if row.name == "physical_barge_in")
+    assert row.status == "passed"
+    assert seen_kwargs["synthetic_mic"] is True
+
+
 def test_certification_exercises_real_file_operations_and_approval_paths(tmp_path):
     from runtime.certification import run_certification
     from utils.settings import Settings

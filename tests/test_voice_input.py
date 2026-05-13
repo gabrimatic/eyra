@@ -71,6 +71,20 @@ def _mock_vad_events(events_by_frame):
 # ---------------------------------------------------------------------------
 
 class TestVoiceInputVAD:
+    def test_numeric_string_input_device_is_used_as_index(self):
+        """VOICE_INPUT_DEVICE=0 should select device index 0, not a device named "0"."""
+        vi = _make_vi(input_device="0", max_duration_s=0.3)
+
+        stream = _mock_stream()
+        stream.read = MagicMock(return_value=(np.zeros((FRAME_SAMPLES, 1), dtype=np.int16), False))
+
+        mock_vad = _mock_vad_events({})
+        with patch("runtime.voice_input.sd.InputStream", return_value=stream) as mock_input_stream:
+            with patch.object(vi, "_new_vad_iterator", return_value=mock_vad):
+                assert vi._record() is None
+
+        assert mock_input_stream.call_args.kwargs["device"] == 0
+
     def test_cancel_stops_recording(self):
         """Setting cancel event should make _record return None."""
         vi = _make_vi()

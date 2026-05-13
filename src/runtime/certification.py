@@ -109,7 +109,12 @@ async def _guarded_async(
         report.add(name, "passed", reason, command=command)
 
 
-def run_certification(settings: Settings | None = None, *, include_physical: bool = False) -> CertificationReport:
+def run_certification(
+    settings: Settings | None = None,
+    *,
+    include_physical: bool = False,
+    synthetic_mic: bool = False,
+) -> CertificationReport:
     """Run local, offline certification checks and label unavailable physical paths honestly."""
     settings = settings or Settings.load_from_env()
     report = CertificationReport()
@@ -124,7 +129,8 @@ def run_certification(settings: Settings | None = None, *, include_physical: boo
     if settings.LIVE_LISTENING_ENABLED:
         diagnostic = asyncio.run(
             VoiceDiagnostics(settings=settings).run(
-                include_physical_barge_in=include_physical and settings.LIVE_SPEECH_ENABLED
+                include_physical_barge_in=include_physical and settings.LIVE_SPEECH_ENABLED,
+                synthetic_mic=synthetic_mic,
             )
         )
         failed_checks = [check for check in diagnostic.checks if check.status == "failed"]

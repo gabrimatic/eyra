@@ -524,6 +524,14 @@ Eyra speaks a long diagnostic sentence. Start talking into the microphone while 
 
 Eyra uses local VAD for barge-in. It does not perform full acoustic echo cancellation; if your speakers feed back into the microphone, lower the volume or use headphones for the physical test.
 
+For deterministic local certification on macOS, feed generated speech through a virtual microphone such as BlackHole 2ch, then run:
+
+```bash
+fake-mic start "hello eyra this is deterministic fake microphone input for certification"
+VOICE_INPUT_DEVICE=0 uv run python scripts/certify_voice_to_computer.py --include-physical --synthetic-mic
+fake-mic stop
+```
+
 </details>
 
 <details><summary><strong>Voice diagnostics</strong></summary>
@@ -582,6 +590,7 @@ uv build --wheel
 USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv run python src/main.py
 WEB_UI_ENABLED=true USE_MOCK_CLIENT=true uv run python -m web.server
 uv run python scripts/certify_voice_to_computer.py
+VOICE_INPUT_DEVICE=0 uv run python scripts/certify_voice_to_computer.py --include-physical --synthetic-mic
 ```
 
 ---
