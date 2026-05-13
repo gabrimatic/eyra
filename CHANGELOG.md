@@ -64,6 +64,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Package version is now `4.1.0` because `v4.0.0` has already been published on GitHub and the current release-qualification work expands the runtime and certification surface after that release.
 - Terminal and Web background tasks now mirror compatibility task rows into the durable local job store.
 - Direct deterministic file moves, copies, writes, and trash actions now record operation metadata with undo instructions where possible.
 - `eyra-web` now runs startup/provider setup and full preflight before serving, then passes real model, tool, vision, and screen capability results into the Web UI runtime.
