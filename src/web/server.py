@@ -42,6 +42,10 @@ from runtime.intents import (
 from runtime.jobs import DurableJobStore, RiskLevel
 from runtime.models import PreflightResult
 from runtime.preflight import PreflightManager
+from runtime.routing.model_registry import worker_model_settings
+from runtime.routing.router import RuntimeRouter
+from runtime.routing.trace import trace_to_dict
+from runtime.routing.types import RequestEnvelope, RequestSource, RoutingDecision
 from runtime.shared import RuntimeSharedState
 from runtime.tasks import BackgroundTask, BackgroundTaskManager, TaskStatus
 from runtime.tooling import build_tool_registry
@@ -180,6 +184,7 @@ class WebAssistantRuntime:
     ):
         self.settings = settings
         self.runtime_scope = "shared" if shared is not None else "standalone"
+        self.shared = shared
         self._owns_components = shared is None
         self.dictation = DictationState()
         if shared is not None:
@@ -210,6 +215,8 @@ class WebAssistantRuntime:
                 job_store=self.job_store,
                 source_frontend="web",
             )
+        self.router = RuntimeRouter(self.scorer)
+        self.last_route_trace = shared.last_route_trace if shared is not None else None
         self.model_semaphore = asyncio.Semaphore(max(1, int(settings.MODEL_CONCURRENCY)))
         self._task_event_subscribers: set[queue.Queue[dict[str, Any]]] = set()
         self._task_event_lock = threading.Lock()
@@ -237,6 +244,9 @@ class WebAssistantRuntime:
         if not text:
             return {"reply": "Message is empty."}
         if requires_network(text) and not self.settings.NETWORK_TOOLS_ENABLED:
+            if self.settings.ROUTING_POLICY_ENABLED:
+                interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
+                await self._route_decision(text, voice_mode=voice_mode, interaction=interaction, is_worker=False)
             return {
                 "reply": (
                     "Network tools are disabled. Enable NETWORK_TOOLS_ENABLED=true before asking Eyra to browse, "
@@ -244,6 +254,9 @@ class WebAssistantRuntime:
                 )
             }
         if needs_screen_context(text) and not self._vision_available():
+            if self.settings.ROUTING_POLICY_ENABLED:
+                interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
+                await self._route_decision(text, voice_mode=voice_mode, interaction=interaction, is_worker=False)
             return {
                 "reply": (
                     "Screen analysis needs a vision-capable model. Set VISION_MODEL to a model that can process "
@@ -267,7 +280,11 @@ class WebAssistantRuntime:
         trigger_result = await self._handle_direct_trigger_intent(text)
         if trigger_result is not None:
             return trigger_result
-        if requires_model_driven_tools(text) and not self._tool_actions_available():
+        if (
+            requires_model_driven_tools(text)
+            and not self._tool_actions_available()
+            and not self.settings.ROUTING_POLICY_ENABLED
+        ):
             return {
                 "reply": (
                     "This open-ended local tool task requires a model with native tool calling. Text chat and "
@@ -328,6 +345,12 @@ class WebAssistantRuntime:
 
     async def _chat(self, text: str, voice_mode: str = "text") -> str:
         interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
+        routing_decision = await self._route_decision(
+            text,
+            voice_mode=voice_mode,
+            interaction=interaction,
+            is_worker=False,
+        )
         chunks: list[str] = []
         async with self.model_semaphore:
             async for chunk in process_task_stream(
@@ -338,6 +361,7 @@ class WebAssistantRuntime:
                 quality_mode=QualityMode.BALANCED,
                 interaction_style=interaction,
                 tool_registry=self.registry,
+                routing_decision=routing_decision,
             ):
                 chunks.append(chunk)
         reply = "".join(chunks).strip() or "No response."
@@ -346,6 +370,13 @@ class WebAssistantRuntime:
 
     async def _run_worker_task(self, task: BackgroundTask, text: str, voice_mode: str) -> str:
         task.mark_progress("Working")
+        interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
+        routing_decision = await self._route_decision(
+            text,
+            voice_mode=voice_mode,
+            interaction=interaction,
+            is_worker=True,
+        )
         if needs_screen_context(text):
             task.mark_progress("Capturing screenshot locally")
             return await analyze_screen(
@@ -360,22 +391,57 @@ class WebAssistantRuntime:
         if pdf_result is not None:
             return pdf_result
         chunks: list[str] = []
-        interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
+        worker_settings = worker_model_settings(self.settings)
         async with self.model_semaphore:
             async for chunk in process_task_stream(
                 text_content=text,
                 complexity_scorer=self.scorer,
-                settings=self.settings,
+                settings=worker_settings,
                 messages=list(task.related_context) or [{"role": "user", "content": text}],
                 quality_mode=QualityMode.BALANCED,
                 interaction_style=interaction,
                 tool_registry=self.registry,
                 require_tools=True,
+                routing_decision=routing_decision,
             ):
                 chunks.append(chunk)
                 if len("".join(chunks)) > 120 and task.progress_summary == "Working":
                     task.mark_progress("Preparing final answer")
         return "".join(chunks).strip() or "Task finished."
+
+    def _source_for_voice_mode(self, voice_mode: str) -> RequestSource:
+        if voice_mode == "local":
+            return RequestSource.LOCAL_VOICE
+        if voice_mode == "realtime":
+            return RequestSource.REALTIME_VOICE
+        return RequestSource.WEB
+
+    async def _route_decision(
+        self,
+        text: str,
+        *,
+        voice_mode: str,
+        interaction: InteractionStyle,
+        is_worker: bool,
+    ) -> RoutingDecision | None:
+        if not self.settings.ROUTING_POLICY_ENABLED:
+            return None
+        envelope = RequestEnvelope(
+            text=text,
+            source=self._source_for_voice_mode(voice_mode),
+            interaction_style=interaction,
+            quality_mode=QualityMode.BALANCED,
+            messages=list(self.conversation),
+            current_goal=None,
+            is_worker=is_worker,
+            settings=self.settings,
+            preflight=self.preflight,
+        )
+        decision = await self.router.route(envelope, tool_registry=self.registry)
+        self.last_route_trace = decision.trace
+        if self.shared is not None:
+            self.shared.last_route_trace = decision.trace
+        return decision
 
     async def _handle_direct_coding_job_intent(self, text: str) -> dict[str, Any] | None:
         request = parse_coding_job_request(text)
@@ -698,6 +764,7 @@ class WebAssistantRuntime:
 
         task.mark_progress("Summarizing extracted PDF text")
         interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
+        worker_settings = worker_model_settings(self.settings)
         prompt = (
             "Summarize the PDF for the user's request. Be concise, factual, and do not ask for a follow-up. "
             "If the user asked for a focus area, answer that focus directly.\n\n"
@@ -709,7 +776,7 @@ class WebAssistantRuntime:
             async for chunk in process_task_stream(
                 text_content=prompt,
                 complexity_scorer=self.scorer,
-                settings=self.settings,
+                settings=worker_settings,
                 messages=[{"role": "user", "content": prompt}],
                 quality_mode=QualityMode.BALANCED,
                 interaction_style=interaction,
@@ -720,6 +787,12 @@ class WebAssistantRuntime:
                 if len("".join(chunks)) > 120 and task.progress_summary == "Summarizing extracted PDF text":
                     task.mark_progress("Preparing final answer")
         return "".join(chunks).strip() or "The PDF text was extracted locally, but there was not enough readable text to summarize."
+
+    async def route_last(self) -> dict[str, Any]:
+        trace = self.last_route_trace
+        if trace is None and self.shared is not None:
+            trace = self.shared.last_route_trace
+        return {"route": trace_to_dict(trace) if trace is not None else None}
 
     async def list_tasks(self) -> dict[str, Any]:
         return {"tasks": [_task_payload(task) for task in self.task_manager.list_tasks(include_recent=True)]}
@@ -1371,6 +1444,11 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             if not self._authorized():
                 return
             self._send_json(200, self.runtime.run_sync(self.runtime.list_tasks()))
+            return
+        if parsed.path == "/api/route/last":
+            if not self._authorized():
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.route_last()))
             return
         job_logs_match = re.fullmatch(r"/api/job/([^/]+)/logs", parsed.path)
         if job_logs_match:

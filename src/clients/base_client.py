@@ -103,6 +103,7 @@ class BaseAIClient(ABC):
         tool_timeout_seconds: int = 30,
         max_tool_rounds: int = 5,
         require_tools: bool = False,
+        allowed_tool_names: set[str] | frozenset[str] | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Stream a completion with optional tool-calling support.
@@ -115,6 +116,7 @@ class BaseAIClient(ABC):
             model_name: Model to use; falls back to instance default.
             tools: Registry of available tools.
             include_costly: If False, only lightweight tools are sent to the model.
+            allowed_tool_names: Optional policy allowlist for model-visible tools.
 
         Yields:
             str: Chunks of the final completion response.

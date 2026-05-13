@@ -50,6 +50,7 @@ class LiveRuntimeState:
     last_spoken_output_at: float | None = None
     conversation_messages: list[dict] = field(default_factory=list)
     recent_events: deque = field(default_factory=lambda: deque(maxlen=50))
+    last_route_trace: object | None = None
 
     @classmethod
     def from_preflight(cls, result: PreflightResult, settings=None) -> "LiveRuntimeState":

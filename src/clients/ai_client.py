@@ -273,8 +273,13 @@ class AIClient(BaseAIClient):
         tool_timeout_seconds: int = 30,
         max_tool_rounds: int = 5,
         require_tools: bool = False,
+        allowed_tool_names: set[str] | frozenset[str] | None = None,
     ) -> AsyncGenerator[str, None]:
-        if not tools or not tools.to_openai_tools(include_costly=include_costly):
+        openai_tools = tools.to_openai_tools(
+            include_costly=include_costly,
+            allowed_names=allowed_tool_names,
+        ) if tools else []
+        if not tools or not openai_tools:
             # generate_completion_stream already cleans via _clean_stream
             async for chunk in self.generate_completion_stream(messages, model_name=model_name):
                 yield chunk
@@ -289,7 +294,7 @@ class AIClient(BaseAIClient):
             return
 
         chosen_model = model_name or self.model_name
-        openai_tools = tools.to_openai_tools(include_costly=include_costly)
+        allowed_set = set(allowed_tool_names) if allowed_tool_names is not None else None
 
         for _ in range(max(1, max_tool_rounds)):
             accumulated_content = ""
@@ -435,16 +440,19 @@ class AIClient(BaseAIClient):
             # Execute each tool and append results (tool messages first, then any images)
             pending_images: list[dict] = []
             for tc in normalized_tool_calls:
-                try:
-                    result = await asyncio.wait_for(
-                        tools.execute(tc["name"], tc["arguments"]),
-                        timeout=max(1, tool_timeout_seconds),
-                    )
-                except asyncio.TimeoutError:
-                    logger.error("Tool '%s' timed out after %ss", tc["name"], tool_timeout_seconds)
-                    result = ToolResult(
-                        content=f"Tool '{tc['name']}' timed out after {tool_timeout_seconds} seconds."
-                    )
+                if allowed_set is not None and tc["name"] not in allowed_set:
+                    result = ToolResult(content=f"Tool '{tc['name']}' is not allowed for this request.")
+                else:
+                    try:
+                        result = await asyncio.wait_for(
+                            tools.execute(tc["name"], tc["arguments"]),
+                            timeout=max(1, tool_timeout_seconds),
+                        )
+                    except asyncio.TimeoutError:
+                        logger.error("Tool '%s' timed out after %ss", tc["name"], tool_timeout_seconds)
+                        result = ToolResult(
+                            content=f"Tool '{tc['name']}' timed out after {tool_timeout_seconds} seconds."
+                        )
                 tool_msg = {
                     "role": "tool",
                     "tool_call_id": tc["id"],

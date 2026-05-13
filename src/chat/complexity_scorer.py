@@ -80,7 +80,7 @@ _CODE_DEBUG_CUES = [
     "error", "bug", "stack trace", "exception", "crash", "lint",
     "test", "unit test", "integration", "deploy", "docker", "ci/cd",
     "git", "branch", "merge", "commit", "typescript", "python", "rust",
-    "javascript", "java", "kotlin", "swift", "go ", "golang", "c++",
+    "javascript", "java", "kotlin", "swift", "go", "golang", "c++",
     "bash", "shell", "terminal", "command line",
 ]
 
@@ -185,7 +185,7 @@ class ComplexityScorer:
         score += min(0.45, reasoning_hits * 0.15)
 
         # Code/debug cues (weight: 0.10 each, max ~0.40)
-        code_hits = sum(1 for cue in _CODE_DEBUG_CUES if re.search(r'\b' + re.escape(cue.strip()) + r'\b', text_lower))
+        code_hits = sum(1 for cue in _CODE_DEBUG_CUES if self._cue_matches(cue, text_lower))
         score += min(0.40, code_hits * 0.10)
 
         # Structured output cues (weight: 0.10 each, max ~0.20)
@@ -306,3 +306,23 @@ class ComplexityScorer:
     @staticmethod
     def _matches_any(text: str, patterns: list[re.Pattern]) -> bool:
         return any(p.search(text) for p in patterns)
+
+    @staticmethod
+    def _cue_matches(cue: str, text_lower: str) -> bool:
+        """Match a scoring cue without treating ordinary English as code."""
+        normalized = cue.strip().lower()
+        if normalized == "go":
+            # "go" is common English. Count it as the language only near code/language cues.
+            return bool(
+                re.search(
+                    r"\b(?:write|use|using|in|with|learn|code|programming|language)\b.{0,30}\bgo\b"
+                    r"|\bgo\b.{0,30}\b(?:code|program|programming|function|module|package|language)\b",
+                    text_lower,
+                    re.I,
+                )
+            )
+        if normalized == "c++":
+            return bool(re.search(r"(?<!\w)c\+\+(?!\w)", text_lower, re.I))
+        if normalized and normalized[0].isalnum() and normalized[-1].isalnum():
+            return bool(re.search(r"\b" + re.escape(normalized) + r"\b", text_lower))
+        return normalized in text_lower

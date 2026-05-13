@@ -2,7 +2,8 @@
 Eyra — personal on-device AI agent.
 
 Starts as an always-on live session with typed input, optional voice I/O,
-and on-demand tool use. The model decides when to capture the screen.
+and on-demand tool use. Screen capture is controller-owned and happens only
+for screen requests.
 """
 
 import asyncio

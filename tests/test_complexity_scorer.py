@@ -69,6 +69,22 @@ class TestScoreRouting:
         r = run(scorer.score_complexity("fix this regex"))
         assert r.classification != ComplexityLevel.SIMPLE
 
+    def test_go_outside_does_not_count_as_go_language(self, scorer):
+        r = run(scorer.score_complexity("go outside"))
+        assert r.classification == ComplexityLevel.SIMPLE
+
+    def test_write_go_code_counts_as_code_cue(self, scorer):
+        r = run(scorer.score_complexity("write Go code"))
+        assert r.classification != ComplexityLevel.SIMPLE
+
+    def test_use_golang_counts_as_code_cue(self, scorer):
+        r = run(scorer.score_complexity("use Golang"))
+        assert r.classification != ComplexityLevel.SIMPLE
+
+    def test_cpp_function_counts_as_code_cue(self, scorer):
+        r = run(scorer.score_complexity("c++ function"))
+        assert r.classification != ComplexityLevel.SIMPLE
+
     def test_simple_question_no_cues(self, scorer):
         r = run(scorer.score_complexity("what time is it?"))
         assert r.classification == ComplexityLevel.SIMPLE

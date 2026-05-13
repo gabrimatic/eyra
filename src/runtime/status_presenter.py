@@ -158,6 +158,7 @@ def render_help_card():
         ("/goal TEXT ", "Set a goal"),
         ("/mode MODE ", "fast|balanced|best"),
         ("/status    ", "Show session info"),
+        ("/route last", "Show last routing trace"),
         ("/tasks     ", "Show active and recent tasks"),
         ("/task ID   ", "Show task details"),
         ("/cancel ID ", "Cancel a task or all"),

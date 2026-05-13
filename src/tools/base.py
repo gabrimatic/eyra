@@ -3,6 +3,8 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from runtime.routing.types import RiskTier, ToolMetadata
+
 
 @dataclass
 class ToolResult:
@@ -19,11 +21,25 @@ class BaseTool(ABC):
     description: str
     parameters: dict  # JSON Schema for function parameters
     costly: bool = False  # If True, only available on Complex tier (e.g. screenshot sends an image)
+    tool_metadata: ToolMetadata | None = None
 
     @abstractmethod
     async def execute(self, **kwargs) -> ToolResult:
         """Execute the tool with the given arguments."""
         ...
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        """Structured policy metadata. Subclasses may override with tool_metadata."""
+        if self.tool_metadata is not None:
+            return self.tool_metadata
+        return ToolMetadata(
+            name=self.name,
+            capabilities=frozenset(),
+            risk_tier=RiskTier.PRIVATE_READ if self.costly else RiskTier.LOW_READ_ONLY,
+            latency_cost="high" if self.costly else "low",
+            reads_private_data=self.costly,
+        )
 
     def to_openai_tool(self) -> dict:
         """Convert to OpenAI function-calling tool format."""

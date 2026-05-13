@@ -130,6 +130,7 @@ def _write_env(base_url: str, api_key: str, model: str):
         "BACKGROUND_TASKS_ENABLED", "MAX_BACKGROUND_TASKS", "WORKER_MODEL", "TASK_TIMEOUT_SECONDS",
         "MAX_WORKER_TOOL_STEPS", "TOOL_TIMEOUT_SECONDS", "MODEL_CONCURRENCY", "TASK_STATUS_UPDATES",
         "FILESYSTEM_ALLOWED_PATHS", "FILESYSTEM_DEFAULT_PATH", "COMPLEXITY_ROUTING_ENABLED",
+        "ROUTING_POLICY_ENABLED", "ROUTING_DEBUG",
     }
     extra: list[str] = []
     existing: dict[str, str] = {}
@@ -220,6 +221,8 @@ def _write_env(base_url: str, api_key: str, model: str):
         "",
         "# Experimental routing",
         f"COMPLEXITY_ROUTING_ENABLED={existing.get('COMPLEXITY_ROUTING_ENABLED', 'false')}",
+        f"ROUTING_POLICY_ENABLED={existing.get('ROUTING_POLICY_ENABLED', 'false')}",
+        f"ROUTING_DEBUG={existing.get('ROUTING_DEBUG', 'false')}",
     ]
     if extra:
         content_lines += ["", "# Custom"] + extra
