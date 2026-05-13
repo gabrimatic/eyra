@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+No unreleased changes.
+
+## [4.1.0] - 2026-05-14
+
 ### Added
 
 - Durable local job store backed by SQLite, including persisted job rows, job logs, and operation ledger entries.

@@ -41,7 +41,15 @@ body:
       required: true
 
   - type: input
-    id: version
+    id: eyra_version
+    attributes:
+      label: Eyra version and install method
+      placeholder: "4.1.0, git clone from tag v4.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: python_version
     attributes:
       label: Python version
       placeholder: "3.11.9"
@@ -51,8 +59,16 @@ body:
   - type: input
     id: os
     attributes:
-      label: macOS version and chip
-      placeholder: "macOS 15.3, M4"
+      label: macOS version and Apple Silicon model
+      placeholder: "macOS 15.3, MacBook Pro M4"
+    validations:
+      required: true
+
+  - type: input
+    id: models
+    attributes:
+      label: MODEL and VISION_MODEL
+      placeholder: "MODEL=gemma4:e4b, VISION_MODEL=(empty)"
     validations:
       required: true
 
@@ -82,11 +98,43 @@ body:
     validations:
       required: true
 
+  - type: checkboxes
+    id: enabled_surfaces
+    attributes:
+      label: Enabled optional surfaces
+      options:
+        - label: Web UI
+        - label: Network/browser tools
+        - label: OS/UI tools
+        - label: MCP tools
+        - label: Agent/coding tools
+        - label: Realtime voice
+    validations:
+      required: false
+
+  - type: textarea
+    id: status_output
+    attributes:
+      label: /status output
+      description: Paste `/status` output. Redact personal paths or secrets if needed.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: voice_diagnose
+    attributes:
+      label: /voice-diagnose output for voice issues
+      description: Required for voice-related issues. Redact personal device names if needed.
+      render: shell
+    validations:
+      required: false
+
   - type: textarea
     id: logs
     attributes:
       label: Terminal output
-      description: Paste relevant terminal output. Redact personal content.
+      description: Paste relevant terminal output. Redact secrets, API keys, personal paths, and tokenized Web UI URLs.
       render: shell
     validations:
       required: false

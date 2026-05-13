@@ -385,13 +385,26 @@ eyra/
 │   ├── main.py                     # Entry point, preflight, live session launch
 │   ├── runtime/
 │   │   ├── live_session.py         # Unified orchestrator
+│   │   ├── actions.py              # Typed local action specs and risk metadata
+│   │   ├── capabilities.py         # Local capability snapshot construction
+│   │   ├── certification.py        # Voice-to-computer certification matrix
+│   │   ├── coding_jobs.py          # Approval-gated terminal-agent job bridge
+│   │   ├── context.py              # Local context snapshots
+│   │   ├── dictation.py            # Local dictation state and literal text handling
 │   │   ├── intents.py              # Shared screen, file, network, PDF, and task intent rules
+│   │   ├── jobs.py                 # Durable SQLite jobs, logs, artifacts, and ledger
+│   │   ├── operator_loop.py        # Observe, plan, act, verify, recover execution loop
+│   │   ├── planner.py              # Deterministic local task planning
+│   │   ├── privacy.py              # Privacy-boundary decisions
+│   │   ├── shared.py               # Terminal-owned objects shared with Web UI
 │   │   ├── tasks.py                # Background task lifecycle manager
+│   │   ├── triggers.py             # Durable file and reminder triggers
 │   │   ├── vision.py               # Controller-owned screenshot + vision model flow
 │   │   ├── tooling.py              # Shared tool registry builder
 │   │   ├── models.py              # Runtime state and event dataclasses
 │   │   ├── preflight.py           # Backend, model, and capability validation
 │   │   ├── speech_controller.py   # TTS output and STT input coordination
+│   │   ├── voice_diagnostics.py   # Local mic, VAD, Local Whisper, and barge-in checks
 │   │   ├── voice_input.py         # Silero VAD recording + local-whisper transcription
 │   │   ├── status_presenter.py    # Terminal status header and updates
 │   │   └── startup.py             # First-run setup and .env management
@@ -427,6 +440,40 @@ eyra/
 │       ├── theme.py
 │       └── mock_client.py
 ```
+
+---
+
+## Certification
+
+Eyra includes a local certification matrix for the release-critical voice-to-computer contract.
+
+Run the default local-first matrix:
+
+```bash
+uv run python scripts/certify_voice_to_computer.py
+```
+
+Run attended physical microphone checks:
+
+```bash
+uv run python scripts/certify_voice_to_computer.py --include-physical
+```
+
+Run deterministic virtual microphone checks, for example with BlackHole or another configured loopback input:
+
+```bash
+uv run python scripts/certify_voice_to_computer.py --include-physical --synthetic-mic
+```
+
+Status meanings:
+
+- `passed`: the scenario completed and verified the expected behavior.
+- `failed`: a launch-critical or requested check did not meet the product contract.
+- `skipped`: the surface was disabled or the physical condition was not requested for this run.
+
+The matrix proves the configured local runtime path it exercises: model preflight, Local Whisper TTS, microphone diagnostics, synthetic or physical barge-in when requested, durable jobs, operation ledger, triggers, task control, Web APIs, disabled-by-default privacy behavior, and enabled browser/OS representatives when those settings are turned on.
+
+It does not prove every physical microphone setup, every macOS app UI, or live OpenAI Realtime unless those paths are actually enabled and tested in that environment. Synthetic microphone certification proves the configured virtual input path; run `/voice-diagnose` and `/voice-test` on each target Mac before claiming human microphone certification.
 
 ---
 
@@ -528,9 +575,11 @@ For deterministic local certification on macOS, feed generated speech through a 
 
 ```bash
 fake-mic start "hello eyra this is deterministic fake microphone input for certification"
-VOICE_INPUT_DEVICE=0 uv run python scripts/certify_voice_to_computer.py --include-physical --synthetic-mic
+VOICE_INPUT_DEVICE='BlackHole 2ch' uv run python scripts/certify_voice_to_computer.py --include-physical --synthetic-mic
 fake-mic stop
 ```
+
+This deterministic path is useful for release checks, but it is not the same as a person speaking into every physical microphone. If physical voice input fails or returns all-zero audio, run `/voice-diagnose`, verify macOS microphone permission for the terminal app, and set `VOICE_INPUT_DEVICE` to the correct sounddevice index or name.
 
 </details>
 
@@ -590,7 +639,8 @@ uv build --wheel
 USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv run python src/main.py
 WEB_UI_ENABLED=true USE_MOCK_CLIENT=true uv run python -m web.server
 uv run python scripts/certify_voice_to_computer.py
-VOICE_INPUT_DEVICE=0 uv run python scripts/certify_voice_to_computer.py --include-physical --synthetic-mic
+uv run python scripts/certify_voice_to_computer.py --include-physical
+uv run python scripts/certify_voice_to_computer.py --include-physical --synthetic-mic
 ```
 
 ---

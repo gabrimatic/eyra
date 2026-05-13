@@ -34,13 +34,25 @@ eyra/
 │   │   └── ai_client.py         # OpenAI-compatible async client
 │   ├── runtime/
 │   │   ├── live_session.py      # Central orchestrator (voice + typed input)
+│   │   ├── actions.py           # Typed local action specs and risk metadata
+│   │   ├── capabilities.py      # Capability snapshots
+│   │   ├── certification.py     # Voice-to-computer certification matrix
+│   │   ├── coding_jobs.py       # Approval-gated terminal-agent jobs
+│   │   ├── context.py           # Local context snapshots
+│   │   ├── dictation.py         # Local dictation state
 │   │   ├── intents.py           # Shared screen, file, network, PDF, and task intent rules
+│   │   ├── jobs.py              # Durable SQLite jobs, logs, artifacts, and ledger
 │   │   ├── models.py            # Runtime data models
+│   │   ├── operator_loop.py     # Observe, plan, act, verify, recover loop
+│   │   ├── planner.py           # Deterministic task planning
 │   │   ├── preflight.py         # Backend and model validation
+│   │   ├── privacy.py           # Privacy-boundary decisions
+│   │   ├── shared.py            # Shared terminal/Web runtime objects
 │   │   ├── startup.py           # First-run setup and .env management
 │   │   ├── speech_controller.py # TTS/STT coordination
 │   │   ├── tasks.py             # Background task lifecycle
 │   │   ├── tooling.py           # Shared terminal/Web UI tool registry
+│   │   ├── triggers.py          # Durable file and reminder triggers
 │   │   ├── vision.py            # Controller-owned screenshot + vision flow
 │   │   ├── voice_diagnostics.py # Local microphone and Local Whisper diagnostics
 │   │   ├── voice_input.py       # Silero VAD recording + local-whisper transcription
@@ -142,8 +154,14 @@ Manual verification:
 Include:
 
 - macOS version
+- Apple Silicon model
+- Eyra version and install method
 - Python version (`python --version`)
 - AI backend version if relevant (e.g. `ollama --version`)
+- `MODEL` and `VISION_MODEL`
+- Voice mode and output of `/voice-diagnose` when voice-related
+- Output of `/status`
+- Whether you are using Web UI, network/browser tools, OS tools, MCP tools, or agent tools
 - Relevant terminal output or logs (`~/Library/Logs/Eyra/eyra.log` by default)
 - Steps to reproduce
 - Relevant sanitized `.env` keys (never paste `API_KEY` or other secrets)
