@@ -26,6 +26,10 @@ def _mock_stream(frames: list[np.ndarray], overflow: bool = False):
     return stream
 
 
+def _mock_input_devices():
+    return [{"index": 0, "name": "Test Mic", "max_input_channels": 1}]
+
+
 def _make_vi(**kwargs):
     with patch("runtime.voice_input.load_silero_vad") as mock_load:
         mock_model = MagicMock()
@@ -93,13 +97,33 @@ def test_microphone_diagnostic_reports_all_zero_audio():
     frames = [np.zeros(FRAME_SAMPLES, dtype=np.int16) for _ in range(2)]
     stream = _mock_stream(frames)
 
-    with patch("runtime.voice_diagnostics.sd.query_devices", return_value=[]):
+    with patch("runtime.voice_diagnostics.sd.query_devices", return_value=_mock_input_devices()):
         with patch("runtime.voice_diagnostics.sd.check_input_settings"):
             with patch("runtime.voice_diagnostics.sd.InputStream", return_value=stream):
                 report = VoiceDiagnostics(settings=settings, wh_bin="/opt/wh").run_microphone_checks()
 
     assert report.check("captured_audio").status == "failed"
     assert "silent/all-zero" in report.check("captured_audio").reason
+
+
+def test_microphone_diagnostic_stops_cleanly_when_no_input_devices():
+    from runtime.voice_diagnostics import VoiceDiagnostics
+
+    settings = Settings(VOICE_DEBUG_RECORD_SECONDS=1)
+
+    with patch("runtime.voice_diagnostics.sd.query_devices", return_value=[]):
+        with patch("runtime.voice_diagnostics.sd.check_input_settings") as check_settings:
+            with patch("runtime.voice_diagnostics.sd.InputStream") as input_stream:
+                report = VoiceDiagnostics(settings=settings, wh_bin="/opt/wh").run_microphone_checks()
+
+    assert report.check("input_devices").status == "failed"
+    assert report.check("selected_input_device").status == "failed"
+    assert "Connect or enable a microphone" in report.check("selected_input_device").reason
+    assert report.check("sample_rate_support").status == "skipped"
+    assert report.check("captured_audio").status == "skipped"
+    assert report.check("macos_microphone_permission").status == "skipped"
+    check_settings.assert_not_called()
+    input_stream.assert_not_called()
 
 
 def test_microphone_diagnostic_probes_alternate_device_after_all_zero_audio():
@@ -134,7 +158,7 @@ def test_microphone_diagnostic_reports_nonzero_audio_and_overflow():
     frames = [np.full(FRAME_SAMPLES, 1200, dtype=np.int16) for _ in range(2)]
     stream = _mock_stream(frames, overflow=True)
 
-    with patch("runtime.voice_diagnostics.sd.query_devices", return_value=[]):
+    with patch("runtime.voice_diagnostics.sd.query_devices", return_value=_mock_input_devices()):
         with patch("runtime.voice_diagnostics.sd.check_input_settings"):
             with patch("runtime.voice_diagnostics.sd.InputStream", return_value=stream):
                 report = VoiceDiagnostics(settings=settings, wh_bin="/opt/wh").run_microphone_checks()
@@ -157,7 +181,7 @@ def test_microphone_diagnostic_skips_vad_when_capture_has_no_speech():
         def _new_vad_iterator(self):
             return lambda *_args, **_kwargs: None
 
-    with patch("runtime.voice_diagnostics.sd.query_devices", return_value=[]):
+    with patch("runtime.voice_diagnostics.sd.query_devices", return_value=_mock_input_devices()):
         with patch("runtime.voice_diagnostics.sd.check_input_settings"):
             with patch("runtime.voice_diagnostics.sd.InputStream", return_value=stream):
                 with patch("runtime.voice_diagnostics.VoiceInput", FakeVoiceInput):
@@ -190,7 +214,7 @@ def test_local_whisper_diagnostic_skips_transcription_when_vad_skipped():
         raise AssertionError(f"unexpected command: {argv}")
 
     diagnostics = VoiceDiagnostics(settings=settings, wh_bin="/opt/wh")
-    with patch("runtime.voice_diagnostics.sd.query_devices", return_value=[]):
+    with patch("runtime.voice_diagnostics.sd.query_devices", return_value=_mock_input_devices()):
         with patch("runtime.voice_diagnostics.sd.check_input_settings"):
             with patch("runtime.voice_diagnostics.sd.InputStream", return_value=stream):
                 with patch("runtime.voice_diagnostics.VoiceInput", FakeVoiceInput):

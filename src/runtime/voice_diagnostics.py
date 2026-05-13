@@ -144,6 +144,19 @@ class VoiceDiagnostics:
             report.add("input_devices", "passed", f"{len(devices)} input device{'s' if len(devices) != 1 else ''} found")
         else:
             report.add("input_devices", "failed", "No sounddevice input devices were reported.")
+            report.add(
+                "selected_input_device",
+                "failed",
+                "No input device is available. Connect or enable a microphone, grant macOS microphone permission to this terminal, then rerun /voice-diagnose.",
+            )
+            report.add("sample_rate_support", "skipped", "No input device is available.")
+            report.add("captured_audio", "skipped", "No input device is available.")
+            report.add(
+                "macos_microphone_permission",
+                "skipped",
+                "No input devices were reported; check macOS microphone permission, remote audio forwarding, or physical microphone connection.",
+            )
+            return report
 
         try:
             selected_device = resolve_input_device(self.device_selector, devices)

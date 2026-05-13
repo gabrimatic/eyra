@@ -87,6 +87,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Web capability and privacy questions now use deterministic local runtime answers instead of model chat.
 - Voice diagnostics now skip unattended no-speech VAD and ASR checks instead of failing a healthy microphone capture with no human speech.
 - Voice diagnostics now probe alternate input devices after all-zero microphone capture and report the exact `VOICE_INPUT_DEVICE` value when another device delivers audio.
+- Voice diagnostics now stop cleanly when no input devices are reported and give recovery guidance for microphone connection, macOS permission, and remote audio forwarding.
 - Trash moves now use unique destination names so concurrent or repeated same-name deletes cannot overwrite another recoverable Trash item.
 
 ## [4.0.0] - 2026-05-11
