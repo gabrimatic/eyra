@@ -662,6 +662,24 @@ class TestInitialStatusAndHeader:
         state.speech_muted = True
         assert voice_status_label(state) == "input + muted speech"
 
+    def test_voice_loop_yields_while_session_busy(self):
+        async def run_check():
+            session, _state = self._make_session(listening=True, speech=True)
+            session._busy.set()
+            session.speech.listen = AsyncMock(return_value="echo from Eyra")
+            session.speech.cancel_listen = MagicMock()
+
+            task = asyncio.create_task(session._voice_input_loop())
+            await asyncio.sleep(0.12)
+            session._shutdown.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+            session.speech.listen.assert_not_awaited()
+            assert session.speech.cancel_listen.called
+
+        _run(run_check())
+
 
 # ---------------------------------------------------------------------------
 # /voice command

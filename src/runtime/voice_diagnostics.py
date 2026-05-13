@@ -385,11 +385,15 @@ class VoiceDiagnostics:
     async def run_barge_in_probe(self, *, synthetic_mic: bool = False, human_phrase: str = "") -> DiagnosticReport:
         report = DiagnosticReport("Barge-in diagnostics")
         interrupted = False
+        speech_detected = False
         proc = None
         challenge = human_phrase.strip()
 
         def interrupt_on_speech() -> None:
-            nonlocal interrupted
+            nonlocal interrupted, speech_detected
+            speech_detected = True
+            if challenge:
+                return
             interrupted = True
             if proc is not None and proc.returncode is None:
                 proc.terminate()
@@ -420,7 +424,27 @@ class VoiceDiagnostics:
                 input_device=self.device_selector or None,
                 sample_rate=self.sample_rate,
             )
-            text = await voice_input.listen(on_speech_start=interrupt_on_speech)
+            if challenge:
+                audio = await asyncio.to_thread(voice_input._record, interrupt_on_speech)
+                if proc.returncode is None:
+                    proc.terminate()
+                    interrupted = speech_detected
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(proc.wait(), timeout=2)
+                if audio is None or len(audio) == 0:
+                    text = None
+                else:
+                    wav_path = await asyncio.to_thread(voice_input._save_wav, audio, self.sample_rate)
+                    if wav_path:
+                        try:
+                            text = await voice_input._transcribe(wav_path)
+                        finally:
+                            with contextlib.suppress(Exception):
+                                Path(wav_path).unlink()
+                    else:
+                        text = None
+            else:
+                text = await voice_input.listen(on_speech_start=interrupt_on_speech)
         finally:
             if proc.returncode is None:
                 proc.terminate()
@@ -451,6 +475,14 @@ class VoiceDiagnostics:
                 "failed",
                 "ASR transcribed audio during TTS, but this unattended run cannot prove it was human speech rather than speaker echo.",
             )
+        elif speech_detected and text and challenge:
+            report.add(
+                "tts_interrupt_by_mic_speech",
+                "failed",
+                "ASR returned text during TTS, but it did not contain the human challenge phrase.",
+            )
+        elif speech_detected and challenge:
+            report.add("tts_interrupt_by_mic_speech", "failed", "Speech onset was detected during TTS, but ASR returned no text.")
         elif interrupted:
             report.add("tts_interrupt_by_mic_speech", "failed", "TTS stopped, but ASR returned no text.")
         else:

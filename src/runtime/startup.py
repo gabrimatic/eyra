@@ -179,7 +179,7 @@ def _write_env(base_url: str, api_key: str, model: str):
         f"VOICE_DEBUG_RECORD_SECONDS={existing.get('VOICE_DEBUG_RECORD_SECONDS', '3')}",
         f"VOICE_DIAGNOSTIC_SAVE_AUDIO={existing.get('VOICE_DIAGNOSTIC_SAVE_AUDIO', 'false')}",
         f"VOICE_SILENCE_MS={existing.get('VOICE_SILENCE_MS', '1500')}",
-        f"VOICE_VAD_THRESHOLD={existing.get('VOICE_VAD_THRESHOLD', '0.6')}",
+        f"VOICE_VAD_THRESHOLD={existing.get('VOICE_VAD_THRESHOLD', '0.15')}",
         "",
         "# Background tasks",
         f"BACKGROUND_TASKS_ENABLED={existing.get('BACKGROUND_TASKS_ENABLED', 'true')}",

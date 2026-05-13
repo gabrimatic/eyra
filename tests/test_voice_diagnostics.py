@@ -274,9 +274,16 @@ def test_human_barge_in_probe_passes_only_with_challenge_phrase():
         def __init__(self, **_kwargs):
             pass
 
-        async def listen(self, on_speech_start=None):
+        def _record(self, on_speech_start=None):
             if on_speech_start is not None:
                 on_speech_start()
+            return np.ones(FRAME_SAMPLES, dtype=np.int16)
+
+        @staticmethod
+        def _save_wav(_audio, _sample_rate):
+            return "/tmp/fake.wav"
+
+        async def _transcribe(self, _wav_path):
             return "noise then human microphone release test now"
 
     settings = Settings(VOICE_DEBUG_RECORD_SECONDS=1, VOICE_INPUT_DEVICE="Test Mic")
@@ -309,9 +316,16 @@ def test_human_barge_in_probe_rejects_text_without_challenge_phrase():
         def __init__(self, **_kwargs):
             pass
 
-        async def listen(self, on_speech_start=None):
+        def _record(self, on_speech_start=None):
             if on_speech_start is not None:
                 on_speech_start()
+            return np.ones(FRAME_SAMPLES, dtype=np.int16)
+
+        @staticmethod
+        def _save_wav(_audio, _sample_rate):
+            return "/tmp/fake.wav"
+
+        async def _transcribe(self, _wav_path):
             return "this is eyra barge in diagnostic start speaking now"
 
     settings = Settings(VOICE_DEBUG_RECORD_SECONDS=1, VOICE_INPUT_DEVICE="Test Mic")

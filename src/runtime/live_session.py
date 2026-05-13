@@ -288,6 +288,10 @@ class LiveSession:
             while not self._shutdown.is_set():
                 if not self.state.listening_enabled:
                     break
+                if self._busy.is_set():
+                    self.speech.cancel_listen()
+                    await asyncio.sleep(0.05)
+                    continue
 
                 self.state.current_status = RuntimeStatus.LISTENING
                 try:

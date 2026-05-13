@@ -2,9 +2,10 @@
 
 import asyncio
 import os
-import subprocess
 import sys
 from unittest.mock import AsyncMock, patch
+
+import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -219,41 +220,53 @@ class TestModelPull:
 
 
 class TestLocalWhisperMicrophoneProbe:
-    def test_quiet_room_no_speech_is_not_a_microphone_failure(self):
+    def test_configured_sounddevice_input_with_nonzero_audio_is_ready(self):
+        manager = PreflightManager(Settings(VOICE_INPUT_DEVICE="2"))
+
+        class FakeStream:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return None
+
+            def read(self, frames):
+                return np.ones((frames, 1), dtype=np.int16), False
+
+        with patch("runtime.preflight.sd.InputStream", FakeStream):
+            assert manager._probe_microphone_ready(manager.settings) is True
+
+    def test_configured_sounddevice_input_rejects_all_zero_audio(self):
         manager = PreflightManager(Settings())
 
-        completed = subprocess.CompletedProcess(
-            args=["wh", "listen", "1", "--raw"],
-            returncode=1,
-            stdout="",
-            stderr="Recording... (Ctrl+C to stop)\nNo speech detected\n",
-        )
-        with patch("runtime.preflight.subprocess.run", return_value=completed):
-            assert manager._probe_microphone_ready("/opt/wh") is True
+        class FakeStream:
+            def __init__(self, **_kwargs):
+                pass
 
-    def test_microphone_error_is_a_microphone_failure(self):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return None
+
+            def read(self, frames):
+                return np.zeros((frames, 1), dtype=np.int16), False
+
+        with patch("runtime.preflight.sd.InputStream", FakeStream):
+            assert manager._probe_microphone_ready(manager.settings) is False
+
+    def test_configured_sounddevice_input_error_is_not_ready(self):
         manager = PreflightManager(Settings())
 
-        completed = subprocess.CompletedProcess(
-            args=["wh", "listen", "1", "--raw"],
-            returncode=1,
-            stdout="",
-            stderr="Recording... (Ctrl+C to stop)\nMicrophone error\n",
-        )
-        with patch("runtime.preflight.subprocess.run", return_value=completed):
-            assert manager._probe_microphone_ready("/opt/wh") is False
+        class FailingStream:
+            def __init__(self, **_kwargs):
+                raise OSError("microphone unavailable")
 
-    def test_no_audio_captured_is_a_microphone_failure(self):
-        manager = PreflightManager(Settings())
-
-        completed = subprocess.CompletedProcess(
-            args=["wh", "listen", "1", "--raw"],
-            returncode=1,
-            stdout="",
-            stderr="Recording... (Ctrl+C to stop)\nNo audio captured\n",
-        )
-        with patch("runtime.preflight.subprocess.run", return_value=completed):
-            assert manager._probe_microphone_ready("/opt/wh") is False
+        with patch("runtime.preflight.sd.InputStream", FailingStream):
+            assert manager._probe_microphone_ready(manager.settings) is False
 
 
 async def _check_wh_with(

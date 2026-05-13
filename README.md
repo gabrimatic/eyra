@@ -272,7 +272,7 @@ VOICE_SAMPLE_RATE=16000           # Microphone sample rate used for VAD and WAV 
 VOICE_DEBUG_RECORD_SECONDS=3      # Bounded local capture length for /voice-diagnose.
 VOICE_DIAGNOSTIC_SAVE_AUDIO=false # Save diagnostic audio under ~/Library/Application Support/Eyra/diagnostics.
 VOICE_SILENCE_MS=1500          # Silence after speech before processing (ms).
-VOICE_VAD_THRESHOLD=0.6        # Silero VAD sensitivity (0.0-1.0, higher = stricter)
+VOICE_VAD_THRESHOLD=0.15       # Silero VAD sensitivity (0.0-1.0, higher = stricter)
 
 # Background tasks.
 BACKGROUND_TASKS_ENABLED=true
@@ -575,7 +575,7 @@ Run:
 
 Eyra speaks a long diagnostic sentence. Start talking into the microphone while it is speaking. Passing behavior: TTS stops, your new input is recorded and processed, the session stays alive, and background tasks keep their state unless you cancel them.
 
-Eyra uses local VAD for barge-in. It does not perform full acoustic echo cancellation; if your speakers feed back into the microphone, lower the volume or use headphones for the physical test.
+Eyra uses local VAD for barge-in. It does not perform full acoustic echo cancellation; if your speakers feed back into the microphone, lower the volume or use headphones for the physical test. During normal responses, Eyra pauses listening while it is thinking or speaking to avoid treating its own TTS as the next user turn.
 
 For deterministic local certification on macOS, feed generated speech through a virtual microphone such as BlackHole 2ch, then run:
 
@@ -612,6 +612,8 @@ VOICE_INPUT_DEVICE=USB Headset
 ```
 
 Diagnostic audio is not saved unless `VOICE_DIAGNOSTIC_SAVE_AUDIO=true`.
+
+During normal responses, Eyra pauses the microphone while it is thinking or speaking so speaker output is not mistaken for the next user turn. `/voice-test` and physical certification still exercise attended interruption behavior; use headphones for those checks if the microphone hears the speakers.
 
 </details>
 

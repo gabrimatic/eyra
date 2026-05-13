@@ -12,6 +12,8 @@ import time
 import wave
 
 import httpx
+import numpy as np
+import sounddevice as sd
 
 from runtime.models import PreflightResult
 from utils.settings import Settings
@@ -259,7 +261,7 @@ class PreflightManager:
             # Process is alive — now wait for ASR to be ready
             print(f"  {DIM}› Waiting for Local Whisper ASR...{NC}", end="", flush=True)
             if self._wait_for_asr_ready(wh_bin, max_wait=15):
-                if self._probe_microphone_ready(wh_bin):
+                if self._probe_microphone_ready(self.settings):
                     result.listening_available = True
                     if speech_requested:
                         print(f"\r  {GREEN}✓{NC} Local Whisper: ready (voice input + speech)   ")
@@ -281,40 +283,28 @@ class PreflightManager:
         return available
 
     @staticmethod
-    def _probe_microphone_ready(wh_bin: str) -> bool:
-        """Run a bounded Local Whisper listen probe so voice input readiness is real.
-
-        ASR readiness alone only proves file transcription works. Hands-free Eyra
-        also needs the microphone path. A one-second listen may return no text on
-        a healthy quiet room, but it must not return Local Whisper's microphone
-        failure.
-        """
+    def _probe_microphone_ready(settings: Settings) -> bool:
+        """Open Eyra's configured sounddevice input path and reject silent/all-zero audio."""
+        input_device: str | int | None = settings.VOICE_INPUT_DEVICE.strip() or None
+        if isinstance(input_device, str) and input_device.isdigit():
+            input_device = int(input_device)
+        sample_rate = int(settings.VOICE_SAMPLE_RATE or 16000)
+        frames = max(512, int(sample_rate * 0.5))
         try:
-            proc = subprocess.run(
-                [wh_bin, "listen", "1", "--raw"],
-                capture_output=True,
-                timeout=5,
-                text=True,
-            )
-        except subprocess.TimeoutExpired:
+            with sd.InputStream(
+                samplerate=sample_rate,
+                device=input_device,
+                channels=1,
+                dtype="int16",
+                blocksize=512,
+            ) as stream:
+                data, overflowed = stream.read(frames)
+            if overflowed:
+                logger.debug("Microphone probe overflowed while checking configured input")
+            return bool(np.any(data))
+        except Exception as e:
+            logger.debug("Microphone probe failed: %s", e)
             return False
-        except Exception:
-            return False
-        output = f"{proc.stdout or ''}\n{proc.stderr or ''}".lower()
-        hard_failures = (
-            "microphone error",
-            "service is busy",
-            "service not ready",
-            "cannot connect",
-            "connection closed",
-            "no audio captured",
-            "recording ended unexpectedly",
-        )
-        if any(marker in output for marker in hard_failures):
-            return False
-        # "No speech detected" is a healthy quiet-room probe: the microphone
-        # opened, recorded, and reached the ASR pipeline.
-        return True
 
     @staticmethod
     def _wait_for_asr_ready(wh_bin: str, max_wait: int = 15) -> bool:
