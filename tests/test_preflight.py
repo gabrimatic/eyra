@@ -37,9 +37,9 @@ class _OllamaCompatibleClient:
 
     async def get(self, url: str):
         if url.endswith("/v1/models"):
-            return _Response(200, {"data": [{"id": "gemma3:4b"}]})
+            return _Response(200, {"data": [{"id": "gemma4:e4b"}]})
         if url.endswith("/api/tags"):
-            return _Response(200, {"models": [{"name": "gemma3:4b"}]})
+            return _Response(200, {"models": [{"name": "gemma4:e4b"}]})
         return _Response(404)
 
     async def post(self, url: str, json: dict):
@@ -78,7 +78,7 @@ class TestPreflightBackend:
         with patch("runtime.preflight.httpx.AsyncClient", _OllamaCompatibleClient):
             preflight = _run(result.run())
 
-        assert preflight.models_ready == ["gemma3:4b"]
+        assert preflight.models_ready == ["gemma4:e4b"]
         assert preflight.models_missing == []
         assert "lacks native tool calling" in capsys.readouterr().out
 

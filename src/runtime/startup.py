@@ -253,7 +253,7 @@ def _setup_ollama() -> tuple[str, str, str]:
     models = [line.split()[0] for line in result.stdout.splitlines()[1:] if line.strip()]
 
     if not models:
-        model = input("  No local models. Pull which model? (e.g. gemma3:4b): ").strip()
+        model = input("  No local models. Pull which model? (e.g. gemma4:e4b): ").strip()
         if not model:
             raise RuntimeError("Model name required.")
         print(f"  {DIM}› Pulling {model}... (this may take a while){NC}")
@@ -269,7 +269,7 @@ def _setup_ollama() -> tuple[str, str, str]:
     pull_opt = "Pull a new model"
     choice = _pick(models + [pull_opt])
     if choice == pull_opt:
-        model = input("  Model name (e.g. gemma3:4b): ").strip()
+        model = input("  Model name (e.g. gemma4:e4b): ").strip()
         if not model:
             raise RuntimeError("Model name required.")
         print(f"  {DIM}› Pulling {model}... (this may take a while){NC}")

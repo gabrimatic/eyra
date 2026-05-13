@@ -10,12 +10,12 @@ class Settings:
     API_BASE_URL: str = "http://localhost:11434/v1"
     API_KEY: str = "ollama"
     # Default model for all requests (used when complexity routing is off)
-    MODEL: str = "gemma3:4b"
+    MODEL: str = "gemma4:e4b"
     # Vision model for deterministic screen/image understanding. Empty means MODEL.
     VISION_MODEL: str = ""
     # Tier models (only used when COMPLEXITY_ROUTING_ENABLED=true)
     SIMPLE_MODEL: str = "qwen3.5:2b"
-    MODERATE_MODEL: str = "gemma3:4b"
+    MODERATE_MODEL: str = "gemma4:e4b"
     # Live runtime settings
     AUTO_PULL_MODELS: bool = True
     LIVE_LISTENING_ENABLED: bool = True
@@ -111,10 +111,10 @@ class Settings:
             USE_MOCK_CLIENT=_bool("USE_MOCK_CLIENT", "false"),
             API_BASE_URL=os.getenv("API_BASE_URL", "http://localhost:11434/v1"),
             API_KEY=os.getenv("API_KEY", "ollama"),
-            MODEL=os.getenv("MODEL", "gemma3:4b"),
+            MODEL=os.getenv("MODEL", "gemma4:e4b"),
             VISION_MODEL=os.getenv("VISION_MODEL", ""),
             SIMPLE_MODEL=os.getenv("SIMPLE_MODEL", "qwen3.5:2b"),
-            MODERATE_MODEL=os.getenv("MODERATE_MODEL", "gemma3:4b"),
+            MODERATE_MODEL=os.getenv("MODERATE_MODEL", "gemma4:e4b"),
             AUTO_PULL_MODELS=_bool("AUTO_PULL_MODELS"),
             LIVE_LISTENING_ENABLED=_bool("LIVE_LISTENING_ENABLED"),
             LIVE_SPEECH_ENABLED=_bool("LIVE_SPEECH_ENABLED"),

@@ -254,13 +254,13 @@ API_KEY=ollama        # Keep this for local providers; set a real key for cloud 
 USE_MOCK_CLIENT=false
 
 # Default model for all requests when complexity routing is off.
-MODEL=gemma3:4b
+MODEL=gemma4:e4b
 # Vision model for screen/image tasks. Empty means use MODEL.
 VISION_MODEL=
 
 # Tier models used only when COMPLEXITY_ROUTING_ENABLED=true.
 SIMPLE_MODEL=qwen3.5:2b
-MODERATE_MODEL=gemma3:4b
+MODERATE_MODEL=gemma4:e4b
 
 # Live runtime settings.
 AUTO_PULL_MODELS=true
