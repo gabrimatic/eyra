@@ -82,6 +82,7 @@ No unreleased changes.
 
 ### Fixed
 
+- Physical microphone barge-in certification can now use an attended human challenge phrase, so speaker echo/self-interruption cannot satisfy the release check.
 - Web UI open-ended local tool requests now fail clearly when the selected model cannot call tools, instead of starting a task that cannot complete correctly.
 - Web UI screen requests now fail clearly when the configured vision model is not vision-capable.
 - `WEB_UI_MAX_REQUEST_BYTES` now applies to browser audio uploads as well as JSON API requests.

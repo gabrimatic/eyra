@@ -258,6 +258,76 @@ def test_synthetic_barge_in_probe_passes_when_audio_interrupts_tts():
     assert "Synthetic microphone audio interrupted TTS" in report.check("tts_interrupt_by_mic_speech").reason
 
 
+def test_human_barge_in_probe_passes_only_with_challenge_phrase():
+    from runtime.voice_diagnostics import VoiceDiagnostics
+
+    class FakeProcess:
+        returncode = None
+
+        def terminate(self):
+            self.returncode = -15
+
+        async def wait(self):
+            return self.returncode
+
+    class FakeVoiceInput:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def listen(self, on_speech_start=None):
+            if on_speech_start is not None:
+                on_speech_start()
+            return "noise then human microphone release test now"
+
+    settings = Settings(VOICE_DEBUG_RECORD_SECONDS=1, VOICE_INPUT_DEVICE="Test Mic")
+
+    with patch("runtime.voice_diagnostics.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=FakeProcess()):
+        with patch("runtime.voice_diagnostics.VoiceInput", FakeVoiceInput):
+            report = _run(
+                VoiceDiagnostics(settings=settings, wh_bin="/opt/wh").run_barge_in_probe(
+                    human_phrase="human microphone release test"
+                )
+            )
+
+    assert report.check("tts_interrupt_by_mic_speech").status == "passed"
+    assert "challenge phrase" in report.check("tts_interrupt_by_mic_speech").reason
+
+
+def test_human_barge_in_probe_rejects_text_without_challenge_phrase():
+    from runtime.voice_diagnostics import VoiceDiagnostics
+
+    class FakeProcess:
+        returncode = None
+
+        def terminate(self):
+            self.returncode = -15
+
+        async def wait(self):
+            return self.returncode
+
+    class FakeVoiceInput:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def listen(self, on_speech_start=None):
+            if on_speech_start is not None:
+                on_speech_start()
+            return "this is eyra barge in diagnostic start speaking now"
+
+    settings = Settings(VOICE_DEBUG_RECORD_SECONDS=1, VOICE_INPUT_DEVICE="Test Mic")
+
+    with patch("runtime.voice_diagnostics.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=FakeProcess()):
+        with patch("runtime.voice_diagnostics.VoiceInput", FakeVoiceInput):
+            report = _run(
+                VoiceDiagnostics(settings=settings, wh_bin="/opt/wh").run_barge_in_probe(
+                    human_phrase="human microphone release test"
+                )
+            )
+
+    assert report.check("tts_interrupt_by_mic_speech").status == "failed"
+    assert "did not contain" in report.check("tts_interrupt_by_mic_speech").reason
+
+
 def test_voice_diagnose_command_prints_structured_report(capsys):
     from chat.complexity_scorer import ComplexityScorer
     from runtime.live_session import LiveSession

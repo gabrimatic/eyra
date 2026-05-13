@@ -114,6 +114,7 @@ def run_certification(
     *,
     include_physical: bool = False,
     synthetic_mic: bool = False,
+    human_phrase: str = "",
 ) -> CertificationReport:
     """Run local, offline certification checks and label unavailable physical paths honestly."""
     settings = settings or Settings.load_from_env()
@@ -131,6 +132,7 @@ def run_certification(
             VoiceDiagnostics(settings=settings).run(
                 include_physical_barge_in=include_physical and settings.LIVE_SPEECH_ENABLED,
                 synthetic_mic=synthetic_mic,
+                human_phrase=human_phrase,
             )
         )
         failed_checks = [check for check in diagnostic.checks if check.status == "failed"]

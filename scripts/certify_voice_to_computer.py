@@ -21,12 +21,21 @@ def main() -> int:
         action="store_true",
         help="Accept a configured virtual microphone, such as BlackHole, as the attended barge-in source.",
     )
+    parser.add_argument(
+        "--human-phrase",
+        default="",
+        help=(
+            "Attended physical barge-in challenge phrase. The diagnostic passes only if ASR returns this phrase; "
+            "the TTS prompt will not speak it, so speaker echo cannot satisfy the check."
+        ),
+    )
     args = parser.parse_args()
 
     report = run_certification(
         Settings.load_from_env(),
         include_physical=args.include_physical,
         synthetic_mic=args.synthetic_mic,
+        human_phrase=args.human_phrase,
     )
     print(report.render())
     return 1 if report.failed else 0

@@ -459,6 +459,12 @@ Run attended physical microphone checks:
 uv run python scripts/certify_voice_to_computer.py --include-physical
 ```
 
+For a human-certified physical microphone check, pass a challenge phrase and say that phrase when Eyra starts speaking. The TTS prompt does not say the phrase, so speaker echo cannot satisfy the check:
+
+```bash
+uv run python scripts/certify_voice_to_computer.py --include-physical --human-phrase "human microphone release test"
+```
+
 Run deterministic virtual microphone checks, for example with BlackHole or another configured loopback input:
 
 ```bash
@@ -473,7 +479,7 @@ Status meanings:
 
 The matrix proves the configured local runtime path it exercises: model preflight, Local Whisper TTS, microphone diagnostics, synthetic or physical barge-in when requested, durable jobs, operation ledger, triggers, task control, Web APIs, disabled-by-default privacy behavior, and enabled browser/OS representatives when those settings are turned on.
 
-It does not prove every physical microphone setup, every macOS app UI, or live OpenAI Realtime unless those paths are actually enabled and tested in that environment. Synthetic microphone certification proves the configured virtual input path; run `/voice-diagnose` and `/voice-test` on each target Mac before claiming human microphone certification.
+It does not prove every physical microphone setup, every macOS app UI, or live OpenAI Realtime unless those paths are actually enabled and tested in that environment. Synthetic microphone certification proves the configured virtual input path; run `/voice-diagnose` and a challenge-phrase physical check on each target Mac before claiming human microphone certification.
 
 ---
 
@@ -640,6 +646,7 @@ USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv r
 WEB_UI_ENABLED=true USE_MOCK_CLIENT=true uv run python -m web.server
 uv run python scripts/certify_voice_to_computer.py
 uv run python scripts/certify_voice_to_computer.py --include-physical
+uv run python scripts/certify_voice_to_computer.py --include-physical --human-phrase "human microphone release test"
 uv run python scripts/certify_voice_to_computer.py --include-physical --synthetic-mic
 ```
 

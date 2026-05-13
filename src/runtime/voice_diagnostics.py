@@ -21,6 +21,7 @@ from runtime.voice_input import CHANNELS, DTYPE, FRAME_SAMPLES, SAMPLE_RATE, SOC
 from utils.settings import Settings
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_WORD_RE = re.compile(r"[a-z0-9]+")
 
 
 @dataclass
@@ -124,11 +125,17 @@ class VoiceDiagnostics:
         self._last_audio_path: str | None = None
         self._last_vad_speech_detected = False
 
-    async def run(self, *, include_physical_barge_in: bool = False, synthetic_mic: bool = False) -> DiagnosticReport:
+    async def run(
+        self,
+        *,
+        include_physical_barge_in: bool = False,
+        synthetic_mic: bool = False,
+        human_phrase: str = "",
+    ) -> DiagnosticReport:
         report = await asyncio.to_thread(self.run_microphone_checks)
         report.extend(await asyncio.to_thread(self.run_local_whisper_checks))
         if include_physical_barge_in:
-            report.extend(await self.run_barge_in_probe(synthetic_mic=synthetic_mic))
+            report.extend(await self.run_barge_in_probe(synthetic_mic=synthetic_mic, human_phrase=human_phrase))
         else:
             report.add(
                 "tts_interrupt_by_mic_speech",
@@ -375,10 +382,11 @@ class VoiceDiagnostics:
             report.add("transcription_returns_text", "skipped", "No nonzero microphone audio was captured.")
         return report
 
-    async def run_barge_in_probe(self, *, synthetic_mic: bool = False) -> DiagnosticReport:
+    async def run_barge_in_probe(self, *, synthetic_mic: bool = False, human_phrase: str = "") -> DiagnosticReport:
         report = DiagnosticReport("Barge-in diagnostics")
         interrupted = False
         proc = None
+        challenge = human_phrase.strip()
 
         def interrupt_on_speech() -> None:
             nonlocal interrupted
@@ -390,7 +398,12 @@ class VoiceDiagnostics:
             proc = await asyncio.create_subprocess_exec(
                 self.wh_bin,
                 "whisper",
-                "This is Eyra's barge-in diagnostic. Start speaking now.",
+                (
+                    "This is Eyra's barge-in diagnostic. Start speaking the challenge phrase now. "
+                    "Keep speaking over this voice until it stops. "
+                    "The diagnostic is still speaking so there is enough time for a real human interruption. "
+                    "Please speak the challenge phrase now."
+                ),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -419,6 +432,18 @@ class VoiceDiagnostics:
                 "tts_interrupt_by_mic_speech",
                 "passed",
                 "Synthetic microphone audio interrupted TTS and ASR returned text.",
+            )
+        elif interrupted and text and challenge and _contains_phrase(text, challenge):
+            report.add(
+                "tts_interrupt_by_mic_speech",
+                "passed",
+                "Human microphone audio interrupted TTS and ASR returned the challenge phrase.",
+            )
+        elif interrupted and text and challenge:
+            report.add(
+                "tts_interrupt_by_mic_speech",
+                "failed",
+                "ASR returned text during TTS, but it did not contain the human challenge phrase.",
             )
         elif interrupted and text:
             report.add(
@@ -452,6 +477,22 @@ class VoiceDiagnostics:
             wf.setsampwidth(2)
             wf.setframerate(sample_rate)
             wf.writeframes(audio.astype(np.int16, copy=False).tobytes())
+
+
+def _contains_phrase(text: str, phrase: str) -> bool:
+    transcript_words = _WORD_RE.findall(text.lower())
+    phrase_words = _WORD_RE.findall(phrase.lower())
+    if not phrase_words:
+        return False
+    if len(phrase_words) == 1:
+        return phrase_words[0] in transcript_words
+    cursor = 0
+    for word in transcript_words:
+        if word == phrase_words[cursor]:
+            cursor += 1
+            if cursor == len(phrase_words):
+                return True
+    return False
 
 
 def _clean_text(text: str) -> str:
