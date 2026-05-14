@@ -221,9 +221,11 @@ Set the speed and quality trade-off with `/mode`:
 
 ## Complexity routing
 
-Complexity routing is **experimental and off by default**. When disabled (`COMPLEXITY_ROUTING_ENABLED=false`), all requests use the single `MODEL` setting with all tools available. `/mode fast` is available only when routing is enabled because the simple-tier model is validated only in routing mode.
+Complexity routing is **optional and off by default**. When disabled (`COMPLEXITY_ROUTING_ENABLED=false`), local policy routing still plans every request, and model execution falls back to the single `MODEL` setting. `/mode fast` is available only when complexity routing is enabled because the simple-tier model is validated only in tiered mode.
 
 When enabled (`COMPLEXITY_ROUTING_ENABLED=true`), every request in `balanced` mode is scored by `ComplexityScorer` before dispatch.
+
+Complexity and the old `costly` flag are not safety boundaries. They help choose model effort and expensive tool exposure, but privacy, sandboxing, approvals, optional capability settings, and the local policy router decide what can actually run.
 
 Scoring factors:
 
@@ -239,6 +241,12 @@ Scoring factors:
 | Complex | `MODEL` |
 
 Set model names in `.env`. Any model supported by your provider works.
+
+## Local policy routing
+
+Eyra plans each user request locally before model execution. The route separates execution class, effort estimate, required capabilities, model capability, tool allowlist, risk tier, privacy boundary, fallback message, and debug trace.
+
+Policy routing is deterministic and local-first. It does not call a router model, use embeddings, add telemetry, add analytics, or silently fall back to network tools or remote providers. If `API_BASE_URL` points to a remote provider because you configured it, `/route last` and route traces say that local prompt/tool context may leave the machine.
 
 ---
 
@@ -318,8 +326,9 @@ REALTIME_ALLOWED_TOOLS=
 # Optional log path. Default: ~/Library/Logs/Eyra/eyra.log on macOS.
 # EYRA_LOG_FILE=~/Library/Logs/Eyra/eyra.log
 
-# Experimental model routing. When disabled, all requests use MODEL.
+# Optional model-tier routing. Local policy routing is always on.
 COMPLEXITY_ROUTING_ENABLED=false
+ROUTING_DEBUG=false
 
 # Filesystem sandbox: comma-separated allowed root paths.
 FILESYSTEM_ALLOWED_PATHS=~/Documents,~/Desktop,~/Downloads,/tmp
@@ -396,6 +405,7 @@ eyra/
 │   │   ├── operator_loop.py        # Observe, plan, act, verify, recover execution loop
 │   │   ├── planner.py              # Deterministic local task planning
 │   │   ├── privacy.py              # Privacy-boundary decisions
+│   │   ├── routing/                # Local policy router, model registry, tool policy, traces
 │   │   ├── shared.py               # Terminal-owned objects shared with Web UI
 │   │   ├── tasks.py                # Background task lifecycle manager
 │   │   ├── triggers.py             # Durable file and reminder triggers

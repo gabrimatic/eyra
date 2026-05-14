@@ -32,12 +32,31 @@ class ToolRegistry:
         """Register a tool by its name."""
         self._tools[tool.name] = tool
 
-    def to_openai_tools(self, include_costly: bool = True) -> list[dict]:
+    def get(self, name: str) -> BaseTool | None:
+        """Return a registered tool by name."""
+        return self._tools.get(name)
+
+    def names(self) -> list[str]:
+        """Return registered tool names."""
+        return list(self._tools)
+
+    def metadata_by_name(self) -> dict:
+        """Return structured metadata for each registered tool."""
+        from runtime.routing.tool_policy import metadata_for_tool
+
+        return {name: metadata_for_tool(tool) for name, tool in self._tools.items()}
+
+    def to_openai_tools(
+        self,
+        include_costly: bool = True,
+        allowed_names: set[str] | frozenset[str] | None = None,
+    ) -> list[dict]:
         """Return tools in OpenAI function-calling format.
         If include_costly is False, only lightweight tools are returned."""
+        allowed_set = set(allowed_names) if allowed_names is not None else None
         return [
             tool.to_openai_tool() for tool in self._tools.values()
-            if include_costly or not tool.costly
+            if (allowed_set is None or tool.name in allowed_set) and (include_costly or not tool.costly)
         ]
 
     async def execute(self, name: str, arguments: str) -> ToolResult:

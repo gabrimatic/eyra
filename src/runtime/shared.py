@@ -31,6 +31,7 @@ class RuntimeSharedState:
     trigger_store: TriggerStore
     task_manager: BackgroundTaskManager
     source_frontend: str = "terminal"
+    last_route_trace: object | None = None
 
     @classmethod
     def create(
@@ -83,6 +84,7 @@ class RuntimeSharedState:
         trigger_store: TriggerStore,
         task_manager: BackgroundTaskManager,
         source_frontend: str = "terminal",
+        last_route_trace: object | None = None,
     ) -> "RuntimeSharedState":
         """Wrap already-owned runtime objects without taking cleanup ownership."""
         return cls(
@@ -97,6 +99,7 @@ class RuntimeSharedState:
             trigger_store=trigger_store,
             task_manager=task_manager,
             source_frontend=source_frontend,
+            last_route_trace=last_route_trace,
         )
 
     async def shutdown(self) -> None:

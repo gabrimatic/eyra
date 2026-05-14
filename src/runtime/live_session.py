@@ -24,7 +24,6 @@ from runtime.intents import (
     extract_pdf_path,
     needs_screen_context,
     requires_filesystem,
-    requires_model_driven_tools,
     requires_network,
     should_background_task,
     task_title,
@@ -34,6 +33,10 @@ from runtime.models import LiveRuntimeState, PreflightResult, RuntimeStatus
 from runtime.operator_loop import build_file_move_operator_loop
 from runtime.planner import plan_task
 from runtime.preflight import PreflightManager
+from runtime.routing.model_registry import worker_model_settings
+from runtime.routing.router import RuntimeRouter
+from runtime.routing.trace import format_route_trace
+from runtime.routing.types import RequestEnvelope, RequestSource, RoutingDecision
 from runtime.shared import RuntimeSharedState
 from runtime.speech_controller import SpeechController
 from runtime.status_presenter import (
@@ -60,7 +63,7 @@ logger = logging.getLogger(__name__)
 
 _COMMANDS = {
     "/voice", "/voice-diagnose", "/voice-test", "/mute", "/unmute",
-    "/goal", "/status", "/quit", "/clear",
+    "/goal", "/status", "/quit", "/clear", "/route",
     "/mode", "/help", "/tasks", "/task", "/cancel", "/pause", "/resume",
     "/approvals", "/approve", "/reject", "/operations", "/capabilities", "/context", "/triggers", "/trigger",
 }
@@ -122,6 +125,7 @@ class LiveSession:
         self.approvals = ApprovalManager()
         self._trusted_overwrite_token = secrets.token_urlsafe(32)
         self._tool_registry = self._build_tool_registry()
+        self._router = RuntimeRouter(self.scorer)
         self._voice_task: asyncio.Task | None = None
         self._input_tasks: set[asyncio.Task] = set()
         self._render_lock = asyncio.Lock()
@@ -204,6 +208,7 @@ class LiveSession:
             trigger_store=self.trigger_store,
             task_manager=self.task_manager,
             source_frontend="terminal",
+            last_route_trace=self.state.last_route_trace,
         )
         runtime = WebAssistantRuntime(self.settings, preflight=self.preflight, shared=shared)
         try:
@@ -424,6 +429,14 @@ class LiveSession:
 
         if command == "/status":
             self._print_status()
+            return True
+
+        if command == "/route":
+            arg = lower_parts[1] if len(lower_parts) > 1 else ""
+            if arg == "last":
+                print(self._indent(format_route_trace(self.state.last_route_trace)))
+            else:
+                print("  Usage: /route last")
             return True
 
         if command == "/tasks":
@@ -770,6 +783,13 @@ class LiveSession:
         quality = self.quality_mode
         if self._needs_screen_context(text):
             if not self._vision_available():
+                await self._route_decision(
+                    text,
+                    quality_mode=QualityMode.BEST,
+                    interaction_style=interaction_style,
+                    source=self._source_for_interaction(interaction_style),
+                    is_worker=False,
+                )
                 print(
                     "  Screen analysis needs a vision-capable model. Set VISION_MODEL to a model that can process "
                     "images, or use a main MODEL with vision support."
@@ -777,8 +797,18 @@ class LiveSession:
                 return
             quality = QualityMode.BEST
         if _settings_bool(self.settings, "BACKGROUND_TASKS_ENABLED", True) and self._should_background_task(text):
-            if self._requires_model_driven_tools(text) and not self._tool_actions_available():
-                self._print_model_without_tools()
+            route_preview = await self._route_decision(
+                text,
+                quality_mode=quality,
+                interaction_style=interaction_style,
+                source=self._source_for_interaction(interaction_style),
+                is_worker=True,
+            )
+            if route_preview.selected_model is None:
+                print(f"  {route_preview.fallback_plan.on_model_missing}")
+                return
+            if route_preview.require_tools and not route_preview.tool_policy.allowed_tool_names:
+                print(f"  {route_preview.fallback_plan.on_capability_missing}")
                 return
             title = self._task_title(text)
             task = self.task_manager.create_task(
@@ -789,6 +819,7 @@ class LiveSession:
                     text_content=text,
                     quality_mode=quality,
                     interaction_style=interaction_style,
+                    routing_decision=route_preview,
                 ),
                 related_context=list(self.state.conversation_messages[-6:]),
                 used_tools=True,
@@ -799,7 +830,19 @@ class LiveSession:
             print_status_change(f"Task {task.id} accepted: {task.title}")
             return
 
-        await self._stream_response(text_content=text, quality_mode=quality, interaction_style=interaction_style)
+        routing_decision = await self._route_decision(
+            text,
+            quality_mode=quality,
+            interaction_style=interaction_style,
+            source=self._source_for_interaction(interaction_style),
+            is_worker=False,
+        )
+        await self._stream_response(
+            text_content=text,
+            quality_mode=quality,
+            interaction_style=interaction_style,
+            routing_decision=routing_decision,
+        )
 
     async def _handle_dictation_input(self, text: str) -> bool:
         command = dictation_command(text)
@@ -1903,24 +1946,11 @@ class LiveSession:
         else:
             print(f"  Could not undo {operation.normalized_action.get('type', 'operation')}: {result.content}")
 
-    def _tool_actions_available(self) -> bool:
-        model = _settings_str(self.settings, "WORKER_MODEL", "") or _settings_str(self.settings, "MODEL", "")
-        checked = set(getattr(self.preflight, "tool_capability_checked_models", []))
-        capable = set(getattr(self.preflight, "tool_capable_models", []))
-        return model not in checked or model in capable
-
     def _vision_available(self) -> bool:
         model = _settings_str(self.settings, "VISION_MODEL", "") or _settings_str(self.settings, "MODEL", "")
         checked = set(getattr(self.preflight, "vision_capability_checked_models", []))
         capable = set(getattr(self.preflight, "vision_capable_models", []))
         return model not in checked or model in capable
-
-    @staticmethod
-    def _print_model_without_tools() -> None:
-        print(
-            "  This open-ended local tool task requires a model with native tool calling. Text chat and recognized "
-            "controller-owned actions still work with the selected model."
-        )
 
     @staticmethod
     def _path_in_named_folder(folder: str, name: str) -> str:
@@ -1938,11 +1968,38 @@ class LiveSession:
     def _requires_network(self, text: str) -> bool:
         return requires_network(text)
 
-    def _requires_model_driven_tools(self, text: str) -> bool:
-        return requires_model_driven_tools(text)
-
     def _task_title(self, text: str) -> str:
         return task_title(text)
+
+    @staticmethod
+    def _source_for_interaction(interaction_style: InteractionStyle) -> RequestSource:
+        if interaction_style == InteractionStyle.VOICE:
+            return RequestSource.LOCAL_VOICE
+        return RequestSource.TERMINAL
+
+    async def _route_decision(
+        self,
+        text: str,
+        *,
+        quality_mode: QualityMode,
+        interaction_style: InteractionStyle,
+        source: RequestSource,
+        is_worker: bool,
+    ) -> RoutingDecision:
+        envelope = RequestEnvelope(
+            text=text,
+            source=source,
+            interaction_style=interaction_style,
+            quality_mode=quality_mode,
+            messages=list(self.state.conversation_messages),
+            current_goal=self.state.current_goal,
+            is_worker=is_worker,
+            settings=self.settings,
+            preflight=self.preflight,
+        )
+        decision = await self._router.route(envelope, tool_registry=self._tool_registry)
+        self.state.last_route_trace = decision.trace
+        return decision
 
     async def _run_worker_task(
         self,
@@ -1950,8 +2007,17 @@ class LiveSession:
         text_content: str,
         quality_mode: QualityMode,
         interaction_style: InteractionStyle,
+        routing_decision: RoutingDecision | None = None,
     ) -> str:
         task.mark_progress("Working")
+        if routing_decision is None:
+            routing_decision = await self._route_decision(
+                text_content,
+                quality_mode=quality_mode,
+                interaction_style=interaction_style,
+                source=self._source_for_interaction(interaction_style),
+                is_worker=True,
+            )
         direct_screen_result = await self._run_direct_screen_task(task, text_content)
         if direct_screen_result is not None:
             return direct_screen_result
@@ -1960,10 +2026,7 @@ class LiveSession:
             return direct_pdf_result
 
         async with self._model_semaphore:
-            worker_settings = self.settings
-            worker_model = _settings_str(self.settings, "WORKER_MODEL", "")
-            if worker_model:
-                worker_settings = Settings(**{**self.settings.__dict__, "MODEL": worker_model})
+            worker_settings = worker_model_settings(self.settings)
             result = ""
             async for chunk in process_task_stream(
                 text_content=text_content,
@@ -1975,6 +2038,7 @@ class LiveSession:
                 tool_registry=self._tool_registry,
                 current_goal=self.state.current_goal,
                 require_tools=True,
+                routing_decision=routing_decision,
             ):
                 result += chunk
                 if len(result) > 120 and task.progress_summary == "Working":
@@ -2015,10 +2079,7 @@ class LiveSession:
             return extracted.content
 
         task.mark_progress("Summarizing extracted PDF text")
-        worker_settings = self.settings
-        worker_model = _settings_str(self.settings, "WORKER_MODEL", "")
-        if worker_model:
-            worker_settings = Settings(**{**self.settings.__dict__, "MODEL": worker_model})
+        worker_settings = worker_model_settings(self.settings)
 
         prompt = (
             "Summarize the PDF for the user's request. Be concise, factual, and do not ask for a follow-up. "
@@ -2078,6 +2139,7 @@ class LiveSession:
         text_content: str,
         quality_mode: QualityMode = QualityMode.BALANCED,
         interaction_style: InteractionStyle = InteractionStyle.TEXT,
+        routing_decision: RoutingDecision | None = None,
     ):
         self._busy.set()
         self.speech.cancel_listen()
@@ -2113,6 +2175,7 @@ class LiveSession:
                             tool_registry=self._tool_registry,
                             current_goal=self.state.current_goal,
                             require_tools=False,
+                            routing_decision=routing_decision,
                         ):
                             if not first_token:
                                 first_token = True

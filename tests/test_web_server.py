@@ -312,6 +312,72 @@ class TestWebServerHelpers:
         assert tasks["tasks"] == []
         runtime.close()
 
+    def test_web_generic_worker_uses_worker_model_across_tiers(self, monkeypatch, tmp_path):
+        from runtime.models import PreflightResult
+
+        seen = {}
+
+        async def fake_process_task_stream(**kwargs):
+            seen["settings"] = kwargs["settings"]
+            seen["require_tools"] = kwargs["require_tools"]
+            yield "done"
+
+        monkeypatch.setattr("web.server.process_task_stream", fake_process_task_stream)
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            MODEL="main",
+            SIMPLE_MODEL="simple",
+            MODERATE_MODEL="moderate",
+            WORKER_MODEL="worker",
+            COMPLEXITY_ROUTING_ENABLED=True,
+            FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+            FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+        )
+        preflight = PreflightResult(
+            backend_reachable=True,
+            models_ready=["main", "simple", "moderate", "worker"],
+            tool_capability_checked_models=["main", "simple", "moderate", "worker"],
+            tool_capable_models=["worker"],
+        )
+        runtime = WebAssistantRuntime(settings, preflight=preflight)
+
+        try:
+            accepted = runtime.run_sync(runtime.handle_message("Organize my Documents folder."))
+            task_id = accepted["taskId"]
+            runtime.run_sync(runtime.task_manager.wait_for_task(task_id))
+        finally:
+            runtime.close()
+
+        assert seen["settings"].MODEL == "worker"
+        assert seen["settings"].SIMPLE_MODEL == "worker"
+        assert seen["settings"].MODERATE_MODEL == "worker"
+        assert seen["require_tools"] is True
+
+    def test_web_route_last_returns_policy_trace(self):
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+        )
+        preflight = PreflightResult(
+            backend_reachable=True,
+            models_ready=settings.all_model_names,
+            tool_capability_checked_models=settings.all_model_names,
+            tool_capable_models=settings.all_model_names,
+        )
+        runtime = WebAssistantRuntime(settings, preflight=preflight)
+
+        try:
+            runtime.run_sync(runtime.handle_message("hi"))
+            payload = runtime.run_sync(runtime.route_last())
+        finally:
+            runtime.close()
+
+        assert payload["route"]["executionClass"] == "text_chat"
+        assert "source" in payload["route"]
+
     def test_web_runtime_capability_question_is_local_not_model_chat(self):
         settings = Settings(USE_MOCK_CLIENT=True, LIVE_LISTENING_ENABLED=False, LIVE_SPEECH_ENABLED=False)
         runtime = WebAssistantRuntime(settings)

@@ -3,10 +3,9 @@
 """
 Message Handler
 
-Routes requests through the complexity scorer, selects the appropriate model tier,
-and streams responses. Images are provided via tools, not captured here.
-Complex-tier requests with an active tool registry use the tool-calling pipeline;
-all other requests use plain text streaming.
+Streams responses from a local policy routing decision when available, or from
+the same deterministic scorer for internal controller prompts. Images are
+provided by controller-owned flows or tools, not captured here.
 """
 
 import logging
@@ -16,6 +15,7 @@ from chat.complexity_scorer import ComplexityLevel, ComplexityScorer
 from chat.session_state import InteractionStyle, QualityMode
 from clients.ai_client import AIClient
 from clients.base_client import BaseAIClient
+from runtime.routing.types import RoutingDecision
 from tools.registry import ToolRegistry
 from utils.image_history import manage_message_history
 from utils.mock_client import MockAIClient
@@ -100,6 +100,22 @@ def select_model(
     return model_mapping.get(complexity_level, settings.SIMPLE_MODEL)
 
 
+def _include_costly_from_effort(
+    *,
+    tiered_model_routing_enabled: bool,
+    quality_mode: QualityMode,
+    complexity_level: ComplexityLevel | None,
+) -> bool:
+    """Compute costly-tool exposure for internal calls without a RoutingDecision."""
+    if not tiered_model_routing_enabled:
+        return True
+    if quality_mode == QualityMode.FAST:
+        return False
+    if quality_mode == QualityMode.BEST:
+        return True
+    return complexity_level == ComplexityLevel.COMPLEX
+
+
 def _apply_style_prompt(
     context: list[dict],
     style: InteractionStyle,
@@ -134,12 +150,14 @@ async def process_task_stream(
     tool_registry: ToolRegistry | None = None,
     current_goal: str | None = None,
     require_tools: bool = False,
+    routing_decision: RoutingDecision | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Score complexity, select a model, and stream the response.
 
-    Tools are enabled only when the request scores Complex or quality_mode is BEST.
-    Simple and Moderate requests use plain text streaming regardless of the model selected.
+    A RoutingDecision is the normal user-facing path and decides the model,
+    required tool use, and allowlist. Internal controller prompts can still use
+    the same deterministic complexity scorer without exposing policy toggles.
     """
     if messages is None:
         messages = []
@@ -151,17 +169,34 @@ async def process_task_stream(
         return
 
     try:
-        if settings.COMPLEXITY_ROUTING_ENABLED:
+        allowed_tool_names = None
+        if routing_decision is not None:
+            if routing_decision.selected_model is None:
+                yield routing_decision.fallback_plan.on_model_missing
+                return
+            model_name = routing_decision.selected_model
+            is_complex = True
+            allowed_tool_names = routing_decision.tool_policy.allowed_tool_names
+            require_tools = routing_decision.require_tools
+            if require_tools and tool_registry and not allowed_tool_names:
+                yield routing_decision.fallback_plan.on_capability_missing
+                return
+        elif settings.COMPLEXITY_ROUTING_ENABLED:
             response = await complexity_scorer.score_complexity(text_content, messages=messages)
             logger.debug("Complexity: %s (%.2f)", response.classification, response.confidence)
             model_name = select_model(response.classification, settings, quality_mode)
-            is_complex = (
-                quality_mode == QualityMode.BEST
-                or response.classification == ComplexityLevel.COMPLEX
+            is_complex = _include_costly_from_effort(
+                tiered_model_routing_enabled=True,
+                quality_mode=quality_mode,
+                complexity_level=response.classification,
             )
         else:
             model_name = settings.MODEL
-            is_complex = True
+            is_complex = _include_costly_from_effort(
+                tiered_model_routing_enabled=False,
+                quality_mode=quality_mode,
+                complexity_level=None,
+            )
             logger.debug("Complexity routing disabled, using: %s", model_name)
 
         logger.debug("Model: %s", model_name)
@@ -180,6 +215,7 @@ async def process_task_stream(
                 tool_timeout_seconds=settings.TOOL_TIMEOUT_SECONDS,
                 max_tool_rounds=settings.MAX_WORKER_TOOL_STEPS,
                 require_tools=require_tools,
+                allowed_tool_names=allowed_tool_names,
             ):
                 yield chunk
         else:
