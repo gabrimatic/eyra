@@ -8,7 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
-No unreleased changes.
+### Changed
+
+- Local policy routing is now always on. Complexity routing only selects model tiers; every request still goes through policy planning for execution class, required capabilities, model capability, tool allowlists, risk, fallback, and route traces.
+- Removed the `ROUTING_POLICY_ENABLED` compatibility switch from generated and example environment files; there is no separate legacy request path.
+
+### Fixed
+
+- Terminal and Web open-ended local tool requests now fail before background-task creation when no configured model can satisfy the required tool capabilities.
 
 ## [4.1.0] - 2026-05-14
 
@@ -304,7 +311,7 @@ No unreleased changes.
 - Tool system (`src/tools/`) with registry pattern: `base.py` defines the interface, `registry.py` manages dispatch
 - `take_screenshot` tool available to Complex-tier requests; the model decides when visual context is needed
 - `get_current_time`, `get_weather`, `read_clipboard`, `get_system_info` tools
-- `COMPLEXITY_ROUTING_ENABLED` setting (experimental, off by default). When disabled, all requests use `MODEL` with all tools available
+- `COMPLEXITY_ROUTING_ENABLED` setting (experimental, off by default). At the time, disabling it used `MODEL` with the then-current tool exposure behavior
 - Sound feedback for listen, process, and respond events
 
 ### Changed
@@ -313,7 +320,7 @@ No unreleased changes.
 - Screenshot capture is now on-demand (model-driven tool call) rather than a constant polling loop
 - Runtime reduced from three concurrent tasks to two (input loop + voice loop)
 - Settings renamed: `COMPLEX_MODEL` to `MODEL`, `SIMPLE_TEXT_MODEL` to `SIMPLE_MODEL`, `MODERATE_TEXT_MODEL` to `MODERATE_MODEL`
-- Complexity routing is now optional and off by default; when off, a single `MODEL` handles all requests
+- Complexity routing is now optional and off by default; when off, a single `MODEL` handles model execution
 
 ### Removed
 
