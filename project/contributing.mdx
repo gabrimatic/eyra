@@ -1,0 +1,58 @@
+---
+title: "Contributing"
+description: "How to make focused changes to Eyra."
+---
+
+Contributions should preserve Eyra's local-first, voice-first contract. Keep changes small enough to review, but complete enough to verify.
+
+## Local setup
+
+```bash
+uv sync
+uv run pytest -q
+uv run ruff check src tests
+```
+
+## Before opening a change
+
+Check:
+
+- The change keeps default behavior local.
+- Optional network, OS, MCP, agent, Web, and Realtime paths stay opt-in.
+- User-facing errors are human-readable and actionable.
+- Filesystem work respects sandbox roots.
+- Risky actions use approvals.
+- Long-running work has task lifecycle and cancellation.
+- Docs and tests match behavior.
+
+## Pull request scope
+
+Prefer one focused change:
+
+- Runtime behavior.
+- Tool or capability.
+- Web UI path.
+- Voice path.
+- Docs-only correction.
+- Tests for a specific contract.
+
+Avoid unrelated formatting churn.
+
+## Verification
+
+Run the relevant gate:
+
+```bash
+uv run pytest -q
+uv run ruff check src tests
+uv lock --check
+bash -n setup.sh
+```
+
+For docs changes:
+
+```bash
+mint validate --disable-openapi
+mint broken-links --check-anchors
+mint a11y
+```

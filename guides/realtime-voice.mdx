@@ -1,0 +1,51 @@
+---
+title: "Realtime voice"
+description: "Enable the optional online browser voice path."
+---
+
+Realtime voice is optional and online. Local Whisper remains the default local voice path.
+
+## Enable
+
+```env
+REALTIME_VOICE_ENABLED=true
+REALTIME_MODEL=gpt-realtime
+REALTIME_VOICE=marin
+OPENAI_API_KEY=<your-key>
+```
+
+Eyra uses `OPENAI_API_KEY` only on the server. Browser clients receive ephemeral client secrets minted by the Web server.
+
+## Tools
+
+Default behavior: Realtime tools are disabled.
+
+```env
+REALTIME_TOOLS_ENABLED=false
+REALTIME_ALLOWED_TOOLS=
+```
+
+The safe built-in allowlist is small. Current safe candidates include:
+
+- `get_current_time`
+- `discover_capabilities`
+
+Risky local tools are not exposed to Realtime even if listed.
+
+## Privacy boundary
+
+Realtime sends browser voice/text to OpenAI only when enabled and used. It does not reuse generic `API_KEY`, and it does not put the standard API key in browser code.
+
+Use `/capabilities` or the Web capabilities endpoint to confirm what is enabled before testing.
+
+## Use local voice first
+
+For local-only operation, keep:
+
+```env
+REALTIME_VOICE_ENABLED=false
+LIVE_LISTENING_ENABLED=true
+LIVE_SPEECH_ENABLED=true
+```
+
+That keeps voice input and speech output on Local Whisper.

@@ -1,0 +1,56 @@
+---
+title: "Privacy model"
+description: "Eyra's local-first default, opt-in remote paths, approvals, and redaction."
+---
+
+Eyra's default is local-first. No telemetry, no analytics, no silent network calls, no remote browsing, no online voice, no connector execution, and no agent delegation unless you enable the relevant setting.
+
+## Remote paths
+
+| Path | Default | What may leave |
+| --- | --- | --- |
+| Remote `API_BASE_URL` | Off by default | Prompts, tool results, screenshots, PDF text sent to model |
+| `NETWORK_TOOLS_ENABLED=true` | Off | URL, query, weather location, browser interaction data |
+| `REALTIME_VOICE_ENABLED=true` | Off | Browser audio/text and allowed tool results |
+| `REALTIME_TOOLS_ENABLED=true` | Off | Allowed tool results to Realtime |
+| External agents | Off | Prompt, bounded context, agent output based on adapter behavior |
+| MCP tools | Off | Tool arguments and outputs based on configured server behavior |
+| `CONNECTORS_ENABLED=true` | Off | Connector task, selected files, cwd, and connector output according to the manifest |
+| `CONNECTORS_ALLOW_REMOTE=true` | Off | Remote connector task payload and declared data classes |
+
+## Local private data
+
+Eyra can read local private data only when the relevant capability is available and policy allows the action:
+
+- Clipboard.
+- Files under sandbox roots.
+- Finder selection under sandbox roots.
+- Screenshots.
+- PDF text.
+- Frontmost app and window context.
+- Accessibility tree when OS tools are enabled.
+- Local agent session content when agent tools are enabled.
+
+## Approvals
+
+Risky local work uses server-side approvals. Approval ids are stored in the runtime, and the model cannot bypass them by passing a confirmation flag.
+
+Actions that may require approval include overwrites, permanent delete, downloads, uploads, shell commands, UI actions, LaunchAgent management, Shortcut execution, MCP calls, and agent delegation.
+
+Connector jobs also require approval when the manifest requests it, mutates files, controls UI, runs shell, leaves the machine, or declares medium-or-higher risk.
+
+## Redaction
+
+Tool, connector, and Web paths avoid logging raw user values where possible. Web payloads redact token query strings, key-like values, OpenAI-style keys, connector destinations, connector output, and home paths.
+
+## Reporting
+
+Use:
+
+```text
+/capabilities
+What would leave my machine?
+Are you local right now?
+```
+
+The answer is based on current settings and preflight state.

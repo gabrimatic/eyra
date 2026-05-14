@@ -1,0 +1,99 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Eyra",
+  "description": "Documentation for Eyra, a local-first voice agent for macOS terminals.",
+  "colors": {
+    "primary": "#0F766E",
+    "light": "#14B8A6",
+    "dark": "#64748B"
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo-light.svg",
+    "dark": "/logo-dark.svg"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Start",
+        "pages": [
+          "index",
+          "get-started/installation",
+          "get-started/first-session",
+          "get-started/configuration",
+          "get-started/troubleshooting"
+        ]
+      },
+      {
+        "group": "Use Eyra",
+        "pages": [
+          "guides/voice-and-hands-free",
+          "guides/local-file-work",
+          "guides/background-tasks",
+          "guides/triggers-and-reminders",
+          "guides/web-ui",
+          "guides/realtime-voice",
+          "guides/connectors",
+          "guides/external-agents-and-mcp"
+        ]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          "reference/commands",
+          "reference/settings",
+          "reference/tools",
+          "reference/web-endpoints",
+          "reference/certification",
+          "reference/agent-docs"
+        ]
+      },
+      {
+        "group": "Architecture",
+        "pages": [
+          "architecture/overview",
+          "architecture/runtime",
+          "architecture/routing",
+          "architecture/voice",
+          "architecture/tools",
+          "architecture/web-runtime",
+          "architecture/privacy"
+        ]
+      },
+      {
+        "group": "Develop",
+        "pages": [
+          "development/local-development",
+          "development/extending-eyra",
+          "development/testing",
+          "development/release-readiness",
+          "development/source-map"
+        ]
+      },
+      {
+        "group": "Project",
+        "pages": [
+          "security/privacy-model",
+          "security/security-policy",
+          "project/strategy",
+          "project/contributing",
+          "project/changelog"
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/gabrimatic/eyra"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/gabrimatic/eyra"
+    }
+  }
+}

@@ -1,0 +1,129 @@
+---
+title: "Troubleshooting"
+description: "Diagnose startup, model, voice, Web UI, filesystem, and tool issues."
+---
+
+Start with `/status`, `/capabilities`, and `/context`. They show the current runtime state, enabled control surfaces, privacy boundary, recent jobs, and recent local changes.
+
+## Backend does not start
+
+Symptom: Eyra stops during preflight with a backend or model message.
+
+Check the provider:
+
+```bash
+curl http://localhost:11434/v1/models
+curl http://localhost:11434/api/tags
+```
+
+Then check model names:
+
+```bash
+ollama list
+ollama show gemma4:e4b
+```
+
+If you use a remote provider, confirm `API_BASE_URL`, `API_KEY`, and `MODEL` point at a chat-completions-compatible model.
+
+## Local model rejects tools
+
+Some local models answer normally but do not support native tool calling. Eyra warns during preflight and falls back to plain streaming when possible.
+
+Use deterministic controller actions for time, screen, PDF, task commands, context, capabilities, and common file work when native tools are unavailable. Use a tool-capable model for open-ended tool loops.
+
+## Voice is unavailable
+
+Run:
+
+```text
+/voice-diagnose
+```
+
+It checks input devices, all-zero audio, VAD speech detection, Local Whisper ASR, generated WAV transcription, and the Local Whisper socket path.
+
+If Local Whisper is missing:
+
+```bash
+brew tap gabrimatic/local-whisper
+brew install local-whisper
+```
+
+If the wrong microphone is selected, set:
+
+```env
+VOICE_INPUT_DEVICE=<index-or-name>
+```
+
+## Web UI cannot connect
+
+Check health:
+
+```bash
+curl http://127.0.0.1:8765/api/health
+```
+
+If non-health endpoints return unauthorized, use the tokenized URL printed at startup or set a known high-entropy `WEB_UI_TOKEN`.
+
+Do not set `WEB_UI_REQUIRE_TOKEN=false` for `0.0.0.0`; Eyra forces auth for non-localhost binds.
+
+## File access is denied
+
+Eyra resolves paths before checking the sandbox.
+
+```env
+FILESYSTEM_ALLOWED_PATHS=~/Documents,~/Desktop,~/Downloads,/tmp
+FILESYSTEM_DEFAULT_PATH=~/Documents
+```
+
+Add only the roots needed for the workflow. Existing files are protected from overwrite unless you explicitly approve or confirm the exact overwrite.
+
+## Installer refuses the target directory
+
+`install.sh` allows only managed install roots:
+
+```text
+~/.local/share/eyra/*
+~/Applications/*
+/opt/*
+```
+
+It refuses `/`, `$HOME`, and `~/.local` to avoid moving or replacing broad user directories. Set `EYRA_INSTALL_DIR` to a subdirectory under one of the allowed roots.
+
+## Wrong .env is being read
+
+Installed Eyra reads `~/.config/eyra/.env`. A repo-local `.env` wins only when you run from an Eyra source checkout.
+
+If another project has a `.env` in your current directory, Eyra ignores it. Run `eyra paths --json` and `eyra doctor --json` to confirm the active config and support paths.
+
+## Shell PATH lines are duplicated
+
+Run setup again:
+
+```bash
+eyra setup
+```
+
+Setup removes older shell lines ending in `# eyra` before adding the current PATH line. Uninstall also cleans Eyra-created shell lines from `~/.zshrc` and `~/.bashrc`.
+
+## Network tools are unavailable
+
+Default behavior: network tools are off.
+
+```env
+NETWORK_TOOLS_ENABLED=true
+```
+
+Weather requires an explicit location and does not use remote IP geolocation. Browser download and upload actions require approval and stay under the filesystem sandbox.
+
+## Tests fail after docs or config changes
+
+Run the project gate:
+
+```bash
+uv run pytest -q
+uv run ruff check src tests
+uv lock --check
+bash -n setup.sh
+```
+
+If a failure depends on physical microphone hardware, keep that gate separate from code-path certification and state the environment that was actually tested.

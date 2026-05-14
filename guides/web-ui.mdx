@@ -1,0 +1,59 @@
+---
+title: "Web UI"
+description: "Use Eyra from a browser or phone with tokenized local access."
+---
+
+The Web UI is optional. It gives you a compact browser interface for text chat, event-driven task status, task cancellation, local voice turns, and local speech feedback.
+
+## Standalone runtime
+
+```bash
+WEB_UI_ENABLED=true uv run python -m web.server
+```
+
+Standalone mode runs its own preflight, conversation, tools, job store, trigger store, and background task manager.
+
+## Shared terminal runtime
+
+```bash
+WEB_UI_ENABLED=true eyra
+```
+
+Shared mode attaches the Web frontend to the terminal-owned runtime. It shares conversation, approvals, tasks, logs, artifacts, triggers, browser session, tool registry, and operation ledger.
+
+## Authentication
+
+Default behavior: every non-health endpoint requires a token.
+
+```env
+WEB_UI_REQUIRE_TOKEN=auto
+WEB_UI_TOKEN=
+```
+
+If `WEB_UI_TOKEN` is empty, Eyra generates a session token and prints a tokenized URL. Keep that URL private.
+
+`WEB_UI_REQUIRE_TOKEN=false` is allowed only when `WEB_UI_HOST` is localhost. Non-localhost binds always require auth.
+
+## Network binding
+
+```env
+WEB_UI_HOST=127.0.0.1
+WEB_UI_PORT=8765
+WEB_UI_MAX_REQUEST_BYTES=1000000
+```
+
+Set `WEB_UI_HOST=0.0.0.0` only when you intentionally want access from another device on your network.
+
+## Local voice turn
+
+The browser can upload audio for a local voice turn. The server transcribes through Local Whisper, then routes the turn through Eyra.
+
+The request size limit is `WEB_UI_MAX_REQUEST_BYTES`.
+
+## Health
+
+```bash
+curl http://127.0.0.1:8765/api/health
+```
+
+Health reports offline-by-default status, runtime scope, model names, voice availability, and enabled tool surfaces without exposing secrets.

@@ -1,0 +1,55 @@
+---
+title: "Architecture overview"
+description: "How Eyra's terminal, voice, router, tools, jobs, and Web UI fit together."
+---
+
+Eyra is one local runtime with multiple frontends. The terminal owns the core live session; voice and Web can feed the same coordinator when enabled.
+
+```text
+typed input            local voice             Web UI
+    │                      │                     │
+    └──────────────┬───────┴──────────────┬──────┘
+                   ↓                      ↓
+             LiveSession            WebAssistantRuntime
+                   │                      │
+                   └──────────┬───────────┘
+                              ↓
+                      RuntimeRouter
+                              ↓
+       local command, deterministic action, tool loop, connector, task, vision, PDF
+                              ↓
+         BackgroundTaskManager, ToolRegistry, ConnectorRegistry, DurableJobStore, TriggerStore
+```
+
+## Core layers
+
+| Layer | Files | Responsibility |
+| --- | --- | --- |
+| Entry | `src/main.py`, `src/runtime/startup.py` | Load settings, setup, preflight, start runtime |
+| Runtime | `src/runtime/live_session.py` | Terminal orchestration |
+| Routing | `src/runtime/routing/` | Local deterministic route policy |
+| Chat | `src/chat/message_handler.py` | Model selection, style prompt, streaming |
+| Clients | `src/clients/` | OpenAI-compatible async calls |
+| Tools | `src/tools/`, `src/runtime/tooling.py` | Local and optional tool registry |
+| Connectors | `src/runtime/connectors/` | Declared external workers under Eyra policy |
+| Voice | `src/runtime/voice_input.py`, `speech_controller.py` | VAD, ASR, TTS, interruption |
+| Tasks | `src/runtime/tasks.py`, `jobs.py` | Background lifecycle, durable logs, ledger |
+| Web | `src/web/server.py`, `src/runtime/shared.py` | Browser/phone UI |
+
+## Design rules
+
+- Local-first default.
+- Optional network, Realtime, OS, MCP, agent, and connector surfaces.
+- Deterministic routing before model/tool execution.
+- Exact approval for risky local actions.
+- Durable evidence for long-running or computer-changing work.
+- Graceful degradation when a dependency is missing.
+
+## Data flow
+
+1. Input arrives from terminal, local voice, or Web.
+2. Local commands and direct intents are intercepted.
+3. `RuntimeRouter` classifies the request and builds a policy decision.
+4. Eyra either answers directly, captures screen/PDF context, executes deterministic work, starts a background or connector task, or streams through the model.
+5. Tools are exposed only when policy and settings allow them.
+6. Results update conversation, speech, tasks, logs, artifacts, and the operation ledger.

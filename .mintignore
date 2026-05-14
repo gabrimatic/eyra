@@ -1,0 +1,21 @@
+# Keep Mintlify focused on the documentation source.
+.venv/
+dist/
+build/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Exclude project source and test internals from hidden public docs.
+src/
+tests/
+scripts/
+docs/
+
+# Exclude local/runtime files if they exist in a checkout.
+.env
+.env.*
+*.log
+*.wav
+models_cache/

@@ -75,3 +75,34 @@ jobs:
 
       - name: Check setup.sh syntax
         run: bash -n setup.sh
+
+  docs:
+    name: Mintlify docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install Mintlify CLI
+        run: npm i -g mint@latest
+
+      - name: Validate docs
+        env:
+          MINTLIFY_TELEMETRY_DISABLED: "1"
+        run: mint validate --disable-openapi
+
+      - name: Check docs links
+        env:
+          MINTLIFY_TELEMETRY_DISABLED: "1"
+        run: mint broken-links --check-anchors
+
+      - name: Check docs accessibility
+        env:
+          MINTLIFY_TELEMETRY_DISABLED: "1"
+        run: mint a11y

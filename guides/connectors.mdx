@@ -1,0 +1,140 @@
+---
+title: "Connectors"
+description: "Configure universal workers that run under Eyra's route policy, approval, sandbox, and job ledger."
+---
+
+Connectors let Eyra hand a task to a declared worker without turning that worker into an unbounded model-selected shell command. A connector can be a CLI, stdio MCP runner, local HTTP service, remote HTTP service, browser agent, coding agent, or guarded Python module.
+
+Eyra still owns the policy layer: manifest validation, route classification, acceptance checks, sandboxed working directories, static argv, approvals, timeouts, output caps, cancellation, redaction, logs, artifacts, and route-trace metadata.
+
+## Enablement
+
+Connectors are disabled by default.
+
+```env
+CONNECTORS_ENABLED=false
+CONNECTORS_CONFIG_PATH=~/.config/eyra/connectors.json
+CONNECTORS_ALLOWED_ROOTS=
+CONNECTORS_TIMEOUT_SECONDS=600
+CONNECTORS_OUTPUT_CAP_BYTES=32768
+CONNECTORS_ALLOW_REMOTE=false
+CONNECTORS_ALLOW_PYTHON_MODULE=false
+```
+
+`CONNECTORS_ALLOWED_ROOTS` falls back to `FILESYSTEM_ALLOWED_PATHS` when empty. Remote HTTP connectors require `CONNECTORS_ALLOW_REMOTE=true`. Python module connectors require `CONNECTORS_ALLOW_PYTHON_MODULE=true`.
+
+## Manifest
+
+`CONNECTORS_CONFIG_PATH` points to a JSON object with a `connectors` list.
+
+```json
+{
+  "connectors": [
+    {
+      "id": "local_worker",
+      "displayName": "Local Worker",
+      "type": "cli",
+      "enabled": true,
+      "command": ["local-worker", "run", "--json"],
+      "cwdPolicy": "request",
+      "inputMode": "stdin_json",
+      "outputMode": "stdout_json",
+      "local": true,
+      "canUseNetwork": false,
+      "canReadFiles": true,
+      "canMutateFiles": true,
+      "canControlUI": false,
+      "canRunShell": false,
+      "requiresApproval": true,
+      "riskTier": "medium_risk_change",
+      "timeoutSeconds": 600,
+      "outputCapBytes": 32768,
+      "privacy": {
+        "dataSent": ["task", "cwd", "selected_files"],
+        "destination": "local CLI process",
+        "leavesMachine": false
+      },
+      "acceptance": {
+        "healthCommand": ["local-worker", "--version"],
+        "testTask": "report status",
+        "expectedOutputContains": "ok",
+        "requiresHumanApproval": true
+      }
+    }
+  ]
+}
+```
+
+Connector ids must match `^[a-z][a-z0-9_-]{1,63}$`. Commands and acceptance health commands must be static argv lists. Eyra rejects model-filled placeholders, shell interpolation, and shell interpreters with `-c`.
+
+## Types
+
+| Type | Transport |
+| --- | --- |
+| `cli` | Static local command |
+| `mcp` | Static local MCP command |
+| `http_local` | POST to localhost or loopback |
+| `http_remote` | POST to a remote HTTP endpoint, opt-in only |
+| `python_module` | `python -m <module>`, guarded by opt-in |
+| `browser_agent` | Static local browser-agent command |
+| `coding_agent` | Static local coding-agent command |
+
+## Risk tiers
+
+| Tier | Meaning |
+| --- | --- |
+| `read_only` | Reads bounded local or connector state |
+| `low_risk_change` | Low-impact local changes |
+| `medium_risk_change` | Mutates files or performs bounded local work |
+| `high_risk_change` | Risky local changes |
+| `irreversible_or_external` | External or hard-to-undo action |
+| `delegated_agent` | Another agent controls execution details |
+
+Approval is required when the manifest requests it, when the connector can mutate files, control UI, run shell, leave the machine, or when the risk tier is medium or higher.
+
+## Acceptance
+
+A connector must be accepted before use. Acceptance can run a declared health command and a declared test task, then records one of these states:
+
+| State | Meaning |
+| --- | --- |
+| `not_configured` | Missing connector or disabled connector system |
+| `configured` | Manifest loaded but not accepted yet |
+| `validation_failed` | Manifest/config validation failed |
+| `available` | Health or availability check passed |
+| `acceptance_failed` | Acceptance check failed |
+| `accepted` | Connector may run |
+| `disabled` | Disabled in manifest or current session |
+
+## Terminal commands
+
+```text
+/connectors
+/connector <id>
+/connector test <id>
+/connector enable <id>
+/connector disable <id>
+/connector run <id> <task>
+```
+
+Eyra also recognizes direct phrases such as `list connectors`, `show connector local_worker`, `ask connector local_worker to summarize this`, and `cancel local_worker`.
+
+## CLI validation
+
+```bash
+eyra connectors validate
+eyra connectors validate --json
+eyra connectors list
+eyra connectors test local_worker
+eyra-connectors validate --json
+```
+
+The connector CLI forces connector loading for validation/list/test, redacts sensitive values, and exits non-zero when validation or acceptance fails.
+
+## Runtime behavior
+
+Connector jobs run as background tasks with durable job rows. Results include capped, redacted output plus connector artifacts such as connector id, redacted working directory or endpoint, output size, and duration.
+
+Cancellation works by connector id or job id. If a connector asks for approval, the job waits for an exact `run_connector_task` approval and reruns only after that approval is consumed.
+
+Remote connectors are never part of the default local path. Realtime voice does not expose connector execution as a browser-side tool.

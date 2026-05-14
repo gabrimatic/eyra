@@ -1,0 +1,71 @@
+---
+title: "Eyra"
+description: "Local-first voice agent for macOS terminals."
+---
+
+Eyra is a local-first voice agent for the macOS terminal. You speak or type, Eyra plans the route locally, calls tools when needed, and keeps computer-changing work cancellable, inspectable, and recoverable.
+
+Default behavior: Ollama at localhost, Local Whisper for voice, Silero VAD in process, screenshots in memory, sandboxed file access, no telemetry, and no silent network calls.
+
+<CardGroup cols={2}>
+  <Card title="Install Eyra" icon="terminal" href="/get-started/installation">
+    Set up the local runtime, models, voice stack, and `eyra` command.
+  </Card>
+  <Card title="Use voice" icon="mic" href="/guides/voice-and-hands-free">
+    Run spoken turns, dictation, approvals, interruption, and hands-free status.
+  </Card>
+  <Card title="Understand the architecture" icon="network" href="/architecture/overview">
+    Follow the runtime, router, tools, connectors, jobs, Web UI, and privacy boundary.
+  </Card>
+  <Card title="Verify releases" icon="badge-check" href="/reference/certification">
+    Run the local voice-to-computer certification matrix and project checks.
+  </Card>
+</CardGroup>
+
+## Product promise
+
+Eyra is the coordinator, not the worker pile.
+
+It keeps the local voice-to-computer workflow useful without making privacy and recovery vague. Tools, Web UI, Realtime voice, connectors, MCP, OS control, browser work, and terminal-agent delegation are available only when you enable the matching capability.
+
+## Runtime model
+
+```text
+input
+  ├─ typed prompt
+  └─ local voice turn
+        ↓
+local policy router
+        ↓
+deterministic action, model turn, tool loop, connector job, or background task
+        ↓
+status, speech, logs, ledger, artifacts, cancellation, undo
+```
+
+## What stays local
+
+| Surface | Default |
+| --- | --- |
+| Model endpoint | `http://localhost:11434/v1` |
+| Voice input | Local Whisper through socket or CLI |
+| Speech output | Local Whisper TTS |
+| Screenshots | Captured and encoded in memory |
+| Files | Sandboxed under configured roots |
+| Network tools | Disabled |
+| Web UI | Disabled |
+| Realtime voice | Disabled |
+| Connectors | Disabled |
+| External agents and MCP | Disabled |
+
+Data leaves the machine only when you configure a remote model provider, enable Realtime voice, enable network-backed tools and use them, or opt into a remote connector.
+
+## Main paths
+
+- Start locally: [Installation](/get-started/installation)
+- Run the first session: [First session](/get-started/first-session)
+- Tune settings: [Configuration](/get-started/configuration)
+- Control files safely: [Local file work](/guides/local-file-work)
+- Run long work: [Background tasks](/guides/background-tasks)
+- Attach external workers: [Connectors](/guides/connectors)
+- Attach a browser or phone: [Web UI](/guides/web-ui)
+- Build or modify Eyra: [Local development](/development/local-development)

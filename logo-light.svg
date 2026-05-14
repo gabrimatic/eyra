@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168 40" role="img" aria-label="Eyra">
+  <rect width="40" height="40" rx="10" fill="#0F172A"/>
+  <path d="M11 23c4 7 18 7 22 0" fill="none" stroke="#14B8A6" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M12 17c4-6 16-6 20 0" fill="none" stroke="#F8FAFC" stroke-width="3.5" stroke-linecap="round"/>
+  <circle cx="20" cy="20" r="2.5" fill="#14B8A6"/>
+  <text x="52" y="27" fill="#0F172A" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700">Eyra</text>
+</svg>

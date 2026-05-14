@@ -1,0 +1,75 @@
+---
+title: "Extending Eyra"
+description: "Add tools, commands, providers, settings, and runtime surfaces safely."
+---
+
+Extend Eyra by adding the smallest local component that fits the product boundary. Keep optional surfaces behind settings and route policy.
+
+## Add a tool
+
+1. Add one file under `src/tools/`.
+2. Implement `BaseTool`.
+3. Define JSON Schema parameters.
+4. Add metadata or rely on `metadata_for_tool()`.
+5. Register it in `src/runtime/tooling.py`.
+6. Add route policy classification if it creates a new risk or capability.
+7. Add tests.
+8. Document the setting, tool, and privacy boundary.
+
+Network tools must be gated by `NETWORK_TOOLS_ENABLED`.
+
+OS, shell, UI, app/window, LaunchAgent, and clipboard-write tools must be gated by `OS_TOOLS_ENABLED`.
+
+## Add a command
+
+1. Add the command to `_COMMANDS` in `src/runtime/live_session.py`.
+2. Handle it in the local command path.
+3. Keep it out of model routing.
+4. Add tests in `tests/test_runtime.py` or a focused test file.
+5. Update [Commands](/reference/commands).
+
+## Add a setting
+
+1. Add the dataclass field in `src/utils/settings.py`.
+2. Load and validate it in `Settings.load_from_env()`.
+3. Add it to `.env.example`.
+4. Update [Settings](/reference/settings).
+5. Add tests for parsing and behavior.
+
+## Add a provider
+
+No provider class is needed when the provider speaks OpenAI-compatible `/v1/chat/completions`.
+
+Document the required `API_BASE_URL`, `API_KEY`, and model names. Preflight should keep failures human-readable.
+
+## Add a connector type or connector behavior
+
+Use `src/runtime/connectors/` when Eyra needs to hand work to an external worker while keeping route policy, approval, logs, artifacts, and cancellation in Eyra.
+
+Required pieces:
+
+- Manifest validation in `manifest.py`.
+- Structured contracts in `types.py`.
+- Registry snapshots and acceptance state in `registry.py`.
+- Bounded execution in `runner.py`.
+- Terminal and Web command/API wiring.
+- Route execution class and capability mapping.
+- Redaction, sandbox, timeout, and output-cap tests.
+- Certification rows when the behavior is release-critical.
+- Updates to [Connectors](/guides/connectors), [Settings](/reference/settings), [Commands](/reference/commands), and [Web endpoints](/reference/web-endpoints).
+
+## Add a long-running capability
+
+Use background tasks when work can outlive the immediate turn.
+
+Required pieces:
+
+- Route policy.
+- Capability and risk classification.
+- Cancellation.
+- Timeout.
+- Logs or artifacts.
+- Privacy boundary.
+- Tests.
+- Documentation.
+- Certification coverage when release-critical.

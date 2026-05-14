@@ -1,0 +1,44 @@
+---
+title: "Strategy"
+description: "Eyra's product position and release bar."
+---
+
+Eyra is the trusted local coordinator for no-hands macOS operation. It should help someone control a computer when keyboard and mouse use is inconvenient or unavailable.
+
+## Position
+
+Eyra's wedge is the safety and coordination layer around local voice-to-computer work:
+
+- Voice UX: short spoken interaction, barge-in handling, dictation, status, and recovery.
+- Route policy: deterministic local planning before model or tool calls.
+- Privacy boundaries: clear answers to what stays local and what leaves.
+- Approvals: exact-action, server-side approval for risky work.
+- Jobs: durable task lifecycle, logs, artifacts, status, cancellation, and retry.
+- Operation ledger: local record of computer-changing actions.
+- Undo: honest reversal for reversible actions.
+- Certification: release checks prove the configured surface.
+- Connectors: specialist CLIs, MCP runners, HTTP services, browser agents, coding agents, and guarded Python modules run only as declared optional workers.
+- Delegation: specialist agents run only through optional worker surfaces.
+
+## What Eyra is not
+
+Eyra is not a general autonomous agent framework, a browser-agent clone, a coding workspace, or an MCP ecosystem as a product surface.
+
+It can integrate those systems as workers. Eyra still owns manifest validation, route policy, approval, privacy, task lifecycle, logs, artifacts, cancellation, output caps, and final status.
+
+## Release bar
+
+Every meaningful new capability needs:
+
+- Route policy.
+- Opt-in config where needed.
+- Safety model.
+- Approval model when risky.
+- Job lifecycle for long work.
+- Cancellation.
+- Logs or artifacts.
+- Privacy boundary.
+- Connector manifest and acceptance checks when the capability depends on an external worker.
+- Tests.
+- Documentation.
+- Certification coverage when release-critical.

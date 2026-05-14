@@ -1,0 +1,56 @@
+---
+title: "Privacy architecture"
+description: "How Eyra decides what stays local and what may leave the machine."
+---
+
+Eyra evaluates privacy per action. The runtime reports whether an action leaves the machine, where it goes, whether it is allowed, and whether it required opt-in.
+
+## Decision model
+
+`evaluate_privacy_boundary()` handles three main paths:
+
+| Action prefix | Destination | Requires opt-in |
+| --- | --- | --- |
+| `model.` | Local or remote model provider | Only for remote provider |
+| `network.` | Remote network tool target | Yes |
+| `realtime.` | OpenAI Realtime | Yes |
+
+Unknown local runtime actions are treated as local by themselves.
+
+Connector privacy is reported separately from connector manifests through `ConnectorRegistry.capability_snapshot()`. Each connector declares data classes, destination, local/remote status, risk tier, capabilities, approval requirement, and acceptance state.
+
+## Capability snapshot
+
+`build_capability_snapshot()` reports:
+
+- Main, worker, and vision models.
+- Whether the provider is local.
+- Local Whisper status.
+- Screen capture status.
+- Filesystem roots.
+- Network, OS, browser, MCP, agent, and Web gates.
+- Connector config status, acceptance state, privacy declaration, and remote/local boundary.
+- Remote paths.
+- Local job store path.
+- Common privacy boundary decisions.
+
+## Defaults
+
+Default behavior:
+
+- Provider is local Ollama.
+- Network tools are disabled.
+- Realtime voice is disabled.
+- Realtime tools are disabled.
+- Agent and MCP bridges are disabled.
+- Web UI is disabled.
+- Connectors are disabled.
+- No telemetry or analytics.
+
+Ask Eyra:
+
+```text
+Are you local right now?
+What would leave my machine?
+What can you control?
+```

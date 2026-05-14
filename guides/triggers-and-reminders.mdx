@@ -1,0 +1,45 @@
+---
+title: "Triggers and reminders"
+description: "Create bounded local file triggers and reminder triggers."
+---
+
+Triggers are explicit, local, and bounded. Eyra does not watch silently; a trigger exists only after you ask for it.
+
+## Examples
+
+```text
+When report.pdf appears in my Downloads, move it to Documents.
+Remind me in 10 minutes to stretch.
+Every 30 minutes remind me to stretch.
+```
+
+## Commands
+
+```text
+/triggers
+/trigger pause <id>
+/trigger resume <id>
+/trigger cancel <id>
+```
+
+## Trigger types
+
+| Type | Behavior |
+| --- | --- |
+| File trigger | Waits for a local file condition, then runs a bounded local action |
+| One-time reminder | Fires once after the requested delay |
+| Recurring reminder | Fires repeatedly until paused or cancelled |
+
+## Settings
+
+```env
+TRIGGER_STORE_PATH=~/.local/share/eyra/triggers.sqlite3
+TRIGGER_CHECK_INTERVAL_SECONDS=0.5
+TRIGGER_TIMEOUT_SECONDS=300
+```
+
+Triggers persist in local SQLite. A trigger can be paused, resumed, cancelled, completed, or failed with an error.
+
+## Design boundary
+
+Eyra is reactive by default. Triggers are the exception because you explicitly create them. They stay bounded and visible through `/triggers`.

@@ -1,0 +1,109 @@
+---
+title: "Settings"
+description: "Complete .env reference for Eyra."
+---
+
+`.env` controls runtime behavior. Every field has a default in `src/utils/settings.py`; `setup.sh` writes the initial file.
+
+## Provider and models
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `API_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible provider endpoint |
+| `API_KEY` | `ollama` | Provider key |
+| `USE_MOCK_CLIENT` | `false` | Bypass backend/model checks for smoke tests |
+| `MODEL` | `gemma4:e4b` | Main model |
+| `VISION_MODEL` | empty | Screen/image model, falls back to `MODEL` |
+| `AUTO_PULL_MODELS` | `true` | Pull missing Ollama models |
+| `COMPLEXITY_ROUTING_ENABLED` | `false` | Enable model-tier routing |
+| `SIMPLE_MODEL` | `qwen3.5:2b` | Simple tier |
+| `MODERATE_MODEL` | `gemma4:e4b` | Moderate tier |
+| `WORKER_MODEL` | empty | Background worker model, falls back to `MODEL` |
+
+## Voice
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `LIVE_LISTENING_ENABLED` | `true` | Local microphone input |
+| `LIVE_SPEECH_ENABLED` | `true` | Local speech output |
+| `SPEECH_COOLDOWN_MS` | `3000` | Minimum gap between spoken responses |
+| `VOICE_INPUT_DEVICE` | empty | sounddevice index or name |
+| `VOICE_SAMPLE_RATE` | `16000` | VAD and WAV sample rate |
+| `VOICE_DEBUG_RECORD_SECONDS` | `3` | `/voice-diagnose` capture length |
+| `VOICE_DIAGNOSTIC_SAVE_AUDIO` | `false` | Save diagnostic audio locally |
+| `VOICE_SILENCE_MS` | `1500` | Silence after speech before processing |
+| `VOICE_VAD_THRESHOLD` | `0.15` | Silero speech threshold |
+| `HANDS_FREE_MODE` | `false` | Show no-hands intent in status/capabilities |
+
+## Tasks and stores
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `BACKGROUND_TASKS_ENABLED` | `true` | Enable background task manager |
+| `MAX_BACKGROUND_TASKS` | `2` | Concurrent tasks |
+| `TASK_TIMEOUT_SECONDS` | `300` | Per-task timeout |
+| `MAX_WORKER_TOOL_STEPS` | `8` | Tool loop step cap for workers |
+| `TOOL_TIMEOUT_SECONDS` | `30` | Per-tool timeout |
+| `MODEL_CONCURRENCY` | `1` | Concurrent model calls |
+| `TASK_STATUS_UPDATES` | `true` | Print task status updates |
+| `JOB_STORE_PATH` | `~/.local/share/eyra/jobs.sqlite3` | Jobs, logs, artifacts, ledger |
+| `TRIGGER_STORE_PATH` | `~/.local/share/eyra/triggers.sqlite3` | Trigger definitions |
+| `TRIGGER_CHECK_INTERVAL_SECONDS` | `0.5` | Trigger check interval |
+| `TRIGGER_TIMEOUT_SECONDS` | `300` | Trigger action timeout |
+
+## Tool gates
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `NETWORK_TOOLS_ENABLED` | `false` | Weather, URL fetch, browser tools |
+| `OS_TOOLS_ENABLED` | `false` | Shell, UI, app/window, LaunchAgent, OCR tools |
+| `SCREEN_OCR_COMMAND` | empty | Local OCR command reading PNG bytes from stdin |
+| `AGENT_TOOLS_ENABLED` | `false` | Built-in agent inspection/delegation tools |
+| `EXTERNAL_AGENT_TOOLS_ENABLED` | `false` | Configured external agent adapters |
+| `EXTERNAL_AGENT_CONFIG_PATH` | `~/.config/eyra/agents.json` | External agent config |
+| `MCP_TOOLS_ENABLED` | `false` | stdio MCP bridge |
+| `MCP_CONFIG_PATH` | `~/.config/eyra/mcp.json` | MCP config |
+
+## Connectors
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `CONNECTORS_ENABLED` | `false` | Enable universal connector workers |
+| `CONNECTORS_CONFIG_PATH` | `~/.config/eyra/connectors.json` | Connector manifest config |
+| `CONNECTORS_ALLOWED_ROOTS` | empty | Connector sandbox roots, falls back to `FILESYSTEM_ALLOWED_PATHS` |
+| `CONNECTORS_TIMEOUT_SECONDS` | `600` | Maximum connector runtime |
+| `CONNECTORS_OUTPUT_CAP_BYTES` | `32768` | Maximum connector output stored or returned |
+| `CONNECTORS_ALLOW_REMOTE` | `false` | Allow remote HTTP connectors |
+| `CONNECTORS_ALLOW_PYTHON_MODULE` | `false` | Allow guarded Python module connectors |
+
+## Filesystem
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `FILESYSTEM_ALLOWED_PATHS` | `~/Documents,~/Desktop,~/Downloads,/tmp` | Sandbox roots |
+| `FILESYSTEM_DEFAULT_PATH` | `~/Documents` | Base for relative paths |
+
+## Web UI and Realtime
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `WEB_UI_ENABLED` | `false` | Start built-in Web UI |
+| `WEB_UI_HOST` | `127.0.0.1` | Bind host |
+| `WEB_UI_PORT` | `8765` | Bind port |
+| `WEB_UI_TOKEN` | empty | Optional fixed token |
+| `WEB_UI_REQUIRE_TOKEN` | `auto` | Auth mode |
+| `WEB_UI_MAX_REQUEST_BYTES` | `1000000` | Request size cap |
+| `REALTIME_VOICE_ENABLED` | `false` | Online browser Realtime voice |
+| `REALTIME_MODEL` | `gpt-realtime` | Realtime model |
+| `REALTIME_VOICE` | `marin` | Realtime voice |
+| `OPENAI_API_KEY` | empty | Realtime API key |
+| `REALTIME_TOOLS_ENABLED` | `false` | Expose safe Realtime tools |
+| `REALTIME_ALLOWED_TOOLS` | empty | Realtime tool allowlist |
+
+## Routing debug
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `ROUTING_DEBUG` | `false` | Log route traces |
+
+Use `/route last` for the most recent trace without enabling debug logging.
