@@ -73,17 +73,9 @@ cd docs
 mint dev --no-open --disable-openapi
 ```
 
-## GitHub Pages
+## Hosted Checks
 
-The repository also publishes the Mintlify export to GitHub Pages from the `docs/` directory. On every push to `master` that changes docs, `.github/workflows/docs-pages.yml` runs `mint export`, patches root-relative paths for GitHub project Pages, uploads the static artifact, and deploys it.
-
-The public GitHub Pages URL is:
-
-```text
-https://gabrimatic.github.io/eyra/
-```
-
-Score a hosted site:
+When a hosted docs site exists, score it with:
 
 ```bash
 mint score https://docs.example.com
@@ -93,4 +85,4 @@ mint score https://docs.example.com
 
 ## Current repo boundary
 
-This branch creates the Mintlify source site. Hosted AI-native artifacts such as live `llms.txt`, `llms-full.txt`, `skill.md`, and the documentation MCP server are available after deployment through Mintlify's hosted layer.
+This repo contains the Mintlify source site only. Hosted AI-native artifacts such as live `llms.txt`, `llms-full.txt`, `skill.md`, and the documentation MCP server are available only after a separate hosted docs deployment is configured.

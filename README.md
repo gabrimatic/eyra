@@ -137,8 +137,8 @@ Those installs should expose the same support commands as source installs. Run `
 - Optional app/window control: list visible apps, list app windows, activate apps, quit apps with approval, and apply approved window actions such as close, minimize, zoom, fullscreen, move, and resize when `OS_TOOLS_ENABLED=true`.
 - Optional MCP tools: list stdio MCP servers from `MCP_CONFIG_PATH` and call tools only after action-specific approval.
 - Optional connectors: attach CLI, MCP, local HTTP, browser-agent, coding-agent, or explicitly opted-in remote workers from a structured manifest. Eyra validates the manifest, tracks acceptance state, enforces sandbox and privacy policy, requires approval for risky work, runs jobs with timeout/cancellation/output caps, redacts output, and records logs/artifacts.
-- Optional agent delegation: inspect Codex/OpenClaw availability and sessions, read bounded redacted session content, use Codex/OpenClaw-compatible tool names, and hand complex work to terminal agents when `AGENT_TOOLS_ENABLED=true`. BYO agents use static argv from `EXTERNAL_AGENT_CONFIG_PATH`, sandboxed cwd, bounded timeouts, capped redacted output, and exact approval.
-- Coding jobs: when agent tools are enabled, “Start a coding job with Codex to …” creates an owned background task, waits for server-side approval, then runs the bounded terminal-agent bridge.
+- Optional agent delegation: inspect configured local agent availability and sessions, read bounded redacted session content, use compatible tool names, and hand complex work to terminal agents when `AGENT_TOOLS_ENABLED=true`. BYO agents use static argv from `EXTERNAL_AGENT_CONFIG_PATH`, sandboxed cwd, bounded timeouts, capped redacted output, and exact approval.
+- Coding jobs: when agent tools are enabled, “Start a coding job to …” creates an owned background task, waits for server-side approval, then runs the bounded terminal-agent bridge.
 - Dictation: “Start dictation”, “End dictation”, and “Cancel dictation” capture text locally without model routing. Dictation can save directly to a sandboxed file and supports simple “Literal …” spelling for filenames, codes, and exact text.
 - Corrections: after a failed direct file move/copy/remove, “No, I meant …” can safely retry the same local action with the corrected target name.
 - Operator loop evidence: direct file moves record observe → plan → act → verify → recover details in the local operation ledger, including post-action checks and recovery guidance when verification fails.
@@ -181,8 +181,8 @@ Eyra runs one live session with a typed channel, a voice channel, a coordinator,
 - Named folders: deterministic file commands understand Desktop, Documents, Downloads, Pictures, Movies, Music, and `/tmp`; sandbox roots still decide which of those paths are allowed.
 - Pause/resume: “Pause that” pauses the latest queued task before it starts, and “Resume that” resumes the latest paused task.
 - Triggers: say “When report.pdf appears in my Downloads, move it to Documents.”, “Remind me in 10 minutes to stretch.”, or “Every 30 minutes remind me to stretch.” Inspect triggers with `/triggers` and manage them with `/trigger pause|resume|cancel <id>`.
-- Coding jobs: say “Start a coding job with Codex to update the README.” to create an approved, cancellable terminal-agent task. Ask “What is the coding agent doing?” for status.
-- Connector jobs: run `/connectors`, `/connector openclawnew`, `/connector test openclawnew`, or `/connector run openclawnew inspect this folder`. Natural phrases such as “What connectors do I have?”, “Can you use OpenClawNew?”, “Ask OpenClawNew to inspect this folder”, and “Cancel the OpenClawNew job” are handled by the coordinator.
+- Coding jobs: say “Start a coding job to update the README.” to create an approved, cancellable terminal-agent task. Ask “What is the coding agent doing?” for status.
+- Connector jobs: run `/connectors`, `/connector local-worker`, `/connector test local-worker`, or `/connector run local-worker inspect this folder`. Natural phrases such as “What connectors do I have?”, “Can you use Local Worker?”, “Ask Local Worker to inspect this folder”, and “Cancel the Local Worker job” are handled by the coordinator.
 - Dictation: say “Start dictation” to capture text locally, or “Start dictation to a file named note.txt in my Documents.” to save the final text when you say “End dictation.” Use “Cancel dictation” to discard it.
 - Corrections: if a direct file target was wrong and the action failed, say “No, I meant correct-file.txt” to retry that same local action with the corrected name.
 - Triggers: say “When report.pdf appears in my Downloads, move it to Documents”, “Remind me in 10 minutes to stretch”, or “Every 30 minutes remind me to stretch.” Use `/triggers` and `/trigger pause|resume|cancel <id>` to manage local triggers.
@@ -441,11 +441,11 @@ Universal connectors use JSON like:
 {
   "connectors": [
     {
-      "id": "openclawnew",
-      "displayName": "OpenClawNew",
+      "id": "local-worker",
+      "displayName": "Local Worker",
       "type": "cli",
       "enabled": true,
-      "command": ["openclawnew", "run", "--json"],
+      "command": ["local-worker", "run", "--json"],
       "cwdPolicy": "filesystem_default_path",
       "inputMode": "stdin_json",
       "outputMode": "stdout_json",
@@ -467,7 +467,7 @@ Universal connectors use JSON like:
         "leavesMachine": false
       },
       "acceptance": {
-        "healthCommand": ["openclawnew", "--version"],
+        "healthCommand": ["local-worker", "--version"],
         "testTask": "Print a short status and exit without modifying files.",
         "expectedOutputContains": "status",
         "requiresHumanApproval": true
@@ -483,7 +483,7 @@ Connector CLI checks:
 
 ```bash
 eyra connectors validate
-eyra connectors test openclawnew
+eyra connectors test local-worker
 eyra connectors list --json
 eyra-connectors validate
 ```
@@ -527,7 +527,7 @@ Default behavior: no telemetry, no analytics, no remote browsing, and no remote 
 | OS command tools | Disabled by default; local only when enabled |
 | MCP stdio tools | Disabled by default; local server processes from `MCP_CONFIG_PATH` |
 | Connectors | Disabled by default; structured workers from `CONNECTORS_CONFIG_PATH`; remote connectors require explicit opt-in |
-| Agent session tools | Disabled by default; read bounded, redacted local Codex/OpenClaw session files when enabled |
+| Agent session tools | Disabled by default; read bounded, redacted local agent session files when enabled |
 | Agent delegation | Disabled by default; local terminal agent commands when enabled |
 | Realtime voice | Disabled by default; contacts OpenAI only when enabled and used; standard API key stays server-side |
 | Web UI | Disabled by default; localhost-only by default; token required for non-localhost binds |
@@ -547,7 +547,6 @@ eyra/
 ├── setup.sh
 ├── docs/                         # Mintlify documentation site
 ├── internal-docs/                # Source notes that are not part of the public docs site
-├── scripts/build_github_pages_docs.py
 ├── src/
 │   ├── main.py                     # Entry point, preflight, live session launch
 │   ├── runtime/
