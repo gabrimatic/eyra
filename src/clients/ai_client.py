@@ -311,7 +311,7 @@ class AIClient(BaseAIClient):
                     messages=messages,
                     tools=openai_tools,
                     tool_choice="auto",
-                    temperature=0.7,
+                    temperature=0.0,
                     stream=True,
                 )
             except Exception as e:

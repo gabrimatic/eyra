@@ -86,6 +86,23 @@ class TestToolPolicy:
         assert "take_screenshot" not in policy.allowed_tool_names
         assert "extract_screen_text" not in policy.allowed_tool_names
 
+    def test_read_only_background_file_route_does_not_expose_mutating_filesystem_tools(self):
+        policy = _policy(
+            Settings(),
+            ExecutionClass.BACKGROUND_TASK,
+            {Capability.TEXT, Capability.NATIVE_TOOLS, Capability.FILE_READ},
+            RiskTier.LOW_READ_ONLY,
+        )
+
+        assert "read_file" in policy.allowed_tool_names
+        assert "list_directory" in policy.allowed_tool_names
+        assert "compare_files" in policy.allowed_tool_names
+        assert "write_file" not in policy.allowed_tool_names
+        assert "edit_file" not in policy.allowed_tool_names
+        assert "append_file" not in policy.allowed_tool_names
+        assert "copy_path" not in policy.allowed_tool_names
+        assert policy.denied_tool_reasons["write_file"] == "mutating filesystem tools require a file-write route"
+
     def test_agent_read_tools_require_agent_route(self):
         normal = _policy(
             Settings(AGENT_TOOLS_ENABLED=True),

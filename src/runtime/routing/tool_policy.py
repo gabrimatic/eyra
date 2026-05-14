@@ -315,6 +315,12 @@ def _deny_reason(
         return "agent tools are disabled"
     if meta.destructive and risk_tier != RiskTier.DESTRUCTIVE:
         return "destructive tools require destructive route risk"
+    if meta.risk_tier == RiskTier.LOCAL_WRITE and meta.mutates_state:
+        if Capability.FILE_WRITE not in required_capabilities or risk_tier not in {
+            RiskTier.LOCAL_WRITE,
+            RiskTier.DESTRUCTIVE,
+        }:
+            return "mutating filesystem tools require a file-write route"
     if meta.allowed_execution_classes and execution_class not in meta.allowed_execution_classes:
         return f"not allowed for {execution_class.value}"
     if meta.capabilities and not (meta.capabilities & required_capabilities):

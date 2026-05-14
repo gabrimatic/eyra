@@ -46,6 +46,7 @@ class TestComplexPatterns:
         "refactor the code in the API layer",
         "compare actor-critic and pure policy gradient methods",
         "design a system for real-time event processing",
+        "design a small async task scheduler with cancellation, retries, persistence, and a trade-off analysis",
     ])
     def test_complex_hard_match(self, scorer, prompt):
         r = run(scorer.score_complexity(prompt))

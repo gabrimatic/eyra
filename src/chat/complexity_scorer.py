@@ -58,6 +58,7 @@ _COMPLEX_CODE_PATTERNS: list[re.Pattern] = [
 _COMPLEX_ANALYSIS_PATTERNS: list[re.Pattern] = [
     re.compile(r"\b(compare|contrast|evaluate|analyze|assess)\b.{0,80}\b(approach|methods?|algorithms?|architecture|frameworks?|strategy|strategies|trade.?offs?)\b", re.I),
     re.compile(r"\b(design|architect|plan)\b.{0,30}\b(system|schema|database|pipeline|workflow|infrastructure)\b", re.I),
+    re.compile(r"\b(design|architect|plan)\b.{0,80}\b(scheduler|worker\s+pool|task\s+(queue|runner|scheduler|system)|job\s+queue|retries?|cancell?ation|persistence)\b", re.I),
     re.compile(r"\b(prove|derive|formalize)\b", re.I),
     re.compile(r"\bmulti.?step\b|\bstep.?by.?step\b.{0,20}\b(plan|solution|approach)\b", re.I),
     re.compile(r"\b(expert|in.?depth|thorough|comprehensive|detailed)\b.{0,20}\b(analysis|review|assessment|explanation)\b", re.I),
@@ -81,7 +82,8 @@ _CODE_DEBUG_CUES = [
     "test", "unit test", "integration", "deploy", "docker", "ci/cd",
     "git", "branch", "merge", "commit", "typescript", "python", "rust",
     "javascript", "java", "kotlin", "swift", "go", "golang", "c++",
-    "bash", "shell", "terminal", "command line",
+    "bash", "shell", "terminal", "command line", "async", "scheduler",
+    "task queue", "worker pool", "retry", "retries", "cancellation", "persistence",
 ]
 
 _STRUCTURED_OUTPUT_CUES = [
@@ -116,7 +118,7 @@ _DOMAIN_TERMS = frozenset([
     "cryptography", "certificate", "tls", "oauth",
     # Systems
     "operating system", "kernel", "memory management", "file system",
-    "process", "thread", "scheduler", "virtual memory",
+    "process", "thread", "scheduler", "task scheduler", "worker pool", "job queue", "virtual memory",
     "compiler", "interpreter", "garbage collection",
     # Physics / quantum
     "qubit", "quantum", "relativity", "superposition", "entanglement",

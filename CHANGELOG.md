@@ -12,10 +12,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Local policy routing is now always on. Complexity routing only selects model tiers; every request still goes through policy planning for execution class, required capabilities, model capability, tool allowlists, risk, fallback, and route traces.
 - Removed the `ROUTING_POLICY_ENABLED` compatibility switch from generated and example environment files; there is no separate legacy request path.
+- Tool-assisted model streams now use deterministic sampling for more reliable local tool selection and final answers.
 
 ### Fixed
 
 - Terminal and Web open-ended local tool requests now fail before background-task creation when no configured model can satisfy the required tool capabilities.
+- Read-only file routes no longer expose mutating filesystem tools such as write, edit, append, copy, or create.
+- Async scheduler, worker-pool, retry, cancellation, and persistence architecture prompts now classify as complex routing work.
 
 ## [4.1.0] - 2026-05-14
 
