@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from chat.complexity_scorer import ComplexityScorer
+from runtime.connectors.registry import ConnectorRegistry
 from runtime.jobs import DurableJobStore
 from runtime.models import PreflightResult
 from runtime.tasks import BackgroundTaskManager, TaskEventCallback
@@ -30,6 +31,7 @@ class RuntimeSharedState:
     job_store: DurableJobStore
     trigger_store: TriggerStore
     task_manager: BackgroundTaskManager
+    connector_registry: ConnectorRegistry
     source_frontend: str = "terminal"
     last_route_trace: object | None = None
 
@@ -55,6 +57,7 @@ class RuntimeSharedState:
             job_store=job_store,
             source_frontend=source_frontend,
         )
+        connector_registry = ConnectorRegistry.from_settings(settings, approvals=approvals, job_store=job_store)
         return cls(
             settings=settings,
             preflight=preflight,
@@ -66,6 +69,7 @@ class RuntimeSharedState:
             job_store=job_store,
             trigger_store=trigger_store,
             task_manager=task_manager,
+            connector_registry=connector_registry,
             source_frontend=source_frontend,
         )
 
@@ -83,6 +87,7 @@ class RuntimeSharedState:
         job_store: DurableJobStore,
         trigger_store: TriggerStore,
         task_manager: BackgroundTaskManager,
+        connector_registry: ConnectorRegistry,
         source_frontend: str = "terminal",
         last_route_trace: object | None = None,
     ) -> "RuntimeSharedState":
@@ -98,6 +103,7 @@ class RuntimeSharedState:
             job_store=job_store,
             trigger_store=trigger_store,
             task_manager=task_manager,
+            connector_registry=connector_registry,
             source_frontend=source_frontend,
             last_route_trace=last_route_trace,
         )

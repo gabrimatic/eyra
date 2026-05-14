@@ -28,6 +28,20 @@ def build_fallback_plan(execution_class: ExecutionClass) -> FallbackPlan:
             on_tools_unsupported="PDF extraction is controller-owned and does not require native model tools.",
             on_capability_missing="The PDF must be a readable local file inside the filesystem sandbox.",
         )
+    if execution_class in {
+        ExecutionClass.CONNECTOR_TASK,
+        ExecutionClass.CONNECTOR_LOCAL,
+        ExecutionClass.CONNECTOR_REMOTE,
+        ExecutionClass.CONNECTOR_FILE_READ,
+        ExecutionClass.CONNECTOR_FILE_WRITE,
+        ExecutionClass.CONNECTOR_NETWORK,
+        ExecutionClass.CONNECTOR_UI_CONTROL,
+    }:
+        return FallbackPlan(
+            on_model_missing="Connector tasks are controller-owned and do not need a special model.",
+            on_tools_unsupported="Connector jobs run through Eyra's connector registry, not model-selected tools.",
+            on_capability_missing="The requested connector is disabled, unaccepted, or blocked by local policy.",
+        )
     if execution_class in {ExecutionClass.BACKGROUND_TASK, ExecutionClass.TOOL_ASSISTED_CHAT, ExecutionClass.FILESYSTEM_ACTION}:
         return FallbackPlan(
             on_model_missing=(

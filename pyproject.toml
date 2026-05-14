@@ -46,6 +46,7 @@ eyra-web = "web.server:run"
 eyra-doctor = "runtime.cli:doctor"
 eyra-setup = "runtime.cli:setup"
 eyra-certify = "runtime.cli:certify"
+eyra-connectors = "runtime.connectors.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/gabrimatic/eyra"

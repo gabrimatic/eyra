@@ -221,6 +221,10 @@ def _add_strategic_policy_rows(report: CertificationReport, settings: Settings, 
     """Add executable coverage rows for routing, hands-free, barge-in, and external-agent policy."""
     from chat.complexity_scorer import ComplexityScorer
     from chat.session_state import InteractionStyle, QualityMode
+    from runtime.connectors.manifest import parse_connector_config
+    from runtime.connectors.registry import ConnectorRegistry
+    from runtime.connectors.runner import redact_output
+    from runtime.connectors.types import AcceptanceState, ConnectorJobSpec
     from runtime.external_agents import AgentAdapterRegistry, AgentJobSpec
     from runtime.models import PreflightResult
     from runtime.routing.router import RuntimeRouter
@@ -639,6 +643,407 @@ def _add_strategic_policy_rows(report: CertificationReport, settings: Settings, 
         lambda: (
             require("run_agent_task" not in allowed(route("start a coding job with codex", route_settings=configured(AGENT_TOOLS_ENABLED=True), source=RequestSource.REALTIME_VOICE)), "Realtime exposed run_agent_task")
             or "Realtime voice does not expose external agent tools by default."
+        ),
+    )
+
+    def connector_payload(command: list[str], **overrides) -> dict:
+        item = {
+            "id": "openclawnew",
+            "displayName": "OpenClawNew",
+            "type": "cli",
+            "enabled": True,
+            "command": command,
+            "cwdPolicy": "filesystem_default_path",
+            "inputMode": "stdin_json",
+            "outputMode": "stdout_json",
+            "local": True,
+            "canUseNetwork": False,
+            "canReadFiles": False,
+            "canMutateFiles": False,
+            "canControlUI": False,
+            "canRunShell": False,
+            "requiresApproval": False,
+            "riskTier": "read_only",
+            "timeoutSeconds": 5,
+            "outputCapBytes": 4096,
+            "allowedTools": [],
+            "deniedTools": ["delete_permanently", "run_command"],
+            "privacy": {"dataSent": ["task"], "destination": "local_process", "leavesMachine": False},
+            "acceptance": {
+                "healthCommand": [sys.executable, "-c", "print('status health')"],
+                "testTask": "Print status.",
+                "expectedOutputContains": "status",
+                "requiresHumanApproval": False,
+            },
+        }
+        item.update(overrides)
+        return {"connectors": [item]}
+
+    def connector_settings(path: Path, **overrides) -> Settings:
+        return configured(
+            CONNECTORS_ENABLED=True,
+            CONNECTORS_CONFIG_PATH=str(path),
+            CONNECTORS_ALLOWED_ROOTS=str(tmp_path),
+            **overrides,
+        )
+
+    def write_connector_config(name: str, payload: dict) -> Path:
+        path = tmp_path / name
+        path.write_text(json.dumps(payload))
+        return path
+
+    row(
+        "connector_config_missing",
+        lambda: (
+            require(
+                ConnectorRegistry.from_settings(
+                    connector_settings(tmp_path / "missing-connectors.json")
+                ).capability_snapshot()["config"]["status"]
+                == "missing",
+                "missing connector config was not reported",
+            )
+            or "Missing connector config is reported before any connector can run."
+        ),
+    )
+    row(
+        "connector_manifest_valid",
+        lambda: (
+            require(
+                parse_connector_config(
+                    connector_payload([sys.executable, "-c", "print('{\"status\":\"ok\"}')"]),
+                    settings=connector_settings(tmp_path / "unused.json"),
+                ).status
+                == "loaded",
+                "valid connector manifest did not load",
+            )
+            or "Connector manifest schema validates a static local CLI worker."
+        ),
+    )
+    row(
+        "connector_manifest_rejects_dynamic_command",
+        lambda: (
+            require(
+                parse_connector_config(
+                    connector_payload("openclawnew run {task}"),
+                    settings=connector_settings(tmp_path / "unused.json"),
+                ).status
+                == "invalid",
+                "dynamic connector command was accepted",
+            )
+            or "Connector manifests reject model-filled command strings."
+        ),
+    )
+
+    async def accepted_registry(config_name: str = "connectors-ok.json") -> ConnectorRegistry:
+        config_path = write_connector_config(
+            config_name,
+            connector_payload(
+                [
+                    sys.executable,
+                    "-c",
+                    "import json,sys; p=json.load(sys.stdin); print(json.dumps({'status':'ok','task':p['task']}))",
+                ]
+            ),
+        )
+        registry = ConnectorRegistry.from_settings(
+            connector_settings(config_path),
+            approvals=ApprovalManager(),
+        )
+        result = await registry.test("openclawnew")
+        require(result.state == AcceptanceState.ACCEPTED, f"acceptance failed: {result.reason}")
+        return registry
+
+    async def connector_local_cli_health() -> str:
+        registry = await accepted_registry("connectors-health.json")
+        state = registry.snapshot_for("openclawnew")["acceptanceState"]
+        require(state == "accepted", f"unexpected acceptance state {state}")
+        return "Local CLI connector health check passes before use."
+
+    asyncio.run(_guarded_async(report, "connector_local_cli_health", connector_local_cli_health))
+
+    async def connector_local_cli_test_task() -> str:
+        registry = await accepted_registry("connectors-test-task.json")
+        result = await registry.run(ConnectorJobSpec(connector_id="openclawnew", task="status", cwd=str(tmp_path)))
+        require(result.status == "completed", f"connector run failed: {result.status}")
+        require('"task": "status"' in result.output, "test task output missing")
+        return "Accepted local CLI connector can run a bounded test task."
+
+    asyncio.run(_guarded_async(report, "connector_local_cli_test_task", connector_local_cli_test_task))
+
+    def connector_output_cap() -> str:
+        config_path = write_connector_config(
+            "connectors-output-cap.json",
+            connector_payload(
+                [sys.executable, "-c", "print('token=secret-token ' + 'x' * 5000)"],
+                outputMode="stdout_text",
+                outputCapBytes=1024,
+                acceptance={"requiresHumanApproval": False},
+            ),
+        )
+        registry = ConnectorRegistry.from_settings(connector_settings(config_path), approvals=ApprovalManager())
+        registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
+            "openclawnew",
+            AcceptanceState.ACCEPTED,
+            "accepted",
+        )
+        result = asyncio.run(registry.run(ConnectorJobSpec(connector_id="openclawnew", task="status", cwd=str(tmp_path))))
+        require("[output clipped]" in result.output, "connector output was not capped")
+        return "Connector output is capped before reporting."
+
+    row("connector_output_cap", connector_output_cap)
+    row(
+        "connector_secret_redaction",
+        lambda: (
+            require("secret-token" not in redact_output("token=secret-token sk-1234567890abcdefghijkl"), "connector redaction leaked secret")
+            or "Connector output redacts common secrets and home paths."
+        ),
+    )
+
+    def connector_sandbox_cwd() -> str:
+        config_path = write_connector_config(
+            "connectors-sandbox.json",
+            connector_payload(
+                [sys.executable, "-c", "print('{\"status\":\"ok\"}')"],
+                cwdPolicy="request",
+                acceptance={"requiresHumanApproval": False},
+            ),
+        )
+        registry = ConnectorRegistry.from_settings(connector_settings(config_path), approvals=ApprovalManager())
+        registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
+            "openclawnew",
+            AcceptanceState.ACCEPTED,
+            "accepted",
+        )
+        result = asyncio.run(registry.run(ConnectorJobSpec(connector_id="openclawnew", task="status", cwd="/")))
+        require(result.status == "blocked", "connector ran outside sandbox")
+        return "Connector cwd is resolved through CONNECTORS_ALLOWED_ROOTS."
+
+    row("connector_sandbox_cwd", connector_sandbox_cwd)
+
+    def connector_file_write_requires_approval() -> str:
+        config_path = write_connector_config(
+            "connectors-write-approval.json",
+            connector_payload(
+                [sys.executable, "-c", "print('{\"status\":\"ok\"}')"],
+                canReadFiles=True,
+                canMutateFiles=True,
+                requiresApproval=True,
+                riskTier="low_risk_change",
+                privacy={"dataSent": ["task", "cwd"], "destination": "local_process", "leavesMachine": False},
+                acceptance={"requiresHumanApproval": False},
+            ),
+        )
+        approvals = ApprovalManager()
+        registry = ConnectorRegistry.from_settings(connector_settings(config_path), approvals=approvals)
+        registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
+            "openclawnew",
+            AcceptanceState.ACCEPTED,
+            "accepted",
+        )
+        result = asyncio.run(registry.run(ConnectorJobSpec(connector_id="openclawnew", task="status", cwd=str(tmp_path))))
+        require(result.status == "approval_required", "file-writing connector did not require approval")
+        require(approvals.list_pending()[0].tool_name == "run_connector_task", "approval was not connector-scoped")
+        return "File-writing connector jobs create exact pending approvals."
+
+    row("connector_file_write_requires_approval", connector_file_write_requires_approval)
+    row(
+        "connector_remote_disabled_default",
+        lambda: (
+            require(
+                parse_connector_config(
+                    connector_payload(
+                        [],
+                        type="http_remote",
+                        endpoint="https://example.com/connector",
+                        local=False,
+                        canUseNetwork=True,
+                        privacy={"dataSent": ["task"], "destination": "https://example.com", "leavesMachine": True},
+                    ),
+                    settings=connector_settings(tmp_path / "unused.json", CONNECTORS_ALLOW_REMOTE=False),
+                ).status
+                == "invalid",
+                "remote connector loaded while remote opt-in was false",
+            )
+            or "Remote connectors are rejected by default."
+        ),
+    )
+    row(
+        "connector_remote_requires_opt_in",
+        lambda: (
+            require(
+                parse_connector_config(
+                    connector_payload(
+                        [],
+                        type="http_remote",
+                        endpoint="https://example.com/connector",
+                        local=False,
+                        canUseNetwork=True,
+                        privacy={"dataSent": ["task"], "destination": "https://example.com", "leavesMachine": True},
+                    ),
+                    settings=connector_settings(
+                        tmp_path / "unused.json",
+                        CONNECTORS_ALLOW_REMOTE=True,
+                    ),
+                ).status
+                == "loaded",
+                "remote connector did not load after explicit opt-in",
+            )
+            or "Remote connectors require CONNECTORS_ALLOW_REMOTE=true."
+        ),
+    )
+    row(
+        "connector_realtime_not_exposed",
+        lambda: (
+            require(
+                route(
+                    "ask connector openclawnew",
+                    route_settings=connector_settings(write_connector_config("connectors-route.json", connector_payload([sys.executable, "-c", "print('{\"status\":\"ok\"}')"]))),
+                    source=RequestSource.REALTIME_VOICE,
+                ).execution_class
+                == ExecutionClass.REALTIME_VOICE_TURN,
+                "Realtime voice did not stay on Realtime route",
+            )
+            or "Connectors are not exposed to Realtime voice by default."
+        ),
+    )
+
+    def connector_cancel() -> str:
+        config_path = write_connector_config(
+            "connectors-cancel.json",
+            connector_payload(
+                [sys.executable, "-c", "import time; time.sleep(10)"],
+                outputMode="stdout_text",
+                timeoutSeconds=5,
+                acceptance={"requiresHumanApproval": False},
+            ),
+        )
+        registry = ConnectorRegistry.from_settings(connector_settings(config_path), approvals=ApprovalManager())
+        registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
+            "openclawnew",
+            AcceptanceState.ACCEPTED,
+            "accepted",
+        )
+
+        async def run_and_cancel() -> bool:
+            task = asyncio.create_task(
+                registry.run(ConnectorJobSpec(connector_id="openclawnew", task="status", cwd=str(tmp_path), job_id="connector-cancel"))
+            )
+            await asyncio.sleep(0.1)
+            cancelled = registry.cancel("connector-cancel")
+            result = await task
+            return cancelled and result.status == "cancelled"
+
+        require(asyncio.run(run_and_cancel()), "connector job was not reported as cancelled")
+        return "Running connector jobs can be cancelled by job id."
+
+    row("connector_cancel", connector_cancel)
+
+    def connector_job_logs_artifacts() -> str:
+        config_path = write_connector_config(
+            "connectors-logs.json",
+            connector_payload(
+                [sys.executable, "-c", "import json,sys; json.load(sys.stdin); print(json.dumps({'status':'ok'}))"],
+                acceptance={"requiresHumanApproval": False},
+            ),
+        )
+        local_store = DurableJobStore(tmp_path / "connector-cert-jobs.sqlite3")
+        registry = ConnectorRegistry.from_settings(
+            connector_settings(config_path),
+            approvals=ApprovalManager(),
+            job_store=local_store,
+        )
+        registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
+            "openclawnew",
+            AcceptanceState.ACCEPTED,
+            "accepted",
+        )
+        job = local_store.create_job(
+            title="Connector cert",
+            original_user_input="connector cert",
+            source_frontend="certification",
+            status=JobStatus.QUEUED,
+        )
+        result = asyncio.run(
+            registry.run(ConnectorJobSpec(connector_id="openclawnew", task="status", cwd=str(tmp_path), job_id=job.id))
+        )
+        require(result.status == "completed", "connector job did not complete")
+        require(local_store.list_logs(job.id), "connector job logs missing")
+        stored = local_store.get_job(job.id)
+        require(stored is not None and stored.artifacts, "connector artifacts missing")
+        return "Connector jobs record logs and artifacts in the operation ledger store."
+
+    row("connector_job_logs", connector_job_logs_artifacts)
+    row("connector_artifacts", connector_job_logs_artifacts)
+
+    row(
+        "connector_route_trace_redacted",
+        lambda: (
+            (lambda cfg_path: (
+                (lambda registry, active_settings: (
+                    (lambda decision: (
+                        require("token=secret" not in format_route_trace(decision.trace), "connector route trace leaked token")
+                        or require("/Users/soroush" not in json.dumps(trace_to_dict(decision.trace)), "connector route trace leaked home path")
+                        or require(decision.trace.connector["connectorId"] == "openclawnew", "connector route trace omitted connector id")
+                        or "Connector route traces show id, risk, capabilities, privacy boundary, and approval state without prompt details."
+                    ))(
+                        asyncio.run(
+                            router.route(
+                                RequestEnvelope(
+                                    text="ask openclawnew to inspect /Users/soroush/private token=secret",
+                                    source=RequestSource.TEST,
+                                    interaction_style=InteractionStyle.TEXT,
+                                    quality_mode=QualityMode.BALANCED,
+                                    messages=[],
+                                    current_goal=None,
+                                    is_worker=True,
+                                    settings=active_settings,
+                                    preflight=PreflightResult(
+                                        backend_reachable=True,
+                                        models_ready=active_settings.all_model_names,
+                                        tool_capability_checked_models=active_settings.all_model_names,
+                                        tool_capable_models=active_settings.all_model_names,
+                                    ),
+                                ),
+                                tool_registry=build_tool_registry(active_settings),
+                                connector_registry=registry,
+                            )
+                        )
+                    )
+                ))(
+                    ConnectorRegistry.from_settings(connector_settings(cfg_path)),
+                    connector_settings(cfg_path),
+                )
+            ))(
+                write_connector_config(
+                    "connectors-trace.json",
+                    connector_payload(
+                        [sys.executable, "-c", "print('{\"status\":\"ok\"}')"],
+                        canReadFiles=True,
+                        canMutateFiles=True,
+                        requiresApproval=True,
+                        riskTier="delegated_agent",
+                        privacy={"dataSent": ["task", "cwd"], "destination": "local_process", "leavesMachine": False},
+                    ),
+                )
+            )
+        ),
+    )
+    row(
+        "connector_acceptance_state",
+        lambda: (
+            require(
+                ConnectorRegistry.from_settings(
+                    connector_settings(
+                        write_connector_config(
+                            "connectors-state.json",
+                            connector_payload([sys.executable, "-c", "print('{\"status\":\"ok\"}')"]),
+                        )
+                    )
+                ).snapshot_for("openclawnew")["acceptanceState"]
+                in {"available", "configured"},
+                "connector did not expose acceptance state",
+            )
+            or "Connector snapshots expose acceptance state before use."
         ),
     )
     row(

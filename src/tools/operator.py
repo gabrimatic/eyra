@@ -105,6 +105,7 @@ class DiscoverCapabilitiesTool(BaseTool):
                     "network": self.settings.NETWORK_TOOLS_ENABLED,
                     "os": self.settings.OS_TOOLS_ENABLED,
                     "agents": self.settings.AGENT_TOOLS_ENABLED or self.settings.EXTERNAL_AGENT_TOOLS_ENABLED,
+                    "connectors": self.settings.CONNECTORS_ENABLED,
                     "mcp": self.settings.MCP_TOOLS_ENABLED,
                 },
                 "voice": {
@@ -153,6 +154,7 @@ class GetVoiceContextTool(BaseTool):
                     "network": self.settings.NETWORK_TOOLS_ENABLED,
                     "os": self.settings.OS_TOOLS_ENABLED,
                     "agents": self.settings.AGENT_TOOLS_ENABLED or self.settings.EXTERNAL_AGENT_TOOLS_ENABLED,
+                    "connectors": self.settings.CONNECTORS_ENABLED,
                     "mcp": self.settings.MCP_TOOLS_ENABLED,
                 },
             }
