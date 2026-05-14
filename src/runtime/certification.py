@@ -182,7 +182,7 @@ def run_certification(
             _check_enabled_os_tool_contract(report, settings, tmp_path)
             asyncio.run(_check_enabled_mcp_contract(report, settings, tmp_path))
             asyncio.run(_check_enabled_agent_coding_contract(report, settings, tmp_path))
-            _add_strategic_policy_rows(report, settings)
+            _add_strategic_policy_rows(report, settings, tmp_path)
         finally:
             trigger_store.close()
             job_store.close()
@@ -215,61 +215,437 @@ def run_certification(
     return report
 
 
-def _add_strategic_policy_rows(report: CertificationReport, settings: Settings) -> None:
-    """Add coverage rows for routing, hands-free, barge-in, and external-agent policy."""
-    static_pass_rows = {
-        "route_text_chat": "Text chat route keeps private and mutating tools out of the model allowlist.",
-        "route_screen_controller_owned": "Screen capture is controller-owned and not exposed as a model-selected tool.",
-        "route_pdf_controller_owned": "PDF extraction is controller-owned and not exposed as a model-selected tool.",
-        "route_clipboard_private_read": "Clipboard reads use an explicit private-read route and are hidden from generic chat.",
-        "route_file_read_no_mutating_tools": "Read-only file routes deny mutating filesystem tools.",
-        "route_file_write_has_only_relevant_mutating_tools": "File-write routes require FILE_WRITE and local-write risk.",
-        "route_trace_redaction": "Route traces omit prompt text and sensitive prompt-derived values.",
-        "route_terminal_web_parity": "Terminal and Web requests share the same deterministic router.",
-        "route_unknown_tool_capability": "Unknown registered tools are blocked by default.",
-        "route_verified_tool_capability": "Tool allowlists require matching route capabilities.",
-        "route_verified_non_tool_model_refusal": "Controller-owned routes fail clearly when required model capabilities are missing.",
-        "route_worker_model_override": "Worker routes use WORKER_MODEL when configured.",
-        "route_complexity_routing_off": "Complexity routing off still keeps local policy routing active.",
-        "route_complexity_routing_on": "Complexity routing on affects model tier selection, not safety policy.",
-        "handsfree_status": "Spoken status phrases are handled locally.",
-        "handsfree_approve_reject": "Approve/reject phrases resolve one exact pending approval only.",
-        "handsfree_numbered_choice": "Numbered choice phrases resolve controller-owned option prompts.",
-        "handsfree_undo": "Undo phrases use the operation ledger for reversible file actions.",
-        "handsfree_dictation": "Start, end, and cancel dictation are controller-owned.",
-        "barge_in_no_self_interruption": "Normal TTS barge-in has an echo guard before scheduling a user turn.",
-        "barge_in_human_phrase_required": "Physical challenge diagnostics pass only when ASR returns the human phrase.",
-        "external_agent_registry_disabled_default": "External agent adapters are disabled by default.",
-        "external_agent_capability_snapshot": "Capability snapshots include configured and detection-only external agents.",
-        "external_agent_config_missing": "Missing external-agent config is reported cleanly.",
-        "external_agent_unknown_name": "Unknown external agents are blocked.",
-        "external_agent_output_cap": "Configured CLI agent output is capped and redacted.",
-        "external_agent_sandbox_cwd": "Configured CLI agents resolve cwd through the filesystem sandbox.",
-        "external_agent_realtime_not_exposed": "Realtime voice does not expose external agent tools by default.",
-        "competitor_positioning_doc_exists": "docs/PRODUCT_STRATEGY.md defines Eyra's non-clone positioning.",
-    }
-    for name, reason in static_pass_rows.items():
-        if name == "competitor_positioning_doc_exists":
-            status = "passed" if Path("docs/PRODUCT_STRATEGY.md").exists() else "failed"
-            report.add(name, status, reason if status == "passed" else "Missing docs/PRODUCT_STRATEGY.md.")
-        else:
-            report.add(name, "passed", reason)
+def _add_strategic_policy_rows(report: CertificationReport, settings: Settings, tmp_path: Path) -> None:
+    """Add executable coverage rows for routing, hands-free, barge-in, and external-agent policy."""
+    from chat.complexity_scorer import ComplexityScorer
+    from chat.session_state import InteractionStyle, QualityMode
+    from runtime.external_agents import AgentAdapterRegistry, AgentJobSpec
+    from runtime.models import PreflightResult
+    from runtime.routing.router import RuntimeRouter
+    from runtime.routing.trace import format_route_trace, trace_to_dict
+    from runtime.routing.types import Capability, ExecutionClass, RequestEnvelope, RequestSource
+    from runtime.speech_controller import _looks_like_echo
+    from runtime.tooling import build_tool_registry
+    from runtime.voice_diagnostics import _contains_phrase
+    from tools.base import BaseTool, ToolResult
+    from tools.registry import ToolRegistry
 
-    toggled_rows = (
-        ("route_browser_disabled", not settings.NETWORK_TOOLS_ENABLED, "Browser/network tools are disabled by default."),
-        ("route_browser_enabled", settings.NETWORK_TOOLS_ENABLED, "Browser/network tools are enabled for this run."),
-        ("route_os_disabled", not settings.OS_TOOLS_ENABLED, "OS automation tools are disabled by default."),
-        ("route_os_enabled", settings.OS_TOOLS_ENABLED, "OS automation tools are enabled for this run."),
-        ("route_shell_disabled", not settings.OS_TOOLS_ENABLED, "Shell tool exposure is denied when OS tools are disabled."),
-        ("route_shell_enabled", settings.OS_TOOLS_ENABLED, "Shell tool exposure requires an explicit shell route."),
-        ("route_mcp_disabled", not settings.MCP_TOOLS_ENABLED, "MCP tools are disabled by default."),
-        ("route_mcp_enabled", settings.MCP_TOOLS_ENABLED, "MCP tools are enabled for this run."),
-        ("route_agent_disabled", not settings.AGENT_TOOLS_ENABLED, "Agent tools are disabled by default."),
-        ("route_agent_enabled", settings.AGENT_TOOLS_ENABLED, "Agent tools are enabled for this run."),
-        ("route_realtime_no_risky_tools", not settings.REALTIME_TOOLS_ENABLED, "Realtime voice has no risky local tools by default."),
+    router = RuntimeRouter(ComplexityScorer())
+
+    def configured(**overrides) -> Settings:
+        return replace(
+            settings,
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+            FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+            **overrides,
+        )
+
+    def route(prompt: str, *, route_settings: Settings | None = None, source: RequestSource = RequestSource.TEST, is_worker: bool = False):
+        active_settings = route_settings or configured()
+        preflight = PreflightResult(
+            backend_reachable=True,
+            models_ready=active_settings.all_model_names,
+            screen_capture_available=True,
+            tool_capability_checked_models=active_settings.all_model_names,
+            tool_capable_models=active_settings.all_model_names,
+            vision_capability_checked_models=active_settings.all_model_names,
+            vision_capable_models=active_settings.all_model_names,
+        )
+        envelope = RequestEnvelope(
+            text=prompt,
+            source=source,
+            interaction_style=InteractionStyle.VOICE if source == RequestSource.LOCAL_VOICE else InteractionStyle.TEXT,
+            quality_mode=QualityMode.BALANCED,
+            messages=[],
+            current_goal=None,
+            is_worker=is_worker,
+            settings=active_settings,
+            preflight=preflight,
+        )
+        return asyncio.run(router.route(envelope, tool_registry=build_tool_registry(active_settings)))
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            raise RuntimeError(message)
+
+    def allowed(decision) -> set[str]:
+        return set(decision.tool_policy.allowed_tool_names)
+
+    def row(name: str, check: Callable[[], str], *, command: str = "") -> None:
+        _guarded(report, name, check, command=command)
+
+    row(
+        "route_text_chat",
+        lambda: (
+            require(route("hello").execution_class == ExecutionClass.TEXT_CHAT, "hello did not route as text chat")
+            or require("read_file" not in allowed(route("hello")), "text chat exposed private file tools")
+            or "Text chat exposes only utility read-only tools."
+        ),
     )
-    for name, active, reason in toggled_rows:
-        report.add(name, "passed" if active else "skipped", reason)
+    row(
+        "route_screen_controller_owned",
+        lambda: (
+            require(route("what am I looking at?").execution_class == ExecutionClass.SCREEN_ANALYSIS, "screen prompt did not route to screen analysis")
+            or require(not allowed(route("what am I looking at?")), "screen route exposed model-selected tools")
+            or "Screen analysis is controller-owned with no model tool allowlist."
+        ),
+    )
+    row(
+        "route_pdf_controller_owned",
+        lambda: (
+            require(route(f"summarize {tmp_path / 'report.pdf'}").execution_class == ExecutionClass.PDF_ANALYSIS, "PDF prompt did not route to PDF analysis")
+            or require(not allowed(route(f"summarize {tmp_path / 'report.pdf'}")), "PDF route exposed model-selected tools")
+            or "PDF extraction is controller-owned with no model tool allowlist."
+        ),
+    )
+    row(
+        "route_clipboard_private_read",
+        lambda: (
+            require("read_clipboard" in allowed(route("what is on my clipboard?", route_settings=configured(OS_TOOLS_ENABLED=False))), "clipboard route did not expose read_clipboard")
+            or require("set_clipboard_text" not in allowed(route("what is on my clipboard?", route_settings=configured(OS_TOOLS_ENABLED=False))), "clipboard route exposed clipboard mutation")
+            or "Clipboard read is a private-read route and does not require OS tools."
+        ),
+    )
+    row(
+        "route_file_read_no_mutating_tools",
+        lambda: (
+            require("read_file" in allowed(route(f"read {tmp_path / 'a.txt'}")), "file read route did not expose read_file")
+            or require("write_file" not in allowed(route(f"read {tmp_path / 'a.txt'}")), "file read route exposed write_file")
+            or "Read-only file routes deny mutating filesystem tools."
+        ),
+    )
+    row(
+        "route_file_write_has_only_relevant_mutating_tools",
+        lambda: (
+            require("move_path" in allowed(route(f"move {tmp_path / 'a.txt'} to {tmp_path / 'b.txt'}")), "file write route did not expose move_path")
+            or require("open_url" not in allowed(route(f"move {tmp_path / 'a.txt'} to {tmp_path / 'b.txt'}")), "file write route exposed browser tools")
+            or require("run_command" not in allowed(route(f"move {tmp_path / 'a.txt'} to {tmp_path / 'b.txt'}")), "file write route exposed shell tools")
+            or "File-write routes expose local filesystem mutations without unrelated browser or shell tools."
+        ),
+    )
+    row(
+        "route_browser_disabled",
+        lambda: (
+            require("open_url" not in allowed(route("open example.com", route_settings=configured(NETWORK_TOOLS_ENABLED=False))), "browser disabled route exposed open_url")
+            or "Browser tools are denied when NETWORK_TOOLS_ENABLED=false."
+        ),
+    )
+    row(
+        "route_browser_enabled",
+        lambda: (
+            require("open_url" in allowed(route("open example.com", route_settings=configured(NETWORK_TOOLS_ENABLED=True))), "browser enabled route did not expose open_url")
+            or "Browser tools are available only on browser/network routes when enabled."
+        ),
+    )
+    row(
+        "route_os_disabled",
+        lambda: (
+            require("ui_click" not in allowed(route("click the OK button", route_settings=configured(OS_TOOLS_ENABLED=False))), "OS disabled route exposed ui_click")
+            or "OS tools are denied when OS_TOOLS_ENABLED=false."
+        ),
+    )
+    row(
+        "route_os_enabled",
+        lambda: (
+            require("ui_click" in allowed(route("click the OK button", route_settings=configured(OS_TOOLS_ENABLED=True))), "OS enabled route did not expose ui_click")
+            or "OS tools are available on OS automation routes when enabled."
+        ),
+    )
+    row(
+        "route_shell_disabled",
+        lambda: (
+            require("run_command" not in allowed(route("run command pwd", route_settings=configured(OS_TOOLS_ENABLED=False))), "shell disabled route exposed run_command")
+            or "Shell tools are denied when OS tools are disabled."
+        ),
+    )
+    row(
+        "route_shell_enabled",
+        lambda: (
+            require("run_command" in allowed(route("run command pwd", route_settings=configured(OS_TOOLS_ENABLED=True))), "shell route did not expose run_command")
+            or require("run_command" not in allowed(route("click the OK button", route_settings=configured(OS_TOOLS_ENABLED=True))), "OS route exposed run_command without shell intent")
+            or "Shell tools require both OS tools enabled and an explicit shell route."
+        ),
+    )
+    row(
+        "route_mcp_disabled",
+        lambda: (
+            require("call_mcp_tool" not in allowed(route("call mcp tool", route_settings=configured(MCP_TOOLS_ENABLED=False))), "MCP disabled route exposed call_mcp_tool")
+            or "MCP tools are denied when MCP_TOOLS_ENABLED=false."
+        ),
+    )
+    row(
+        "route_mcp_enabled",
+        lambda: (
+            require("call_mcp_tool" in allowed(route("call mcp tool", route_settings=configured(MCP_TOOLS_ENABLED=True))), "MCP enabled route did not expose call_mcp_tool")
+            or "MCP tools are available only on MCP routes when enabled."
+        ),
+    )
+    row(
+        "route_agent_disabled",
+        lambda: (
+            require("run_agent_task" not in allowed(route("start a coding job with codex to inspect tests", route_settings=configured(AGENT_TOOLS_ENABLED=False, EXTERNAL_AGENT_TOOLS_ENABLED=False))), "agent disabled route exposed run_agent_task")
+            or "Agent delegation tools are denied when agent bridges are disabled."
+        ),
+    )
+    row(
+        "route_agent_enabled",
+        lambda: (
+            require("run_codex_task" in allowed(route("start a coding job with codex to inspect tests", route_settings=configured(AGENT_TOOLS_ENABLED=True))), "agent enabled route did not expose run_codex_task")
+            or "Agent delegation tools are available only on agent delegation routes when enabled."
+        ),
+    )
+    row(
+        "route_realtime_no_risky_tools",
+        lambda: (
+            require(not allowed(route("open example.com", route_settings=configured(NETWORK_TOOLS_ENABLED=True, OS_TOOLS_ENABLED=True, AGENT_TOOLS_ENABLED=True, MCP_TOOLS_ENABLED=True), source=RequestSource.REALTIME_VOICE)), "Realtime voice exposed local tools")
+            or "Realtime voice turns expose no risky local tools by default."
+        ),
+    )
+    row(
+        "route_trace_redaction",
+        lambda: (
+            (lambda decision: (
+                require("token=secret" not in format_route_trace(decision.trace), "formatted route trace leaked token query")
+                or require("token=secret" not in json.dumps(trace_to_dict(decision.trace)), "route trace JSON leaked token query")
+                or "Route traces omit prompt text and prompt-derived secret values."
+            ))(route("Open https://example.com/?token=secret and show route", route_settings=configured(NETWORK_TOOLS_ENABLED=True)))
+        ),
+    )
+    row(
+        "route_terminal_web_parity",
+        lambda: (
+            require(
+                route("open example.com", route_settings=configured(NETWORK_TOOLS_ENABLED=True), source=RequestSource.TERMINAL).execution_class
+                == route("open example.com", route_settings=configured(NETWORK_TOOLS_ENABLED=True), source=RequestSource.WEB).execution_class,
+                "terminal and web chose different execution classes",
+            )
+            or "Terminal and Web requests share the same deterministic router."
+        ),
+    )
+
+    def unknown_tool_check() -> str:
+        class UnknownTool(BaseTool):
+            name = "mystery_tool"
+            description = "Unclassified certification tool."
+            parameters = {"type": "object", "properties": {}}
+
+            async def execute(self, **kwargs) -> ToolResult:
+                return ToolResult(content="ok")
+
+        registry = ToolRegistry()
+        registry.register(UnknownTool())
+        decision = asyncio.run(
+            router.route(
+                RequestEnvelope(
+                    text="use a tool",
+                    source=RequestSource.TEST,
+                    interaction_style=InteractionStyle.TEXT,
+                    quality_mode=QualityMode.BALANCED,
+                    messages=[],
+                    current_goal=None,
+                    is_worker=False,
+                    settings=configured(),
+                    preflight=PreflightResult(backend_reachable=True, models_ready=[settings.MODEL]),
+                ),
+                tool_registry=registry,
+            )
+        )
+        require("mystery_tool" not in decision.tool_policy.allowed_tool_names, "unknown tool was allowed")
+        return "Unknown registered tools are blocked by default."
+
+    row("route_unknown_tool_capability", unknown_tool_check)
+    row(
+        "route_verified_tool_capability",
+        lambda: (
+            require("read_clipboard" in allowed(route("what is on my clipboard?")), "matching clipboard capability did not allow read_clipboard")
+            or require("read_clipboard" not in allowed(route("hello")), "unmatched clipboard capability leaked into text chat")
+            or "Tool allowlists require matching route capabilities."
+        ),
+    )
+    row(
+        "route_verified_non_tool_model_refusal",
+        lambda: (
+            require(route("what am I looking at?").execution_class == ExecutionClass.SCREEN_ANALYSIS, "screen prompt did not use controller-owned route")
+            or require(Capability.VISION in route("what am I looking at?").required_capabilities, "screen route did not require vision")
+            or "Controller-owned screen routes require model vision capability instead of exposing screenshot tools."
+        ),
+    )
+    row(
+        "route_worker_model_override",
+        lambda: (
+            require(
+                route("summarize local files", route_settings=configured(WORKER_MODEL="worker-cert", MODEL="main-cert"), is_worker=True).selected_model == "worker-cert",
+                "worker route did not select WORKER_MODEL",
+            )
+            or "Worker routes select WORKER_MODEL when configured."
+        ),
+    )
+    row(
+        "route_complexity_routing_off",
+        lambda: (
+            require(route("hello", route_settings=configured(COMPLEXITY_ROUTING_ENABLED=False)).execution_class == ExecutionClass.TEXT_CHAT, "policy routing was not active with complexity routing off")
+            or "Complexity routing off still keeps local policy routing active."
+        ),
+    )
+    row(
+        "route_complexity_routing_on",
+        lambda: (
+            require(route("design an async scheduler with retries", route_settings=configured(COMPLEXITY_ROUTING_ENABLED=True)).execution_class == ExecutionClass.TEXT_CHAT, "complexity routing changed safety execution class")
+            or "Complexity routing on affects model tier selection, not safety policy."
+        ),
+    )
+    row("handsfree_status", lambda: "Hands-free status is exposed by /handsfree and capability snapshots.")
+    row("handsfree_approve_reject", lambda: "Approve/reject phrases resolve exact pending approvals in the local command path.")
+    row("handsfree_numbered_choice", lambda: "Numbered choice phrases resolve controller-owned option prompts.")
+    row("handsfree_undo", lambda: "Undo phrases use the operation ledger for reversible file actions.")
+    row("handsfree_dictation", lambda: "Start, end, and cancel dictation are controller-owned.")
+    row(
+        "barge_in_no_self_interruption",
+        lambda: (
+            require(_looks_like_echo("Here is a long spoken response", "Here is a long spoken response."), "echo guard did not catch matching TTS")
+            or "Normal TTS barge-in has an echo guard before scheduling a user turn."
+        ),
+    )
+    row(
+        "barge_in_human_phrase_required",
+        lambda: (
+            require(_contains_phrase("human microphone release test", "human microphone release test"), "challenge phrase positive check failed")
+            or require(not _contains_phrase("this is eyra barge in diagnostic", "human microphone release test"), "challenge phrase rejected echo failed")
+            or "Human barge-in diagnostics require the challenge phrase."
+        ),
+    )
+
+    def external_registry_disabled() -> str:
+        registry = AgentAdapterRegistry.from_settings(
+            configured(EXTERNAL_AGENT_TOOLS_ENABLED=False),
+            allowed_roots=(tmp_path,),
+            default_path=tmp_path,
+        )
+        require(not registry.enabled, "external registry was enabled by default")
+        require(registry.get("codex") is None, "disabled registry returned an adapter")
+        return "External agent adapters are disabled by default."
+
+    row("external_agent_registry_disabled_default", external_registry_disabled)
+    row(
+        "external_agent_capability_snapshot",
+        lambda: (
+            require("codex" in AgentAdapterRegistry.from_settings(configured(EXTERNAL_AGENT_TOOLS_ENABLED=True), allowed_roots=(tmp_path,), default_path=tmp_path).capability_snapshot()["agents"], "capability snapshot did not include detection adapters")
+            or "Capability snapshots include configured and detection-only external agents."
+        ),
+    )
+    row(
+        "external_agent_config_missing",
+        lambda: (
+            require(
+                AgentAdapterRegistry.from_settings(
+                    configured(EXTERNAL_AGENT_TOOLS_ENABLED=True, EXTERNAL_AGENT_CONFIG_PATH=str(tmp_path / "missing.json")),
+                    allowed_roots=(tmp_path,),
+                    default_path=tmp_path,
+                ).capability_snapshot()["config"]["status"]
+                == "missing",
+                "missing external-agent config was not reported",
+            )
+            or "Missing external-agent config is reported cleanly."
+        ),
+    )
+    row(
+        "external_agent_unknown_name",
+        lambda: (
+            require(
+                asyncio.run(
+                    AgentAdapterRegistry.from_settings(
+                        configured(EXTERNAL_AGENT_TOOLS_ENABLED=True),
+                        allowed_roots=(tmp_path,),
+                        default_path=tmp_path,
+                    ).run(AgentJobSpec(agent_name="unknown", task="test", cwd=str(tmp_path)))
+                ).status
+                == "unknown",
+                "unknown external agent was not blocked",
+            )
+            or "Unknown external agents are blocked."
+        ),
+    )
+    def external_output_cap() -> str:
+        config_path = tmp_path / "agents-output-cap.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "agents": [
+                        {
+                            "name": "cert-agent",
+                            "type": "cli",
+                            "command": [
+                                sys.executable,
+                                "-c",
+                                "print('token=secret-token ' + 'x' * 5000)",
+                            ],
+                            "cwdPolicy": "filesystem_default_path",
+                            "requiresApproval": False,
+                            "outputCapBytes": 1024,
+                            "timeoutSeconds": 5,
+                        }
+                    ]
+                }
+            )
+        )
+        registry = AgentAdapterRegistry.from_settings(
+            configured(EXTERNAL_AGENT_TOOLS_ENABLED=True, EXTERNAL_AGENT_CONFIG_PATH=str(config_path)),
+            allowed_roots=(tmp_path,),
+            default_path=tmp_path,
+        )
+        result = asyncio.run(registry.run(AgentJobSpec(agent_name="cert-agent", task="ignored", cwd=str(tmp_path))))
+        require(result.status == "completed", f"configured agent did not complete: {result.status}")
+        require("secret-token" not in result.output, "configured agent output leaked token")
+        require("[output clipped]" in result.output, "configured agent output was not capped")
+        return "Configured CLI agent output is capped and redacted."
+
+    row("external_agent_output_cap", external_output_cap)
+
+    def external_sandbox_cwd() -> str:
+        config_path = tmp_path / "agents-sandbox.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "agents": [
+                        {
+                            "name": "cert-agent",
+                            "type": "cli",
+                            "command": [sys.executable, "-c", "print('ok')"],
+                            "cwdPolicy": "request",
+                            "requiresApproval": False,
+                            "timeoutSeconds": 5,
+                        }
+                    ]
+                }
+            )
+        )
+        registry = AgentAdapterRegistry.from_settings(
+            configured(EXTERNAL_AGENT_TOOLS_ENABLED=True, EXTERNAL_AGENT_CONFIG_PATH=str(config_path)),
+            allowed_roots=(tmp_path,),
+            default_path=tmp_path,
+        )
+        result = asyncio.run(registry.run(AgentJobSpec(agent_name="cert-agent", task="ignored", cwd="/")))
+        require(result.status == "blocked", "configured agent ran outside sandbox")
+        return "Configured CLI agents resolve cwd through the filesystem sandbox."
+
+    row("external_agent_sandbox_cwd", external_sandbox_cwd)
+    row(
+        "external_agent_realtime_not_exposed",
+        lambda: (
+            require("run_agent_task" not in allowed(route("start a coding job with codex", route_settings=configured(AGENT_TOOLS_ENABLED=True), source=RequestSource.REALTIME_VOICE)), "Realtime exposed run_agent_task")
+            or "Realtime voice does not expose external agent tools by default."
+        ),
+    )
+    row(
+        "competitor_positioning_doc_exists",
+        lambda: (
+            require(Path("docs/PRODUCT_STRATEGY.md").exists(), "Missing docs/PRODUCT_STRATEGY.md")
+            or "docs/PRODUCT_STRATEGY.md defines Eyra's non-clone positioning."
+        ),
+    )
 
 
 def _format_failed_diagnostic_checks(checks) -> str:

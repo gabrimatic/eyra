@@ -86,3 +86,11 @@ class TestBuildToolRegistry:
         assert "web_search" in names
         assert "download_file" in names
         assert "upload_file" in names
+
+    def test_external_agent_tools_can_be_enabled_without_builtin_agent_flag(self):
+        registry = build_tool_registry(Settings(EXTERNAL_AGENT_TOOLS_ENABLED=True, AGENT_TOOLS_ENABLED=False))
+
+        names = _tool_names(registry)
+
+        assert "run_agent_task" in names
+        assert "run_codex_task" in names

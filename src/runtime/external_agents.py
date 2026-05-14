@@ -288,10 +288,17 @@ def load_agent_config(
         payload = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         return AgentConfigLoadResult(status="invalid", reason=f"Could not read external agent config: {exc}")
+    if not isinstance(payload, dict):
+        return AgentConfigLoadResult(status="invalid", reason="External agent config must be a JSON object.")
+    raw_agents = payload.get("agents", [])
+    if not isinstance(raw_agents, list):
+        return AgentConfigLoadResult(status="invalid", reason="External agent config needs an agents list.")
     adapters: list[ExternalAgentAdapter] = []
     default_root = default_path or Path.cwd()
     roots = tuple(allowed_roots or (default_root,))
-    for item in payload.get("agents", []):
+    for item in raw_agents:
+        if not isinstance(item, dict):
+            return AgentConfigLoadResult(status="invalid", reason="Each configured agent must be a JSON object.")
         if item.get("type") != "cli":
             return AgentConfigLoadResult(status="invalid", reason=f"Unsupported agent type for {item.get('name')}.")
         command = item.get("command")
@@ -300,6 +307,11 @@ def load_agent_config(
         name = str(item.get("name") or "").strip()
         if not name:
             return AgentConfigLoadResult(status="invalid", reason="Each agent needs a name.")
+        try:
+            timeout_seconds = int(item.get("timeoutSeconds", _DEFAULT_TIMEOUT_SECONDS))
+            output_cap_bytes = int(item.get("outputCapBytes", _DEFAULT_OUTPUT_CAP_BYTES))
+        except (TypeError, ValueError):
+            return AgentConfigLoadResult(status="invalid", reason=f"Invalid timeout or output cap for {name}.")
         adapters.append(
             ConfiguredCliAgentAdapter(
                 name=name,
@@ -310,8 +322,8 @@ def load_agent_config(
                 network=bool(item.get("network", False)),
                 mutates_files=bool(item.get("mutatesFiles", False)),
                 requires_approval=bool(item.get("requiresApproval", True)),
-                timeout_seconds=int(item.get("timeoutSeconds", _DEFAULT_TIMEOUT_SECONDS)),
-                output_cap_bytes=int(item.get("outputCapBytes", _DEFAULT_OUTPUT_CAP_BYTES)),
+                timeout_seconds=timeout_seconds,
+                output_cap_bytes=output_cap_bytes,
             )
         )
     return AgentConfigLoadResult(status="loaded", adapters=tuple(adapters))

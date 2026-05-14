@@ -75,6 +75,14 @@ class TestDiscoverCapabilitiesTool:
         assert data["voice"]["realtime"] is True
         assert data["web"]["enabled"] is True
 
+    def test_reports_external_agent_flag_as_agent_capability(self):
+        result = _run(
+            DiscoverCapabilitiesTool(Settings(AGENT_TOOLS_ENABLED=False, EXTERNAL_AGENT_TOOLS_ENABLED=True)).execute()
+        )
+        data = json.loads(result.content)
+
+        assert data["tools"]["agents"] is True
+
     def test_voice_context_returns_runtime_summary(self):
         result = _run(GetVoiceContextTool(Settings(WEB_UI_ENABLED=True)).execute())
         data = json.loads(result.content)
@@ -105,6 +113,7 @@ class TestRunCommandTool:
         result = _run(tool.execute(command="echo hello", cwd=str(tmp_path)))
 
         assert "Approval required" in result.content
+
         assert "/approve" in result.content
 
     def test_dangerous_argv_requires_confirmation(self, tmp_path):
@@ -149,6 +158,16 @@ class TestRunCommandTool:
         assert manager.approve(approval_id) is False
         result = _run(tool.execute(command="echo late", cwd=str(tmp_path), approval_id=approval_id))
         assert "Approval required" in result.content
+
+
+class TestRunAgentTaskToolSchema:
+    def test_configured_agent_name_is_not_restricted_to_builtin_enum(self, tmp_path):
+        tool = RunAgentTaskTool(allowed_roots=(tmp_path,), default_path=tmp_path)
+
+        schema = tool.to_openai_tool()["function"]["parameters"]["properties"]["agent"]
+
+        assert schema["type"] == "string"
+        assert "enum" not in schema
 
 
 class TestFileInspectionTools:

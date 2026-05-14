@@ -134,7 +134,7 @@ def build_health_payload(
         "tools": {
             "network": settings.NETWORK_TOOLS_ENABLED,
             "os": settings.OS_TOOLS_ENABLED,
-            "agents": settings.AGENT_TOOLS_ENABLED,
+            "agents": settings.AGENT_TOOLS_ENABLED or settings.EXTERNAL_AGENT_TOOLS_ENABLED,
             "mcp": settings.MCP_TOOLS_ENABLED,
         },
     }
@@ -187,11 +187,11 @@ def _task_payload(task: BackgroundTask) -> dict[str, Any]:
     return {
         "id": task.id,
         "title": task.title,
-        "request": task.original_request,
+        "request": _redact_api_value(task.original_request),
         "status": task.status.value,
-        "progress": task.progress_summary,
-        "result": task.final_result,
-        "error": task.error,
+        "progress": _redact_api_value(task.progress_summary),
+        "result": _redact_api_value(task.final_result),
+        "error": _redact_api_value(task.error),
         "createdAt": task.created_at,
         "updatedAt": task.updated_at,
         "needsUserInput": task.needs_user_input,
@@ -487,8 +487,13 @@ class WebAssistantRuntime:
         request = parse_coding_job_request(text)
         if request is None:
             return None
-        if not self.settings.AGENT_TOOLS_ENABLED:
-            return {"reply": "Agent tools are disabled. Enable AGENT_TOOLS_ENABLED=true before starting coding jobs."}
+        if not (self.settings.AGENT_TOOLS_ENABLED or self.settings.EXTERNAL_AGENT_TOOLS_ENABLED):
+            return {
+                "reply": (
+                    "Agent tools are disabled. Enable AGENT_TOOLS_ENABLED=true or "
+                    "EXTERNAL_AGENT_TOOLS_ENABLED=true before starting coding jobs."
+                )
+            }
 
         agent, instruction = request
         task = self.task_manager.create_task(

@@ -116,3 +116,34 @@ class TestExternalAgentAdapters:
 
         assert config.status == "invalid"
         assert "static argv" in config.reason
+
+    def test_load_agent_config_rejects_non_object_payload(self, tmp_path):
+        config_path = tmp_path / "agents.json"
+        config_path.write_text(json.dumps([]))
+
+        config = load_agent_config(config_path)
+
+        assert config.status == "invalid"
+        assert "JSON object" in config.reason
+
+    def test_load_agent_config_rejects_invalid_timeout(self, tmp_path):
+        config_path = tmp_path / "agents.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "agents": [
+                        {
+                            "name": "bad",
+                            "type": "cli",
+                            "command": [sys.executable, "-c", "print('ok')"],
+                            "timeoutSeconds": "soon",
+                        }
+                    ]
+                }
+            )
+        )
+
+        config = load_agent_config(config_path)
+
+        assert config.status == "invalid"
+        assert "timeout" in config.reason

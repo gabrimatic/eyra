@@ -230,6 +230,37 @@ class TestWebServerHelpers:
 
         runtime.close()
 
+    def test_web_task_payload_redacts_sensitive_request_text(self, tmp_path):
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+            TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
+        )
+        runtime = WebAssistantRuntime(settings)
+
+        async def create_task():
+            async def worker(task):
+                return "opened https://example.com/?token=secret-token"
+
+            task = runtime.task_manager.create_task(
+                "Sensitive task",
+                "Open https://example.com/?token=secret-token",
+                worker,
+            )
+            await runtime.task_manager.wait_for_task(task.id)
+            return await runtime.list_tasks()
+
+        try:
+            tasks = runtime.run_sync(create_task())
+        finally:
+            runtime.close()
+
+        rendered = json.dumps(tasks)
+        assert "secret-token" not in rendered
+        assert "token=[REDACTED]" in rendered
+
     def test_web_runtime_publishes_task_events(self, tmp_path):
         settings = Settings(
             USE_MOCK_CLIENT=True,

@@ -212,6 +212,16 @@ class TestToolPolicy:
             "agent delegation tools require an agent delegation route"
         )
 
+    def test_external_agent_flag_allows_agent_delegation_policy(self):
+        policy = _policy(
+            Settings(AGENT_TOOLS_ENABLED=False, EXTERNAL_AGENT_TOOLS_ENABLED=True),
+            ExecutionClass.CODING_AGENT_TASK,
+            {Capability.TEXT, Capability.AGENT_DELEGATION},
+            RiskTier.DELEGATED_AGENT,
+        )
+
+        assert "run_agent_task" in policy.allowed_tool_names
+
     def test_delete_permanently_is_destructive_and_approval_protected(self):
         registry = build_tool_registry(Settings())
         meta = registry.metadata_by_name()["delete_permanently"]

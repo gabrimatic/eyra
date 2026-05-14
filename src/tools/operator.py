@@ -105,7 +105,7 @@ class DiscoverCapabilitiesTool(BaseTool):
                     "screen": True,
                     "network": self.settings.NETWORK_TOOLS_ENABLED,
                     "os": self.settings.OS_TOOLS_ENABLED,
-                    "agents": self.settings.AGENT_TOOLS_ENABLED,
+                    "agents": self.settings.AGENT_TOOLS_ENABLED or self.settings.EXTERNAL_AGENT_TOOLS_ENABLED,
                     "mcp": self.settings.MCP_TOOLS_ENABLED,
                 },
                 "voice": {
@@ -153,7 +153,7 @@ class GetVoiceContextTool(BaseTool):
                 "tools": {
                     "network": self.settings.NETWORK_TOOLS_ENABLED,
                     "os": self.settings.OS_TOOLS_ENABLED,
-                    "agents": self.settings.AGENT_TOOLS_ENABLED,
+                    "agents": self.settings.AGENT_TOOLS_ENABLED or self.settings.EXTERNAL_AGENT_TOOLS_ENABLED,
                     "mcp": self.settings.MCP_TOOLS_ENABLED,
                 },
             }
@@ -1577,7 +1577,10 @@ class RunAgentTaskTool(BaseTool):
     parameters = {
         "type": "object",
         "properties": {
-            "agent": {"type": "string", "enum": ["codex", "openclaw"]},
+            "agent": {
+                "type": "string",
+                "description": "Configured agent name, e.g. codex, openclaw, or a static name from EXTERNAL_AGENT_CONFIG_PATH.",
+            },
             "task": {"type": "string"},
             "cwd": {"type": "string"},
             "approval_id": {"type": "string"},

@@ -330,7 +330,9 @@ def _deny_reason(
         return "shell tools are disabled"
     if Capability.MCP in meta.capabilities and not settings.MCP_TOOLS_ENABLED:
         return "MCP tools are disabled"
-    if Capability.AGENT_DELEGATION in meta.capabilities and not settings.AGENT_TOOLS_ENABLED:
+    if Capability.AGENT_DELEGATION in meta.capabilities and not (
+        settings.AGENT_TOOLS_ENABLED or settings.EXTERNAL_AGENT_TOOLS_ENABLED
+    ):
         return "agent tools are disabled"
     if meta.destructive and risk_tier != RiskTier.DESTRUCTIVE:
         return "destructive tools require destructive route risk"

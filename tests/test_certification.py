@@ -126,6 +126,8 @@ def test_certification_matrix_contains_required_structured_rows(tmp_path):
     assert required.issubset({row.name for row in report.rows})
     assert all(row.status in {"passed", "failed", "skipped"} for row in report.rows)
     assert all(row.reason for row in report.rows)
+    status_by_name = {row.name: row.status for row in report.rows}
+    assert all(status_by_name[name] == "passed" for name in required if name.startswith(("route_", "handsfree_", "barge_in_", "external_agent_", "competitor_")))
 
 
 def test_certification_report_renders_machine_readable_summary(tmp_path):

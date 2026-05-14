@@ -641,7 +641,15 @@ class LiveSession:
                 ("Network", "on" if _settings_bool(self.settings, "NETWORK_TOOLS_ENABLED", False) else "off"),
                 ("OS tools", "on" if _settings_bool(self.settings, "OS_TOOLS_ENABLED", False) else "off"),
                 ("MCP", "on" if _settings_bool(self.settings, "MCP_TOOLS_ENABLED", False) else "off"),
-                ("Agents", "on" if _settings_bool(self.settings, "AGENT_TOOLS_ENABLED", False) else "off"),
+                (
+                    "Agents",
+                    "on"
+                    if (
+                        _settings_bool(self.settings, "AGENT_TOOLS_ENABLED", False)
+                        or _settings_bool(self.settings, "EXTERNAL_AGENT_TOOLS_ENABLED", False)
+                    )
+                    else "off",
+                ),
                 ("Realtime", "on" if _settings_bool(self.settings, "REALTIME_VOICE_ENABLED", False) else "off"),
                 ("Hands-free", "on" if self._hands_free_mode else "off"),
                 ("Sandbox", _settings_str(self.settings, "FILESYSTEM_ALLOWED_PATHS", "")),
@@ -1038,8 +1046,14 @@ class LiveSession:
         request = parse_coding_job_request(text)
         if request is None:
             return False
-        if not _settings_bool(self.settings, "AGENT_TOOLS_ENABLED", False):
-            print("  Agent tools are disabled. Enable AGENT_TOOLS_ENABLED=true before starting coding jobs.")
+        if not (
+            _settings_bool(self.settings, "AGENT_TOOLS_ENABLED", False)
+            or _settings_bool(self.settings, "EXTERNAL_AGENT_TOOLS_ENABLED", False)
+        ):
+            print(
+                "  Agent tools are disabled. Enable AGENT_TOOLS_ENABLED=true or "
+                "EXTERNAL_AGENT_TOOLS_ENABLED=true before starting coding jobs."
+            )
             return True
 
         agent, instruction = request
