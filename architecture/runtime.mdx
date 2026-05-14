@@ -1,0 +1,45 @@
+---
+title: "Runtime"
+description: "LiveSession, startup, preflight, task ownership, and shutdown."
+---
+
+`LiveSession` is the terminal orchestrator. It owns typed input, optional voice input, speech output, browser session, approvals, tool registry, router, durable stores, background task manager, and embedded Web UI handle.
+
+## Startup
+
+```text
+Settings.load_from_env()
+  → PreflightManager.run()
+  → LiveRuntimeState.from_preflight()
+  → LiveSession.run()
+```
+
+Preflight validates backend, models, voice dependencies, and screen capture before the session starts.
+
+## Owned runtime objects
+
+| Object | Purpose |
+| --- | --- |
+| `SpeechController` | Local speech output and voice input coordination |
+| `BrowserSession` | Shared Playwright browser for network tools |
+| `ApprovalManager` | Server-side risky-action approvals |
+| `ToolRegistry` | Registered tools for model tool calls |
+| `RuntimeRouter` | Local route policy |
+| `BackgroundTaskManager` | Cancellable task lifecycle |
+| `DurableJobStore` | Jobs, logs, artifacts, operation ledger |
+| `TriggerStore` | File and reminder trigger definitions |
+| `RuntimeSharedState` | Shared terminal/Web runtime wrapper |
+
+## Input loop
+
+`_input_loop()` reads terminal input through `prompt_toolkit`. Empty input is ignored. Quit words and `/commands` are handled locally.
+
+Voice runs in a separate owned task when listening is enabled. The `_busy` event pauses listening while Eyra is streaming or speaking.
+
+## Embedded Web UI
+
+When `WEB_UI_ENABLED=true`, `LiveSession` starts a Web server with `RuntimeSharedState.from_components()`. The Web UI then shares terminal-owned approvals, tools, tasks, stores, browser session, and conversation.
+
+## Shutdown
+
+Shutdown cancels input tasks, stops voice, shuts down task manager, interrupts speech, closes Web UI, closes browser, closes trigger/job stores, and exits cleanly.

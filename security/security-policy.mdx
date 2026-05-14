@@ -1,0 +1,41 @@
+---
+title: "Security policy"
+description: "Supported security posture and vulnerability reporting."
+---
+
+Eyra is a local-first macOS terminal assistant with optional remote and OS-control surfaces. Security work focuses on explicit opt-in, local sandboxing, approval gates, and clear recovery.
+
+## Supported version
+
+The active `master` branch receives security fixes. Released versions may receive fixes when the issue affects shipped artifacts and the fix can be backported cleanly.
+
+## Report a vulnerability
+
+Use the GitHub security reporting surface for the repository when available. Include:
+
+- Affected version or commit.
+- Local settings needed to reproduce.
+- Whether optional gates were enabled.
+- Exact steps.
+- Expected and actual behavior.
+- Any logs with secrets removed.
+
+Do not publish exploit details before a fix is available.
+
+## Security boundaries
+
+Eyra's important boundaries:
+
+- Filesystem roots in `FILESYSTEM_ALLOWED_PATHS`.
+- Local policy routing and tool allowlists.
+- Approval manager for risky actions.
+- Disabled-by-default network, OS, MCP, agent, Web, and Realtime surfaces.
+- Token-protected Web UI endpoints.
+- Server-side Realtime key handling.
+- Local-only job and trigger stores.
+
+## Non-goals
+
+Eyra does not sandbox the whole operating system. If you enable shell, UI, MCP, browser, or external-agent tools, you are allowing local processes to do the work described by that capability.
+
+Use the narrowest setting set that supports the workflow.

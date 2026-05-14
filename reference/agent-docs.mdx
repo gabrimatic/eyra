@@ -1,0 +1,83 @@
+---
+title: "Agent-facing docs"
+description: "How Eyra docs align with Mintlify AI-native documentation."
+---
+
+Mintlify-hosted docs are AI-native by default: pages are available as Markdown, hosted public docs can expose `llms.txt`, `llms-full.txt`, `skill.md`, and an MCP server, and the CLI can score agent readiness for a public site.
+
+## Local docs structure
+
+This repo keeps the source docs in MDX with explicit frontmatter and navigation in `docs.json`.
+
+```text
+docs.json
+index.mdx
+get-started/
+guides/
+reference/
+architecture/
+development/
+security/
+project/
+```
+
+## Agent usefulness
+
+Eyra docs should stay useful to both people and agents:
+
+- Put the operational contract in reference pages, not hidden prose.
+- Keep settings, commands, tools, routes, and verification commands in tables.
+- Link architecture pages to source files through [Source map](/development/source-map).
+- Keep privacy boundaries explicit on every optional remote path.
+- Avoid copying private prompt/spec/control-plane files into public docs.
+
+## Generated AI files
+
+When hosted on Mintlify, the public documentation site can expose:
+
+| Path | Purpose |
+| --- | --- |
+| `/llms.txt` | Directory of documentation pages with descriptions |
+| `/.well-known/llms.txt` | Compatibility path for the same index |
+| `/llms-full.txt` | Full documentation content for larger-context tools |
+| `/.well-known/llms-full.txt` | Compatibility path for the full file |
+| `/skill.md` | Capability summary generated from the docs |
+| `/.well-known/agent-skills/index.json` | Agent-skills discovery manifest |
+| `/.well-known/agent-skills/*` | Individual skill files |
+| `/mcp` | Documentation MCP server on hosted docs |
+
+The `llms.txt` summary uses the `description` field in `docs.json`, and each page entry uses the page frontmatter `description`.
+
+## Mintlify checks
+
+Install the CLI:
+
+```bash
+npm i -g mint
+```
+
+Validate locally:
+
+```bash
+mint validate --disable-openapi
+mint broken-links --check-anchors
+mint a11y
+```
+
+Preview locally:
+
+```bash
+mint dev --no-open --disable-openapi
+```
+
+Score a hosted site:
+
+```bash
+mint score https://docs.example.com
+```
+
+`mint score` checks agent-facing surfaces such as `llms.txt`, `llms-full.txt`, Markdown content negotiation, `skill.md`, MCP discoverability, sitemap, structured data, robots, and latency.
+
+## Current repo boundary
+
+This branch creates the Mintlify source site. Hosted AI-native artifacts such as live `llms.txt`, `llms-full.txt`, `skill.md`, and the documentation MCP server are available after deployment through Mintlify's hosted layer.

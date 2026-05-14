@@ -1,0 +1,118 @@
+---
+title: "Voice and hands-free"
+description: "Use Local Whisper voice input, speech output, interruption, dictation, and spoken control phrases."
+---
+
+Voice is a first-class input path. Eyra records locally, uses Silero VAD to detect speech boundaries, transcribes through Local Whisper, routes the resulting text through the same runtime as typed input, and speaks a short response back through Local Whisper.
+
+## Voice stack
+
+```text
+microphone
+  → sounddevice input stream
+  → 32 ms Silero VAD frames
+  → local WAV buffer
+  → Local Whisper socket or wh CLI
+  → Eyra runtime
+  → Local Whisper TTS
+```
+
+Voice input and speech output are tracked separately. If one side fails, Eyra can keep the other side available.
+
+## Commands
+
+```text
+/voice on
+/voice off
+/mute
+/unmute
+/voice-diagnose
+/voice-test
+/handsfree on
+/handsfree off
+```
+
+`/voice on` rechecks Local Whisper at runtime, so a session can recover after Local Whisper starts without restarting Eyra.
+
+## Spoken control
+
+These phrases are handled locally:
+
+| Phrase | Behavior |
+| --- | --- |
+| `stop` | Interrupt speech output |
+| `show status` | Show runtime status |
+| `what are you doing` | Show current task state |
+| `what changed` | Show recent operation ledger entries |
+| `approve that` | Approve one pending action when unambiguous |
+| `reject that` | Reject one pending action when unambiguous |
+| `choose number two` | Select a numbered local option |
+| `read the options` | Repeat numbered options |
+| `start dictation` | Start local dictation |
+| `end dictation` | End and save dictation |
+| `cancel dictation` | Discard dictation |
+
+If more than one approval is pending, Eyra reads the ids and asks you to choose.
+
+## Dictation
+
+Start a transient dictation buffer:
+
+```text
+Start dictation.
+```
+
+Save dictation to a sandboxed file:
+
+```text
+Start dictation to a file named note.txt in my Documents.
+```
+
+End or cancel:
+
+```text
+End dictation.
+Cancel dictation.
+```
+
+Use `Literal ...` when you need exact filenames, codes, or punctuation-sensitive text.
+
+## Interruption
+
+Eyra can stop TTS immediately through `SpeechController.interrupt()`. `/voice-test` runs the manual voice interruption diagnostic.
+
+Physical acoustic barge-in is hardware-dependent. Treat code-path tests, synthetic loopback tests, and human microphone challenge tests as separate evidence.
+
+## Diagnostics
+
+Run:
+
+```text
+/voice-diagnose
+```
+
+The report checks:
+
+- Input device selection.
+- All-zero microphone audio.
+- VAD speech detection.
+- Local Whisper transcription.
+- Generated WAV transcription.
+- Local socket path.
+- Barge-in behavior when requested.
+
+## Configuration
+
+```env
+LIVE_LISTENING_ENABLED=true
+LIVE_SPEECH_ENABLED=true
+SPEECH_COOLDOWN_MS=3000
+VOICE_INPUT_DEVICE=
+VOICE_SAMPLE_RATE=16000
+VOICE_DEBUG_RECORD_SECONDS=3
+VOICE_DIAGNOSTIC_SAVE_AUDIO=false
+VOICE_SILENCE_MS=1500
+VOICE_VAD_THRESHOLD=0.15
+```
+
+Raise `VOICE_VAD_THRESHOLD` for stricter speech detection. Lower it when the microphone is quiet or speech is not detected.

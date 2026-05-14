@@ -1,0 +1,72 @@
+---
+title: "Certification"
+description: "Run Eyra's local voice-to-computer certification matrix."
+---
+
+Certification proves the configured local runtime path that was actually exercised. It does not certify untested microphones, apps, remote providers, or Realtime paths by implication.
+
+## Default matrix
+
+```bash
+uv run python scripts/certify_voice_to_computer.py
+```
+
+This checks the local-first contract without requiring a physical microphone challenge.
+
+## Physical microphone checks
+
+```bash
+uv run python scripts/certify_voice_to_computer.py --include-physical
+```
+
+Human-certified challenge:
+
+```bash
+uv run python scripts/certify_voice_to_computer.py --include-physical --human-phrase "human microphone release test"
+```
+
+The TTS prompt does not say the challenge phrase, so speaker echo cannot satisfy the check.
+
+## Synthetic microphone checks
+
+```bash
+uv run python scripts/certify_voice_to_computer.py --include-physical --synthetic-mic
+```
+
+Use this with a configured loopback input such as BlackHole.
+
+## Status meanings
+
+| Status | Meaning |
+| --- | --- |
+| `passed` | The scenario completed and verified expected behavior |
+| `failed` | A requested or launch-critical check did not meet the contract |
+| `skipped` | The surface was disabled or not requested |
+
+## What it covers
+
+- Model preflight.
+- Local Whisper TTS.
+- Microphone diagnostics.
+- Synthetic or physical barge-in when requested.
+- Durable jobs.
+- Operation ledger.
+- Triggers.
+- Task control.
+- Web APIs.
+- Disabled-by-default privacy behavior.
+- Enabled browser and OS representatives when settings turn them on.
+
+## Release gate
+
+Use certification with the project checks:
+
+```bash
+uv run pytest -q
+uv run ruff check src tests
+uv lock --check
+bash -n setup.sh
+uv build --sdist --wheel
+```
+
+If a physical hardware check was not run, say that plainly in release notes or readiness reports.

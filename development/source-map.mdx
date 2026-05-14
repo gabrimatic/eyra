@@ -1,0 +1,73 @@
+---
+title: "Source map"
+description: "Map documentation topics to source files and tests."
+---
+
+Use this page when you need to jump from docs to implementation.
+
+## Runtime
+
+| Topic | Source | Tests |
+| --- | --- | --- |
+| Entry point | `src/main.py` | `tests/test_main.py` |
+| Startup setup | `src/runtime/startup.py` | `tests/test_startup.py` |
+| Preflight | `src/runtime/preflight.py` | `tests/test_preflight.py` |
+| Live session | `src/runtime/live_session.py` | `tests/test_runtime.py` |
+| Status UI | `src/runtime/status_presenter.py` | `tests/test_runtime.py` |
+
+## Routing and model flow
+
+| Topic | Source | Tests |
+| --- | --- | --- |
+| Complexity scoring | `src/chat/complexity_scorer.py` | `tests/test_complexity_scorer.py` |
+| Message handling | `src/chat/message_handler.py` | `tests/test_message_handler.py` |
+| Session state | `src/chat/session_state.py` | `tests/test_session_state.py` |
+| Runtime router | `src/runtime/routing/router.py` | `tests/test_routing_policy.py` |
+| Tool policy | `src/runtime/routing/tool_policy.py` | `tests/test_tool_policy.py` |
+| Model registry | `src/runtime/routing/model_registry.py` | `tests/test_model_registry.py` |
+
+## Voice and screen
+
+| Topic | Source | Tests |
+| --- | --- | --- |
+| Voice input | `src/runtime/voice_input.py` | `tests/test_voice_input.py` |
+| Speech controller | `src/runtime/speech_controller.py` | `tests/test_runtime.py` |
+| Voice diagnostics | `src/runtime/voice_diagnostics.py` | `tests/test_voice_diagnostics.py` |
+| Screenshot capture | `src/chat/capture.py` | `tests/test_vision_flow.py` |
+| Vision flow | `src/runtime/vision.py` | `tests/test_vision_flow.py` |
+| Sound player | `src/utils/sound_player.py` | `tests/test_sound_player.py` |
+
+## Tools
+
+| Topic | Source | Tests |
+| --- | --- | --- |
+| Base tool | `src/tools/base.py` | `tests/test_tools.py` |
+| Registry | `src/tools/registry.py` | `tests/test_tools.py` |
+| Registry builder | `src/runtime/tooling.py` | `tests/test_tooling.py` |
+| Filesystem | `src/tools/filesystem.py` | `tests/test_filesystem_tool.py` |
+| Browser | `src/tools/browser.py` | `tests/test_browser_tool.py` |
+| PDF | `src/tools/pdf.py` | `tests/test_pdf_tool.py` |
+| macOS context | `src/tools/macos_context.py` | `tests/test_macos_context_tool.py` |
+| MCP | `src/tools/mcp_stdio.py` | `tests/test_mcp_stdio_tool.py` |
+| Operator tools | `src/tools/operator.py` | `tests/test_operator_tools.py` |
+
+## Jobs, triggers, and Web
+
+| Topic | Source | Tests |
+| --- | --- | --- |
+| Background tasks | `src/runtime/tasks.py` | `tests/test_task_manager.py` |
+| Durable jobs and ledger | `src/runtime/jobs.py` | `tests/test_job_system.py` |
+| Triggers | `src/runtime/triggers.py` | `tests/test_triggers.py` |
+| Context snapshot | `src/runtime/context.py` | `tests/test_context.py` |
+| Capabilities | `src/runtime/capabilities.py` | `tests/test_capabilities.py` |
+| Privacy | `src/runtime/privacy.py` | `tests/test_capabilities.py` |
+| Web UI | `src/web/server.py` | `tests/test_web_server.py` |
+| Shared runtime | `src/runtime/shared.py` | `tests/test_web_server.py` |
+
+## Release and docs
+
+| Topic | Source | Tests |
+| --- | --- | --- |
+| Certification | `scripts/certify_voice_to_computer.py`, `src/runtime/certification.py` | `tests/test_certification.py` |
+| Package metadata | `pyproject.toml` | `tests/test_package_metadata.py` |
+| Public docs | `README.md`, `docs/PRODUCT_STRATEGY.md`, Mintlify MDX | Mintlify CLI checks |

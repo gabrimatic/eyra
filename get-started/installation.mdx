@@ -1,0 +1,92 @@
+---
+title: "Installation"
+description: "Install Eyra, configure the local runtime, and start the terminal session."
+---
+
+Runtime: macOS, Python 3.11+, Homebrew, `uv`, and an OpenAI-compatible provider. Preferred setup: Ollama at `localhost:11434` and Local Whisper for speech.
+
+```bash
+git clone https://github.com/gabrimatic/eyra.git
+cd eyra
+chmod +x setup.sh && ./setup.sh
+```
+
+`setup.sh` creates `.env`, installs dependencies, checks the backend and models, checks Local Whisper when voice is enabled, and registers the `eyra` command.
+
+## Run from source
+
+```bash
+uv run python src/main.py
+```
+
+After your shell sees `~/.local/bin`, run:
+
+```bash
+eyra
+```
+
+## Local provider
+
+Default provider: Ollama.
+
+```env
+API_BASE_URL=http://localhost:11434/v1
+API_KEY=ollama
+MODEL=gemma4:e4b
+```
+
+Eyra checks `/v1/models`, falls back to Ollama `/api/tags`, verifies every configured model, and auto-pulls missing Ollama models when `AUTO_PULL_MODELS=true`.
+
+## Voice dependency
+
+Eyra uses Local Whisper for both transcription and speech output.
+
+```bash
+brew tap gabrimatic/local-whisper
+brew install local-whisper
+```
+
+Preflight resolves the `wh` binary from `PATH`, LaunchAgent plists, and common Homebrew paths. If voice is disabled, the Local Whisper check is skipped.
+
+## Mock mode
+
+Use mock mode when you want to smoke-test Eyra without a running model backend.
+
+```bash
+USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv run python src/main.py
+```
+
+Mock mode intentionally bypasses backend and model preflight. It still exercises the terminal session, command handling, local routing, and basic streaming path.
+
+## Web UI
+
+Standalone Web runtime:
+
+```bash
+WEB_UI_ENABLED=true uv run python -m web.server
+```
+
+Shared terminal and Web runtime:
+
+```bash
+WEB_UI_ENABLED=true eyra
+```
+
+Default host: `127.0.0.1`. Set `WEB_UI_HOST=0.0.0.0` only when you intentionally want another device on the network to connect.
+
+## Verification
+
+Run the standard local checks:
+
+```bash
+uv run pytest -q
+uv run ruff check src tests
+uv lock --check
+bash -n setup.sh
+```
+
+Run certification when validating voice-to-computer behavior:
+
+```bash
+uv run python scripts/certify_voice_to_computer.py
+```

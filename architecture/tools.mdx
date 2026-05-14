@@ -1,0 +1,62 @@
+---
+title: "Tool architecture"
+description: "BaseTool, ToolRegistry, tool metadata, approvals, and optional tool gates."
+---
+
+Tools are small async classes. Each tool defines a name, description, JSON Schema parameters, risk metadata, and an `execute()` method.
+
+## Base interface
+
+```python
+class BaseTool(ABC):
+    name: str
+    description: str
+    parameters: dict
+    costly: bool = False
+    tool_metadata: ToolMetadata | None = None
+
+    async def execute(self, **kwargs) -> ToolResult:
+        ...
+```
+
+`ToolResult` contains text and optionally a base64 image.
+
+## Registry
+
+`ToolRegistry` owns:
+
+- Registration by name.
+- OpenAI tool conversion.
+- Costly-tool filtering.
+- Policy allowlist filtering.
+- JSON argument parsing.
+- Error capture.
+- Log-safe argument summaries.
+
+Invalid JSON returns a clean tool result. Unknown tools return a clean message.
+
+## Registry construction
+
+`build_tool_registry()` registers always-on local tools first, then optional surfaces based on settings:
+
+1. Core read/local tools.
+2. Filesystem tools under sandbox roots.
+3. Network/browser tools.
+4. OS/operator tools.
+5. Agent tools.
+6. MCP tools.
+
+## Approvals
+
+`ApprovalManager` creates server-side pending approvals. Risky tools cannot rely on a model-provided `confirmed=true` field; the runtime checks the approval record.
+
+Examples requiring approval:
+
+- Overwrite-sensitive writes.
+- Permanent deletion.
+- Browser downloads/uploads.
+- Shell commands.
+- UI actions.
+- LaunchAgent management.
+- MCP calls.
+- Agent delegation.

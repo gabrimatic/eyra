@@ -1,0 +1,75 @@
+---
+title: "Background tasks"
+description: "Run long work without blocking typed or spoken input."
+---
+
+Background tasks keep Eyra responsive. Long PDF, file, screen, website, model, and multi-tool work gets an id, status, logs, artifacts, result, error, cancellation state, and durable local history.
+
+## When Eyra creates a task
+
+Eyra can create a task when the request is long-running, tool-heavy, or explicitly phrased as background work.
+
+Examples:
+
+```text
+Summarize this PDF and keep working while I ask questions.
+Start a task to organize Downloads.
+Start a coding job with the configured terminal agent to update the README.
+What is the task doing?
+Cancel that.
+```
+
+## Task lifecycle
+
+```text
+queued → running → completed
+                 → failed
+                 → cancelled
+paused → queued
+```
+
+Tasks store progress summaries, result text, error text, required capabilities, and frontend source.
+
+## Commands
+
+```text
+/tasks
+/task <id>
+/task logs <id>
+/task artifacts <id>
+/task retry <id>
+/cancel <id>
+/cancel all
+/pause <id>
+/resume <id>
+/tasks clear-completed
+```
+
+## Settings
+
+```env
+BACKGROUND_TASKS_ENABLED=true
+MAX_BACKGROUND_TASKS=2
+WORKER_MODEL=
+TASK_TIMEOUT_SECONDS=300
+MAX_WORKER_TOOL_STEPS=8
+TOOL_TIMEOUT_SECONDS=30
+MODEL_CONCURRENCY=1
+TASK_STATUS_UPDATES=true
+JOB_STORE_PATH=~/.local/share/eyra/jobs.sqlite3
+```
+
+`WORKER_MODEL` defaults to `MODEL` when empty.
+
+## Durable storage
+
+`DurableJobStore` stores:
+
+- Task metadata.
+- Job logs.
+- Artifacts.
+- Operation ledger entries.
+- Source frontend.
+- Risk level.
+
+The store is local SQLite. It is not telemetry.

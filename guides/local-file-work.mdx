@@ -1,0 +1,74 @@
+---
+title: "Local file work"
+description: "Read, write, move, copy, trash, restore, compress, and inspect files through Eyra's sandbox."
+---
+
+Eyra treats local file work as computer control. Paths are resolved under the filesystem sandbox, writes are bounded, overwrites require explicit consent, and reversible operations record undo metadata when possible.
+
+## Sandbox
+
+```env
+FILESYSTEM_ALLOWED_PATHS=~/Documents,~/Desktop,~/Downloads,/tmp
+FILESYSTEM_DEFAULT_PATH=~/Documents
+```
+
+Relative paths resolve under `FILESYSTEM_DEFAULT_PATH`, then Eyra checks the resolved path against `FILESYSTEM_ALLOWED_PATHS`.
+
+## Supported file actions
+
+| Action | Tool |
+| --- | --- |
+| Read text | `read_file` |
+| Write new file | `write_file` |
+| Edit text | `edit_file` |
+| Append or prepend | `append_file`, `prepend_file` |
+| Compare text files | `compare_files` |
+| List directories | `list_directory` |
+| Create directories | `create_directory` |
+| Move or copy | `move_path`, `copy_path` |
+| Rename or duplicate | `rename_path`, `duplicate_path` |
+| Compress or extract | `compress_path`, `uncompress_archive` |
+| Move to Trash | `move_to_trash` |
+| Restore from Trash | `restore_from_trash` |
+| Delete permanently | `delete_permanently` |
+| Reveal or open | `reveal_path`, `open_path` |
+| Extract PDF text | `read_pdf` |
+
+## Safer defaults
+
+- Existing files are not overwritten by default.
+- Permanent delete requires approval.
+- Trash is preferred for removal.
+- Binary reads and edits return clean messages instead of raw bytes.
+- Archive extraction stays under the sandbox.
+- Browser downloads and uploads stay sandboxed when network tools are enabled.
+
+## Deterministic file intents
+
+Common file requests can run before model tool loops:
+
+```text
+Move the latest downloaded file to Documents.
+Rename report-final.pdf to report.pdf.
+Undo that.
+No, I meant report-draft.pdf.
+```
+
+Eyra resolves named folders such as Desktop, Documents, Downloads, Pictures, Movies, Music, and `/tmp`, then records the operation.
+
+## Operation ledger
+
+Computer-changing actions record observe, plan, act, verify, and recovery details in the local ledger. Inspect it with:
+
+```text
+/operations
+```
+
+Ask:
+
+```text
+What changed?
+Undo that.
+```
+
+Undo is available only when Eyra has enough metadata to reverse the operation honestly.

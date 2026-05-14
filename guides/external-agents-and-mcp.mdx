@@ -1,0 +1,64 @@
+---
+title: "External agents and MCP"
+description: "Use optional terminal-agent and stdio MCP bridges under Eyra's policy layer."
+---
+
+External agents and MCP servers are optional workers. Eyra owns the route, sandbox, approvals, timeouts, output caps, logs, cancellation, and final status.
+
+## Capability gates
+
+```env
+AGENT_TOOLS_ENABLED=false
+EXTERNAL_AGENT_TOOLS_ENABLED=false
+EXTERNAL_AGENT_CONFIG_PATH=~/.config/eyra/agents.json
+MCP_TOOLS_ENABLED=false
+MCP_CONFIG_PATH=~/.config/eyra/mcp.json
+```
+
+Enable only the bridge you need.
+
+## External agent config
+
+```json
+{
+  "agents": [
+    {
+      "name": "openhands",
+      "type": "cli",
+      "command": ["openhands", "run"],
+      "cwdPolicy": "filesystem_default_path",
+      "network": false,
+      "mutatesFiles": true,
+      "requiresApproval": true,
+      "timeoutSeconds": 600
+    }
+  ]
+}
+```
+
+Use static argv only. Eyra does not accept model-selected dynamic commands.
+
+## Coding jobs
+
+```text
+Start a coding job with the configured terminal agent to update the README.
+What is the coding agent doing?
+Cancel that.
+```
+
+Coding jobs run as background tasks after approval. They are bounded and logged.
+
+## MCP bridge
+
+`list_mcp_tools` reads configured stdio server tools. `call_mcp_tool` requires action-specific approval and returns capped output.
+
+MCP calls are local stdio processes from `MCP_CONFIG_PATH`. Treat each server’s side effects according to that server’s own behavior.
+
+## Safety model
+
+- Bridges are disabled by default.
+- Delegation is routed as `DELEGATED_AGENT` risk.
+- Mutating delegation requires approval.
+- Output is redacted and capped.
+- Working directories stay under sandbox policy.
+- Realtime voice does not get agent delegation by default.

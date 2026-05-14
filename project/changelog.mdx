@@ -1,0 +1,39 @@
+---
+title: "Changelog"
+description: "Where to track shipped and unreleased Eyra changes."
+---
+
+Eyra's source changelog lives in `CHANGELOG.md`.
+
+Current package metadata reports version `4.1.0`. Current `master` contains post-4.1.0 routing and voice hardening intended for a future release candidate.
+
+## Read the changelog
+
+Repository link:
+
+[CHANGELOG.md](https://github.com/gabrimatic/eyra/blob/master/CHANGELOG.md)
+
+## Update rules
+
+When runtime behavior changes, keep these surfaces aligned:
+
+- `CHANGELOG.md`
+- `README.md`
+- `.env.example`
+- Mintlify docs
+- Tests
+- Certification notes when voice-to-computer behavior changes
+
+## Release evidence
+
+A release note should state which checks actually ran:
+
+- Unit tests.
+- Ruff.
+- Lockfile check.
+- Setup syntax.
+- Package build.
+- Runtime smoke.
+- Certification matrix.
+- Physical microphone challenge when claimed.
+- Secret scan when public release scope requires it.

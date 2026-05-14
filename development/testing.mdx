@@ -1,0 +1,77 @@
+---
+title: "Testing"
+description: "Run unit, lint, setup, package, docs, and certification checks."
+---
+
+Verification is part of done. Use the checks that match the changed surface.
+
+## Core gate
+
+```bash
+uv run pytest -q
+uv run ruff check src tests
+uv lock --check
+bash -n setup.sh
+```
+
+## Package gate
+
+```bash
+uv build --sdist --wheel
+```
+
+Use this when packaging metadata, entrypoints, dependencies, README, or release files change.
+
+## Runtime smoke
+
+Mock backend:
+
+```bash
+USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv run python src/main.py
+```
+
+Real local backend:
+
+```bash
+uv run python src/main.py
+```
+
+Use real backend smoke only when Ollama and the configured model are available.
+
+## Voice checks
+
+```text
+/voice-diagnose
+/voice-test
+```
+
+Certification:
+
+```bash
+uv run python scripts/certify_voice_to_computer.py
+uv run python scripts/certify_voice_to_computer.py --include-physical --human-phrase "human microphone release test"
+```
+
+Keep synthetic and physical microphone results separate.
+
+## Docs checks
+
+```bash
+mint validate --disable-openapi
+mint broken-links --check-anchors
+mint a11y
+```
+
+Use `--disable-openapi` because Eyra docs do not define an OpenAPI spec.
+
+## Focused tests
+
+Use focused tests while iterating:
+
+```bash
+uv run pytest tests/test_tool_policy.py -q
+uv run pytest tests/test_web_server.py -q
+uv run pytest tests/test_voice_diagnostics.py -q
+```
+
+Run the full gate before closing broad work.

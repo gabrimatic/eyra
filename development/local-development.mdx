@@ -1,0 +1,75 @@
+---
+title: "Local development"
+description: "Set up the development environment and run Eyra's checks."
+---
+
+Development uses `uv`, Python 3.11+, and the same local-first runtime as the app.
+
+## Install
+
+```bash
+uv sync
+```
+
+Run from source:
+
+```bash
+uv run python src/main.py
+```
+
+Run without a backend:
+
+```bash
+USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv run python src/main.py
+```
+
+## Project checks
+
+```bash
+uv run pytest -q
+uv run ruff check src tests
+uv lock --check
+bash -n setup.sh
+```
+
+Build package artifacts:
+
+```bash
+uv build --sdist --wheel
+```
+
+## Mintlify docs checks
+
+Mintlify requires Node.js 20.17+ for the CLI.
+
+```bash
+npm i -g mint
+mint validate --disable-openapi
+mint broken-links --check-anchors
+mint a11y
+```
+
+Preview:
+
+```bash
+mint dev --no-open --disable-openapi
+```
+
+Disable Mintlify CLI telemetry for local checks:
+
+```bash
+MINTLIFY_TELEMETRY_DISABLED=1 mint validate --disable-openapi
+```
+
+## Test layout
+
+Tests are under `tests/`. They cover:
+
+- Runtime preflight and commands.
+- Voice input and diagnostics.
+- Tools and filesystem safety.
+- Routing policy and model registry.
+- Web server helpers and endpoints.
+- Background tasks, triggers, jobs, context, vision, and certification.
+
+Async tests use `asyncio.run()` directly.

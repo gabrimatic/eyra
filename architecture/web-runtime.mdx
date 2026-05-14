@@ -1,0 +1,41 @@
+---
+title: "Web runtime"
+description: "Standalone and shared Web UI runtime behavior."
+---
+
+The Web UI can own a standalone runtime or attach to the terminal runtime.
+
+## Standalone
+
+`WebAssistantRuntime(settings, preflight=None, shared=None)` creates its own:
+
+- Conversation.
+- Complexity scorer.
+- Browser session.
+- Approval manager.
+- Tool registry.
+- Durable job store.
+- Trigger store.
+- Background task manager.
+
+## Shared
+
+When `shared` is provided, the Web runtime reuses terminal-owned objects:
+
+- Conversation.
+- Browser session.
+- Approvals.
+- Tool registry.
+- Job store.
+- Trigger store.
+- Task manager.
+
+The health payload reports `runtime.scope` as `shared` or `standalone`.
+
+## Events
+
+The browser subscribes to `/api/events` through server-sent events. Task events update the UI without polling.
+
+## Redaction
+
+Web responses redact token query strings, key-like values, OpenAI-style keys, and local home paths before returning capability and task data.

@@ -1,0 +1,79 @@
+---
+title: "First session"
+description: "What happens when Eyra starts and how to drive the live terminal."
+---
+
+Eyra starts with preflight, then runs one live session until you quit. Typed and spoken input feed the same conversation and the same local policy router.
+
+```bash
+eyra
+```
+
+Expected startup:
+
+```text
+Eyra
+
+  Voice: input + speech    Backend: ready
+
+  Type anything or speak. /help for commands.
+```
+
+## Preflight
+
+Startup checks run in this order:
+
+1. Backend reachability through `/v1/models`, with Ollama `/api/tags` fallback.
+2. Model availability for `MODEL`, `VISION_MODEL`, worker model, and routing tiers when enabled.
+3. Local Whisper availability when voice input or speech output is enabled.
+4. macOS screen capture command availability.
+
+The session does not start until backend and model checks pass. `USE_MOCK_CLIENT=true` skips backend and model checks for local development.
+
+## Input
+
+Typed input uses `prompt_toolkit`.
+
+Voice input uses `sounddevice`, Silero VAD, and Local Whisper. Eyra pauses listening while it is thinking or speaking so the microphone does not fight the response stream.
+
+## Local commands
+
+Commands starting with `/` are handled by the controller and never sent to the model. Common commands:
+
+```text
+/help
+/status
+/capabilities
+/context
+/tasks
+/operations
+/voice on
+/voice off
+/quit
+```
+
+Full list: [Commands](/reference/commands).
+
+## Good first prompts
+
+```text
+What can you control?
+Are you local right now?
+What would leave my machine?
+Show status.
+Move the latest downloaded file to Documents.
+Start dictation.
+End dictation.
+Remind me in 10 minutes to stand up.
+```
+
+## What Eyra records
+
+Eyra records durable local state for work that needs recovery:
+
+- Background task metadata, logs, artifacts, result, error, and cancellation state.
+- Operation ledger entries for local computer-changing actions.
+- Trigger definitions and status.
+- Current goal and context snapshot in runtime memory.
+
+Default stores live under `~/.local/share/eyra/` unless you change the settings.

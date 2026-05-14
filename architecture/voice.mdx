@@ -1,0 +1,38 @@
+---
+title: "Voice architecture"
+description: "VoiceInput, SpeechController, Local Whisper, diagnostics, and barge-in."
+---
+
+Voice input is lazy and local. Typed-only sessions do not load the VAD stack until voice is actually used.
+
+## Input path
+
+`VoiceInput` records 16 kHz mono audio through `sounddevice.InputStream`. Silero VAD receives 512-sample frames, about 32 ms each. A lookback deque preserves speech onset.
+
+When VAD emits `speech_end`, Eyra stops recording if enough frames were captured. Very short clips are treated as false triggers.
+
+## Transcription
+
+Transcription prefers Local Whisper's Unix socket:
+
+```text
+~/.whisper/cmd.sock
+```
+
+If the socket is unavailable, Eyra falls back to the resolved `wh` binary from preflight. Runtime code uses `state.wh_bin`, not bare `wh` from `PATH`.
+
+## Speech output
+
+`SpeechController` calls Local Whisper TTS through the resolved `wh_bin`. `interrupt()` kills active TTS so the user can cut in.
+
+`listen()` waits for speech to finish before opening the microphone.
+
+## Diagnostics
+
+`VoiceDiagnostics` checks device selection, non-zero input, VAD behavior, Local Whisper ASR, generated WAV transcription, and barge-in flows.
+
+`/voice-diagnose` is the normal first check.
+
+## Recovery
+
+`/voice on` re-runs the Local Whisper check and enables whichever side is available. ASR and TTS are tracked separately.

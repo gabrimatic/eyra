@@ -1,0 +1,105 @@
+---
+title: "Configuration"
+description: "Configure providers, models, voice, tools, Web UI, Realtime voice, and sandbox roots."
+---
+
+`.env` is the single source of truth. `Settings.load_from_env()` reads every setting with defaults, validates booleans and numeric ranges, and feeds the runtime, Web UI, routing, tools, and voice stack.
+
+## Provider
+
+```env
+API_BASE_URL=http://localhost:11434/v1
+API_KEY=ollama
+MODEL=gemma4:e4b
+VISION_MODEL=
+```
+
+`API_BASE_URL` can point at Ollama, LM Studio, vLLM, OpenRouter, Groq, OpenAI, or any compatible `/v1/chat/completions` endpoint.
+
+Local providers ignore `API_KEY`. Cloud providers require a real key and receive prompts, tool results, and model-bound content because you configured that provider.
+
+## Models
+
+Default behavior: all requests use `MODEL` after local policy routing.
+
+```env
+COMPLEXITY_ROUTING_ENABLED=false
+SIMPLE_MODEL=qwen3.5:2b
+MODERATE_MODEL=gemma4:e4b
+WORKER_MODEL=
+```
+
+If complexity routing is off, Eyra validates `MODEL`, `WORKER_MODEL` when set, and `VISION_MODEL` when set. If routing is on, Eyra validates all tier models.
+
+## Voice
+
+```env
+LIVE_LISTENING_ENABLED=true
+LIVE_SPEECH_ENABLED=true
+SPEECH_COOLDOWN_MS=3000
+VOICE_INPUT_DEVICE=
+VOICE_SAMPLE_RATE=16000
+VOICE_SILENCE_MS=1500
+VOICE_VAD_THRESHOLD=0.15
+```
+
+`VOICE_INPUT_DEVICE` accepts a sounddevice input index or name. Leave it empty for the system default.
+
+## Filesystem sandbox
+
+```env
+FILESYSTEM_ALLOWED_PATHS=~/Documents,~/Desktop,~/Downloads,/tmp
+FILESYSTEM_DEFAULT_PATH=~/Documents
+```
+
+Relative paths resolve under `FILESYSTEM_DEFAULT_PATH`, then Eyra checks that the resolved path sits under one of `FILESYSTEM_ALLOWED_PATHS`.
+
+## Optional capability gates
+
+Default behavior: optional tools are disabled.
+
+```env
+NETWORK_TOOLS_ENABLED=false
+OS_TOOLS_ENABLED=false
+AGENT_TOOLS_ENABLED=false
+EXTERNAL_AGENT_TOOLS_ENABLED=false
+MCP_TOOLS_ENABLED=false
+```
+
+Enable only the surface you need. Eyra still applies route policy, sandboxing, approval checks, and privacy reporting after a capability is enabled.
+
+## Web UI
+
+```env
+WEB_UI_ENABLED=false
+WEB_UI_HOST=127.0.0.1
+WEB_UI_PORT=8765
+WEB_UI_TOKEN=
+WEB_UI_REQUIRE_TOKEN=auto
+WEB_UI_MAX_REQUEST_BYTES=1000000
+```
+
+`WEB_UI_REQUIRE_TOKEN=auto` requires a token for every non-health endpoint. `WEB_UI_REQUIRE_TOKEN=false` is allowed only on localhost; non-localhost binds always require a token.
+
+## Realtime voice
+
+```env
+REALTIME_VOICE_ENABLED=false
+REALTIME_MODEL=gpt-realtime
+REALTIME_VOICE=marin
+OPENAI_API_KEY=
+REALTIME_TOOLS_ENABLED=false
+REALTIME_ALLOWED_TOOLS=
+```
+
+Realtime voice is online. Eyra mints ephemeral browser client secrets server-side and never puts the standard OpenAI API key in browser code.
+
+## Logs and stores
+
+```env
+JOB_STORE_PATH=~/.local/share/eyra/jobs.sqlite3
+TRIGGER_STORE_PATH=~/.local/share/eyra/triggers.sqlite3
+# EYRA_LOG_FILE=~/Library/Logs/Eyra/eyra.log
+```
+
+Jobs, task logs, artifacts, operation ledger entries, and triggers are local SQLite state. The macOS log file defaults to `~/Library/Logs/Eyra/eyra.log`.

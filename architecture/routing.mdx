@@ -1,0 +1,70 @@
+---
+title: "Routing"
+description: "Local policy routing, model selection, capabilities, risks, and fallback plans."
+---
+
+Every user request goes through `RuntimeRouter` before model execution. The router is deterministic and local; it does not call a router model, embeddings, telemetry, analytics, or a network router.
+
+## Route output
+
+`RoutingDecision` includes:
+
+- Execution class.
+- Effort estimate.
+- Selected model and reason.
+- Required capabilities.
+- Risk tier.
+- Tool policy allowlist and denial reasons.
+- Tool requirement.
+- Fallback plan.
+- Redacted route trace.
+
+## Execution classes
+
+| Class | Use |
+| --- | --- |
+| `TEXT_CHAT` | Normal answer |
+| `TOOL_ASSISTED_CHAT` | Model-driven tools |
+| `DIRECT_ACTION` | Deterministic local action |
+| `BACKGROUND_TASK` | Long-running worker |
+| `SCREEN_ANALYSIS` | Screenshot plus vision model |
+| `PDF_ANALYSIS` | Local PDF text extraction |
+| `FILESYSTEM_ACTION` | File action through tools |
+| `BROWSER_TASK` | Network/browser work |
+| `CODING_AGENT_TASK` | Agent status or delegation |
+| `REALTIME_VOICE_TURN` | Online Realtime path |
+
+## Capability examples
+
+| Capability | Meaning |
+| --- | --- |
+| `TEXT` | Text model response |
+| `NATIVE_TOOLS` | Function/tool calling |
+| `VISION` | Image processing |
+| `SCREEN_CAPTURE` | Local screenshot |
+| `FILE_READ`, `FILE_WRITE` | Sandboxed file access |
+| `NETWORK`, `BROWSER_CONTROL` | Remote web/browser work |
+| `OS_AUTOMATION`, `SHELL` | Local OS command/control |
+| `MCP`, `AGENT_DELEGATION` | External worker bridges |
+
+## Model selection
+
+When complexity routing is disabled, Eyra uses `MODEL` after policy routing. When enabled, `ComplexityScorer` estimates simple, moderate, or complex effort, and `ModelRegistry` chooses the matching tier.
+
+Vision tasks use `VISION_MODEL` when set, otherwise `MODEL`.
+
+Worker tasks use `WORKER_MODEL` when set, otherwise `MODEL`.
+
+## Tool policy
+
+`route_tool_policy()` compares execution class, capabilities, risk tier, settings, and registered tool metadata.
+
+Settings gates deny whole categories:
+
+- `NETWORK_TOOLS_ENABLED=false`
+- `OS_TOOLS_ENABLED=false`
+- `AGENT_TOOLS_ENABLED=false`
+- `EXTERNAL_AGENT_TOOLS_ENABLED=false`
+- `MCP_TOOLS_ENABLED=false`
+
+Denied tools stay visible in route traces with reasons.

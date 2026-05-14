@@ -1,0 +1,82 @@
+---
+title: "Commands"
+description: "Terminal commands handled locally by Eyra."
+---
+
+Commands are controller-owned. They are intercepted before model routing and never sent to the model as ordinary chat.
+
+## Session
+
+| Command | Behavior |
+| --- | --- |
+| `/help` | Show local command help |
+| `/status` | Show runtime status |
+| `/capabilities` | Show control surfaces and privacy boundary |
+| `/context` | Show goal, working directory, recent jobs, and recent changes |
+| `/goal <text>` | Set session context |
+| `/mode fast\|balanced\|best` | Set quality mode |
+| `/route last` | Show the last routing trace when available |
+| `/clear` | Reset conversation history |
+| `/quit` | Exit |
+
+## Voice
+
+| Command | Behavior |
+| --- | --- |
+| `/voice on\|off` | Toggle voice input and speech output |
+| `/handsfree on\|off` | Mark no-hands runtime intent |
+| `/voice-diagnose` | Run microphone, VAD, and Local Whisper diagnostics |
+| `/voice-test` | Start manual interruption diagnostics |
+| `/mute` | Mute speech output |
+| `/unmute` | Unmute speech output |
+
+## Tasks
+
+| Command | Behavior |
+| --- | --- |
+| `/tasks` | Show active and recent tasks |
+| `/task <id>` | Show detailed task state |
+| `/task logs <id>` | Show durable local job logs |
+| `/task artifacts <id>` | Show durable local job artifacts |
+| `/task retry <id>` | Retry a failed, cancelled, or blocked deterministic job |
+| `/cancel <id>` | Cancel one task |
+| `/cancel all` | Cancel all queued or running tasks |
+| `/pause <id>` | Pause a queued task |
+| `/resume <id>` | Resume a paused task |
+| `/tasks clear-completed` | Clear completed, failed, and cancelled rows |
+
+## Approvals
+
+| Command | Behavior |
+| --- | --- |
+| `/approvals` | Show pending risky-action approvals |
+| `/approve <id>` | Approve one exact action |
+| `/reject <id>` | Reject one exact action |
+
+## Local state
+
+| Command | Behavior |
+| --- | --- |
+| `/operations` | Show operation ledger entries |
+| `/triggers` | Show trigger definitions and status |
+| `/trigger pause <id>` | Pause a trigger |
+| `/trigger resume <id>` | Resume a trigger |
+| `/trigger cancel <id>` | Cancel a trigger |
+
+## Spoken equivalents
+
+Eyra also handles common voice phrases locally:
+
+- `stop`
+- `cancel that`
+- `pause that`
+- `resume that`
+- `show status`
+- `what are you doing`
+- `what changed`
+- `approve that`
+- `reject that`
+- `read the options`
+- `choose number two`
+- `start dictation`
+- `end dictation`

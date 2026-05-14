@@ -1,0 +1,86 @@
+---
+title: "Tools"
+description: "Tool registry, capability gates, risk tiers, and current tool inventory."
+---
+
+Eyra tools implement `BaseTool`, return `ToolResult`, and register through `build_tool_registry()`. The local policy router decides which registered tools are allowed for a request.
+
+## Always registered
+
+| Tool | Purpose |
+| --- | --- |
+| `discover_capabilities` | Report enabled control surfaces |
+| `get_voice_context` | Report voice runtime context |
+| `get_current_time` | Current local time |
+| `read_clipboard` | Read clipboard |
+| `get_system_info` | Local system snapshot |
+| `take_screenshot` | In-memory screenshot |
+| `get_frontmost_app` | Frontmost macOS app |
+| `get_finder_selection` | Sandboxed Finder selection |
+| `read_file`, `write_file`, `edit_file` | Sandboxed file text operations |
+| `append_file`, `prepend_file`, `compare_files` | Structured text operations |
+| `list_directory`, `create_directory` | Directory operations |
+| `move_path`, `copy_path`, `rename_path`, `duplicate_path` | Reversible local path operations |
+| `compress_path`, `uncompress_archive` | Archive operations |
+| `move_to_trash`, `restore_from_trash`, `delete_permanently` | Removal and restore |
+| `open_path`, `reveal_path` | macOS open/reveal |
+| `read_pdf` | Local PDF text extraction |
+
+## Network tools
+
+Enabled by `NETWORK_TOOLS_ENABLED=true`.
+
+| Tool | Purpose |
+| --- | --- |
+| `get_weather` | Weather for an explicit location |
+| `fetch_url` | Fetch URL text |
+| `web_search` | Brave Search through Playwright |
+| `open_url` | Open page and extract text |
+| `click_element` | Click by selector, link role, or text |
+| `fill_form_field` | Fill a form field without submitting |
+| `page_screenshot` | Browser screenshot |
+| `download_file` | Approved download into sandbox |
+| `upload_file` | Approved sandboxed upload |
+
+## OS tools
+
+Enabled by `OS_TOOLS_ENABLED=true`.
+
+| Tool | Purpose |
+| --- | --- |
+| `run_command` | Approved shell command under sandbox policy |
+| `get_file_info`, `search_files` | Local file metadata/search |
+| `list_processes`, `get_system_snapshot` | System reads |
+| `get_accessibility_tree`, `extract_screen_text` | Local UI/screen reads |
+| `list_open_apps`, `list_windows` | App/window reads |
+| `window_action`, `activate_app`, `open_app`, `quit_app` | App/window control |
+| `get_launch_agent_status`, `manage_launch_agent` | LaunchAgent status/control |
+| `ui_click`, `ui_scroll`, `ui_drag`, `ui_type_text`, `press_hotkey` | Approved UI actions |
+| `show_notification`, `run_shortcut`, `set_clipboard_text` | Local macOS actions |
+
+## Agent and MCP tools
+
+Enabled by `AGENT_TOOLS_ENABLED`, `EXTERNAL_AGENT_TOOLS_ENABLED`, or `MCP_TOOLS_ENABLED`.
+
+| Tool | Purpose |
+| --- | --- |
+| `get_agent_status`, `list_agent_sessions`, `get_agent_session_content` | Agent state reads |
+| `list_codex_sessions`, `get_codex_session_content` | Bounded session reads |
+| `list_openclaw_sessions`, `get_openclaw_status` | OpenClaw state reads |
+| `run_agent_task`, `run_codex_task`, `run_openclaw_agent` | Approved terminal-agent delegation |
+| `list_mcp_tools`, `call_mcp_tool` | stdio MCP listing and approved call |
+
+## Risk tiers
+
+| Tier | Examples |
+| --- | --- |
+| `LOW_READ_ONLY` | Time, basic system info |
+| `PRIVATE_READ` | Files, screenshots, clipboard, PDF, agent session reads |
+| `LOCAL_WRITE` | File writes, moves, copies, app opens |
+| `DESTRUCTIVE` | Permanent delete |
+| `NETWORKED` | Browser, weather, URL fetch |
+| `OS_CONTROL` | UI actions, app/window control |
+| `SHELL_EXECUTION` | Shell commands |
+| `DELEGATED_AGENT` | Agent or MCP calls |
+
+Complexity routing is not a safety boundary. Tool policy, settings gates, sandboxing, approvals, and privacy decisions decide what can run.

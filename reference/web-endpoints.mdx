@@ -1,0 +1,65 @@
+---
+title: "Web endpoints"
+description: "Built-in Web UI endpoints and authentication behavior."
+---
+
+The Web UI runs on Python's `ThreadingHTTPServer`. It serves a small browser app and local API endpoints for chat, tasks, approvals, triggers, Realtime setup, and local voice turns.
+
+## Authentication
+
+`/api/health` is public. Every other API endpoint requires the Web session token when auth is enabled.
+
+Token locations:
+
+- `X-Eyra-Web-Token` header.
+- `token` query parameter for event streams and the initial page URL.
+
+## GET endpoints
+
+| Endpoint | Purpose | Auth |
+| --- | --- | --- |
+| `/` | Browser UI | Token in query when auth is required |
+| `/api/health` | Redacted health and capability summary | No |
+| `/api/events` | Server-sent task events | Yes |
+| `/api/tasks` | Active and recent tasks | Yes |
+| `/api/task/<id>` | One task | Yes |
+| `/api/job/<id>/logs` | Durable job logs | Yes |
+| `/api/job/<id>/artifacts` | Durable job artifacts | Yes |
+| `/api/triggers` | Trigger list | Yes |
+| `/api/approvals` | Pending approvals | Yes |
+| `/api/capabilities` | Redacted capability snapshot | Yes |
+| `/api/route/last` | Last route trace | Yes |
+
+## POST endpoints
+
+| Endpoint | Purpose |
+| --- | --- |
+| `/api/chat` | Text chat or task request |
+| `/api/cancel` | Cancel task |
+| `/api/tasks/clear-completed` | Clear terminal tasks |
+| `/api/trigger` | Pause, resume, or cancel trigger |
+| `/api/approve` | Approve pending action |
+| `/api/reject` | Reject pending action |
+| `/api/local-voice-turn` | Upload audio and run local voice turn |
+| `/api/local-speak` | Speak local text through Local Whisper |
+| `/api/realtime-session` | Mint OpenAI Realtime ephemeral client secret |
+| `/api/realtime-tool-call` | Call a safe server-side Realtime tool |
+
+## Request limits
+
+`WEB_UI_MAX_REQUEST_BYTES` applies to chat requests, task APIs, and browser audio uploads. `/api/local-voice-turn` has a hard server-side cap for browser audio.
+
+## Redaction
+
+Web payload helpers redact:
+
+- Token query strings.
+- Key, secret, password, and token-looking values.
+- OpenAI-style API keys.
+- Local home paths.
+
+## Runtime scope
+
+`/api/health` reports whether the server is `standalone` or `shared`.
+
+Shared mode means the Web UI is attached to the terminal-owned runtime. Standalone mode means the Web server owns its own runtime objects.

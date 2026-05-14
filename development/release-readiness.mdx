@@ -1,0 +1,66 @@
+---
+title: "Release readiness"
+description: "Check code, docs, privacy, certification, package artifacts, and public surfaces."
+---
+
+Release readiness means the current head is proven, not assumed.
+
+## Local checks
+
+```bash
+uv run pytest -q
+uv run ruff check src tests
+uv lock --check
+bash -n setup.sh
+uv build --sdist --wheel
+```
+
+## Runtime checks
+
+Run a mock smoke when backend availability is not part of the change:
+
+```bash
+USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv run python src/main.py
+```
+
+Run a real Ollama smoke when backend/model behavior is part of the claim.
+
+## Certification
+
+```bash
+uv run python scripts/certify_voice_to_computer.py
+```
+
+Add physical checks before claiming physical microphone certification:
+
+```bash
+uv run python scripts/certify_voice_to_computer.py --include-physical --human-phrase "human microphone release test"
+```
+
+## Docs
+
+```bash
+mint validate --disable-openapi
+mint broken-links --check-anchors
+mint a11y
+```
+
+Review docs for:
+
+- Current default model and settings.
+- Local-first privacy contract.
+- Optional capability gates.
+- Commands and Web endpoints.
+- Certification limits.
+- No private prompt/spec/control-plane files.
+- No secrets or local identity fixtures beyond approved public project metadata.
+
+## Public surface
+
+Before push or release:
+
+- Check `git diff`.
+- Check `git status --short --branch`.
+- Run a secret scan when public release scope requires it.
+- Confirm branch target is `master` for this repo unless changed upstream.
+- Keep physical or environment-specific gates clearly labelled.
