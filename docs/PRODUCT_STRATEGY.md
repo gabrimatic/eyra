@@ -126,6 +126,21 @@ An adapter must declare:
 
 Adapters run only when enabled and configured. They use static argv, sandboxed cwd, redacted capped output, and explicit approval for mutation or delegation. Realtime voice must not call external agents by default.
 
+## Installation And Distribution
+
+Installer UX is part of the product, not a developer afterthought. The first contact should explain what stays local, what is missing, and what is deliberately disabled.
+
+Distribution should stay compatible with the current license and release policy:
+
+- Source checkout remains the developer and private-beta path.
+- A release installer can install GitHub release archives, but private repositories require authenticated access.
+- Homebrew should use a custom `gabrimatic/eyra` tap, not `homebrew/core`, unless the license and release policy change.
+- `uv tool` and `pipx` installs should expose the same commands as source installs: `eyra`, `eyra web`, `eyra doctor`, `eyra setup`, `eyra certify`, `eyra update`, `eyra uninstall`, `eyra version`, and `eyra paths`.
+- Updates must preserve `.env`, jobs, triggers, logs, artifacts, and the operation ledger.
+- Uninstall must remove command shims first and leave user data alone unless the user explicitly chooses data removal.
+
+Install diagnostics should be support-ready. `eyra doctor --json` should report version, install source, local backend state, model state, Local Whisper state, microphone summary, screen capture state, sandbox roots, Web UI config, optional tool flags, and redacted paths without logging secrets.
+
 ## Release Bar
 
 Every meaningful new capability needs:

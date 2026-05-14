@@ -26,11 +26,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Package version is now staged as `4.2.0rc1` for release-candidate validation. This has not been published.
+- `eyra` now has install/support subcommands: `web`, `doctor`, `setup`, `certify`, `update`, `uninstall`, `version`, and `paths`.
+- JSON support output for `eyra doctor --json`, `eyra paths --json`, `eyra version --json`, and certification rows through `eyra certify --json`.
+- `install.sh` release-archive installer scaffold for future GitHub Release assets, including private-repo authentication guidance and no-secret logging defaults.
+- Custom Homebrew tap formula scaffold under `Formula/eyra.rb`; this targets a private/custom tap and does not assume `homebrew/core`.
+- Installer certification rows for setup idempotence, `.env` preservation, command shims, doctor/certify/web commands, update detection, uninstall dry-run, release installer parsing, Homebrew formula presence, uv/pipx command compatibility, and user-data preservation.
 - `docs/PRODUCT_STRATEGY.md` defines Eyra's stance as a local-first voice coordinator and safety layer, not a clone of coding agents, browser agents, or generic agent frameworks.
 - Optional configured external-agent adapters through `EXTERNAL_AGENT_TOOLS_ENABLED` and `EXTERNAL_AGENT_CONFIG_PATH`, using static argv, sandboxed cwd, bounded timeouts, capped redacted output, and clean unavailable/unknown-agent reporting.
 - `/handsfree on|off` and `HANDS_FREE_MODE` to make no-hands operation visible in status and capability snapshots.
 - Web capability responses are split from unauthenticated health and redacted before returning local paths, job details, logs, artifacts, or approval details.
 - Certification rows for route policy, hands-free controls, barge-in boundaries, external-agent adapter safety, and competitor-positioning documentation.
+- Generic external-agent execution no longer falls back to arbitrary model-selected command lines; configured static adapters are required before a delegated worker can run.
 
 ## [4.1.0] - 2026-05-14
 

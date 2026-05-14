@@ -121,13 +121,32 @@ def test_certification_matrix_contains_required_structured_rows(tmp_path):
         "external_agent_sandbox_cwd",
         "external_agent_realtime_not_exposed",
         "competitor_positioning_doc_exists",
+        "install_source_setup_script",
+        "install_release_script_parse",
+        "install_setup_idempotent",
+        "install_no_env_overwrite",
+        "install_no_duplicate_aliases",
+        "install_command_shims",
+        "install_doctor_json",
+        "install_certify_command",
+        "install_web_command",
+        "install_update_source_detection",
+        "install_uninstall_dry_run",
+        "install_private_repo_warning",
+        "install_homebrew_tap_formula_exists",
+        "install_homebrew_formula_test",
+        "install_uv_tool_compatibility",
+        "install_pipx_compatibility",
+        "install_clean_wheel_commands",
+        "install_fresh_clone_tag",
+        "install_preserves_user_data",
     }
 
     assert required.issubset({row.name for row in report.rows})
     assert all(row.status in {"passed", "failed", "skipped"} for row in report.rows)
     assert all(row.reason for row in report.rows)
     status_by_name = {row.name: row.status for row in report.rows}
-    assert all(status_by_name[name] == "passed" for name in required if name.startswith(("route_", "handsfree_", "barge_in_", "external_agent_", "competitor_")))
+    assert all(status_by_name[name] == "passed" for name in required if name.startswith(("route_", "handsfree_", "barge_in_", "external_agent_", "competitor_", "install_")))
 
 
 def test_certification_report_renders_machine_readable_summary(tmp_path):

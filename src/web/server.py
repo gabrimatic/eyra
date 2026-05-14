@@ -839,6 +839,12 @@ class WebAssistantRuntime:
             trace = self.shared.last_route_trace
         return {"route": trace_to_dict(trace) if trace is not None else None}
 
+    async def support_diagnostics(self) -> dict[str, Any]:
+        from runtime.cli import _doctor
+
+        result = await _doctor(self.settings)
+        return {"ok": result.ok, "message": result.message, **result.data}
+
     async def capabilities(self) -> dict[str, Any]:
         return build_capabilities_payload(
             self.settings,
@@ -1521,6 +1527,11 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             if not self._authorized():
                 return
             self._send_json(200, self.runtime.run_sync(self.runtime.route_last()))
+            return
+        if parsed.path == "/api/doctor":
+            if not self._authorized():
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.support_diagnostics()))
             return
         job_logs_match = re.fullmatch(r"/api/job/([^/]+)/logs", parsed.path)
         if job_logs_match:

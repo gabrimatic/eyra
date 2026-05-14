@@ -58,3 +58,41 @@ class TestSettingsRoutingDefaults:
         settings = Settings()
 
         assert settings.ROUTING_DEBUG is False
+
+    def test_load_from_env_reads_user_config_before_cwd_env(self, monkeypatch, tmp_path):
+        from utils.settings import Settings
+
+        home = tmp_path / "home"
+        config = home / ".config" / "eyra"
+        config.mkdir(parents=True)
+        (config / ".env").write_text("MODEL=user-config-model\nNETWORK_TOOLS_ENABLED=true\n")
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        (cwd / ".env").write_text("MODEL=cwd-model\n")
+        monkeypatch.delenv("MODEL", raising=False)
+        monkeypatch.delenv("NETWORK_TOOLS_ENABLED", raising=False)
+        monkeypatch.setattr("utils.settings.Path.home", lambda: home)
+        monkeypatch.chdir(cwd)
+
+        settings = Settings.load_from_env()
+
+        assert settings.MODEL == "cwd-model"
+        assert settings.NETWORK_TOOLS_ENABLED is True
+
+    def test_process_environment_overrides_env_files(self, monkeypatch, tmp_path):
+        from utils.settings import Settings
+
+        home = tmp_path / "home"
+        config = home / ".config" / "eyra"
+        config.mkdir(parents=True)
+        (config / ".env").write_text("LIVE_LISTENING_ENABLED=true\n")
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        (cwd / ".env").write_text("LIVE_LISTENING_ENABLED=true\n")
+        monkeypatch.setattr("utils.settings.Path.home", lambda: home)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setenv("LIVE_LISTENING_ENABLED", "false")
+
+        settings = Settings.load_from_env()
+
+        assert settings.LIVE_LISTENING_ENABLED is False

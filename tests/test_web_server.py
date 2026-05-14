@@ -424,6 +424,20 @@ class TestWebServerHelpers:
         assert payload["route"]["executionClass"] == "text_chat"
         assert "source" in payload["route"]
 
+    def test_web_support_diagnostics_are_redacted(self):
+        settings = Settings(USE_MOCK_CLIENT=True, LIVE_LISTENING_ENABLED=False, LIVE_SPEECH_ENABLED=False)
+        runtime = WebAssistantRuntime(settings)
+
+        try:
+            payload = runtime.run_sync(runtime.support_diagnostics())
+        finally:
+            runtime.close()
+
+        assert "version" in payload
+        assert "preflight" in payload
+        assert "hasApiKey" in payload["settings"]
+        assert "API_KEY" not in json.dumps(payload)
+
     def test_web_runtime_capability_question_is_local_not_model_chat(self):
         settings = Settings(USE_MOCK_CLIENT=True, LIVE_LISTENING_ENABLED=False, LIVE_SPEECH_ENABLED=False)
         runtime = WebAssistantRuntime(settings)
@@ -645,40 +659,43 @@ class TestWebServerHelpers:
         assert triggers["triggers"][0]["status"] == "cancelled"
 
     def test_web_runtime_coding_job_waits_for_approval_then_runs_agent(self, tmp_path):
+        agent_config = tmp_path / "agents.json"
+        agent_config.write_text(
+            json.dumps(
+                {
+                    "agents": [
+                        {
+                            "name": "codex",
+                            "type": "cli",
+                            "command": [sys.executable, "-c", "import sys; print('web coding done: ' + sys.stdin.read())"],
+                            "cwdPolicy": "request",
+                            "requiresApproval": True,
+                            "timeoutSeconds": 5,
+                        }
+                    ]
+                }
+            )
+        )
         settings = Settings(
             USE_MOCK_CLIENT=True,
             LIVE_LISTENING_ENABLED=False,
             LIVE_SPEECH_ENABLED=False,
             AGENT_TOOLS_ENABLED=True,
+            EXTERNAL_AGENT_TOOLS_ENABLED=True,
+            EXTERNAL_AGENT_CONFIG_PATH=str(agent_config),
             FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
             FILESYSTEM_DEFAULT_PATH=str(tmp_path),
             JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
             TRIGGER_STORE_PATH=str(tmp_path / "triggers.sqlite3"),
         )
         runtime = WebAssistantRuntime(settings)
-        created = {}
-
-        class FakeProcess:
-            returncode = 0
-
-            async def communicate(self):
-                return b"web coding done", b""
-
-        async def fake_create_subprocess_exec(*argv, cwd=None, stdout=None, stderr=None):
-            created["argv"] = argv
-            created["cwd"] = cwd
-            return FakeProcess()
 
         try:
-            with patch("tools.operator.shutil.which", return_value="/usr/bin/codex"):
-                with patch("tools.operator.asyncio.create_subprocess_exec", fake_create_subprocess_exec):
-                    result = runtime.run_sync(
-                        runtime.handle_message("Start a coding job with Codex to update the README.")
-                    )
-                    approvals = runtime.run_sync(runtime.list_approvals())
-                    approved = runtime.run_sync(runtime.approve(approvals["approvals"][0]["id"]))
-                    runtime.run_sync(runtime.task_manager.wait_for_task(result["taskId"]), timeout=3)
-                    tasks = runtime.run_sync(runtime.list_tasks())
+            result = runtime.run_sync(runtime.handle_message("Start a coding job with Codex to update the README."))
+            approvals = runtime.run_sync(runtime.list_approvals())
+            approved = runtime.run_sync(runtime.approve(approvals["approvals"][0]["id"]))
+            runtime.run_sync(runtime.task_manager.wait_for_task(result["taskId"]), timeout=3)
+            tasks = runtime.run_sync(runtime.list_tasks())
         finally:
             runtime.close()
 
@@ -686,7 +703,7 @@ class TestWebServerHelpers:
         assert approved["approved"] is True
         assert tasks["tasks"][0]["status"] == "completed"
         assert "web coding done" in tasks["tasks"][0]["result"]
-        assert created["argv"] == ("/usr/bin/codex", "exec", "update the README")
+        assert "update the README" in tasks["tasks"][0]["result"]
 
     def test_web_runtime_refuses_coding_job_when_agent_tools_are_disabled(self, tmp_path):
         settings = Settings(

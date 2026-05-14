@@ -1,7 +1,8 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 
 @dataclass
@@ -84,10 +85,20 @@ class Settings:
 
     @classmethod
     def load_from_env(cls):
-        load_dotenv()
+        user_env = Path.home() / ".config" / "eyra" / ".env"
+        file_values = {}
+        if user_env.exists():
+            file_values.update({key: value for key, value in dotenv_values(user_env).items() if value is not None})
+        cwd_env = Path.cwd() / ".env"
+        if cwd_env.exists():
+            file_values.update({key: value for key, value in dotenv_values(cwd_env).items() if value is not None})
+        values = {**file_values, **os.environ}
+
+        def _getenv(key: str, default: str = "") -> str:
+            return str(values.get(key, default))
 
         def _bool(key: str, default: str = "true") -> bool:
-            raw = os.getenv(key, default).strip().lower()
+            raw = _getenv(key, default).strip().lower()
             if raw in {"true", "1", "yes", "on"}:
                 return True
             if raw in {"false", "0", "no", "off"}:
@@ -95,14 +106,14 @@ class Settings:
             raise ValueError(f"Invalid boolean for {key}: '{raw}'. Use true or false.")
 
         def _int(key: str, default: str) -> int:
-            raw = os.getenv(key, default)
+            raw = _getenv(key, default)
             try:
                 return int(raw)
             except ValueError:
                 raise ValueError(f"Invalid integer for {key}: '{raw}'. Check your .env file.")
 
         def _float_range(key: str, default: str, lo: float, hi: float) -> float:
-            raw = os.getenv(key, default)
+            raw = _getenv(key, default)
             try:
                 val = float(raw)
             except ValueError:
@@ -113,59 +124,59 @@ class Settings:
 
         return cls(
             USE_MOCK_CLIENT=_bool("USE_MOCK_CLIENT", "false"),
-            API_BASE_URL=os.getenv("API_BASE_URL", "http://localhost:11434/v1"),
-            API_KEY=os.getenv("API_KEY", "ollama"),
-            MODEL=os.getenv("MODEL", "gemma4:e4b"),
-            VISION_MODEL=os.getenv("VISION_MODEL", ""),
-            SIMPLE_MODEL=os.getenv("SIMPLE_MODEL", "qwen3.5:2b"),
-            MODERATE_MODEL=os.getenv("MODERATE_MODEL", "gemma4:e4b"),
+            API_BASE_URL=_getenv("API_BASE_URL", "http://localhost:11434/v1"),
+            API_KEY=_getenv("API_KEY", "ollama"),
+            MODEL=_getenv("MODEL", "gemma4:e4b"),
+            VISION_MODEL=_getenv("VISION_MODEL", ""),
+            SIMPLE_MODEL=_getenv("SIMPLE_MODEL", "qwen3.5:2b"),
+            MODERATE_MODEL=_getenv("MODERATE_MODEL", "gemma4:e4b"),
             AUTO_PULL_MODELS=_bool("AUTO_PULL_MODELS"),
             LIVE_LISTENING_ENABLED=_bool("LIVE_LISTENING_ENABLED"),
             LIVE_SPEECH_ENABLED=_bool("LIVE_SPEECH_ENABLED"),
             SPEECH_COOLDOWN_MS=_int("SPEECH_COOLDOWN_MS", "3000"),
-            VOICE_INPUT_DEVICE=os.getenv("VOICE_INPUT_DEVICE", ""),
+            VOICE_INPUT_DEVICE=_getenv("VOICE_INPUT_DEVICE", ""),
             VOICE_SAMPLE_RATE=_int("VOICE_SAMPLE_RATE", "16000"),
             VOICE_DEBUG_RECORD_SECONDS=_int("VOICE_DEBUG_RECORD_SECONDS", "3"),
             VOICE_DIAGNOSTIC_SAVE_AUDIO=_bool("VOICE_DIAGNOSTIC_SAVE_AUDIO", "false"),
             VOICE_SILENCE_MS=_int("VOICE_SILENCE_MS", "1500"),
             VOICE_VAD_THRESHOLD=_float_range("VOICE_VAD_THRESHOLD", "0.15", 0.0, 1.0),
-            FILESYSTEM_ALLOWED_PATHS=os.getenv("FILESYSTEM_ALLOWED_PATHS", "~/Documents,~/Desktop,~/Downloads,/tmp"),
-            FILESYSTEM_DEFAULT_PATH=os.getenv("FILESYSTEM_DEFAULT_PATH", "~/Documents"),
+            FILESYSTEM_ALLOWED_PATHS=_getenv("FILESYSTEM_ALLOWED_PATHS", "~/Documents,~/Desktop,~/Downloads,/tmp"),
+            FILESYSTEM_DEFAULT_PATH=_getenv("FILESYSTEM_DEFAULT_PATH", "~/Documents"),
             NETWORK_TOOLS_ENABLED=_bool("NETWORK_TOOLS_ENABLED", "false"),
             BACKGROUND_TASKS_ENABLED=_bool("BACKGROUND_TASKS_ENABLED", "true"),
             MAX_BACKGROUND_TASKS=_int("MAX_BACKGROUND_TASKS", "2"),
-            WORKER_MODEL=os.getenv("WORKER_MODEL", ""),
+            WORKER_MODEL=_getenv("WORKER_MODEL", ""),
             TASK_TIMEOUT_SECONDS=_int("TASK_TIMEOUT_SECONDS", "300"),
             MAX_WORKER_TOOL_STEPS=_int("MAX_WORKER_TOOL_STEPS", "8"),
             TOOL_TIMEOUT_SECONDS=_int("TOOL_TIMEOUT_SECONDS", "30"),
             MODEL_CONCURRENCY=_int("MODEL_CONCURRENCY", "1"),
             TASK_STATUS_UPDATES=_bool("TASK_STATUS_UPDATES", "true"),
-            JOB_STORE_PATH=os.getenv("JOB_STORE_PATH", "~/.local/share/eyra/jobs.sqlite3"),
-            TRIGGER_STORE_PATH=os.getenv("TRIGGER_STORE_PATH", "~/.local/share/eyra/triggers.sqlite3"),
+            JOB_STORE_PATH=_getenv("JOB_STORE_PATH", "~/.local/share/eyra/jobs.sqlite3"),
+            TRIGGER_STORE_PATH=_getenv("TRIGGER_STORE_PATH", "~/.local/share/eyra/triggers.sqlite3"),
             TRIGGER_CHECK_INTERVAL_SECONDS=_float_range("TRIGGER_CHECK_INTERVAL_SECONDS", "0.5", 0.01, 60.0),
             TRIGGER_TIMEOUT_SECONDS=_int("TRIGGER_TIMEOUT_SECONDS", "300"),
             OS_TOOLS_ENABLED=_bool("OS_TOOLS_ENABLED", "false"),
-            SCREEN_OCR_COMMAND=os.getenv("SCREEN_OCR_COMMAND", ""),
+            SCREEN_OCR_COMMAND=_getenv("SCREEN_OCR_COMMAND", ""),
             AGENT_TOOLS_ENABLED=_bool("AGENT_TOOLS_ENABLED", "false"),
             EXTERNAL_AGENT_TOOLS_ENABLED=_bool(
                 "EXTERNAL_AGENT_TOOLS_ENABLED",
-                os.getenv("AGENT_TOOLS_ENABLED", "false"),
+                _getenv("AGENT_TOOLS_ENABLED", "false"),
             ),
-            EXTERNAL_AGENT_CONFIG_PATH=os.getenv("EXTERNAL_AGENT_CONFIG_PATH", "~/.config/eyra/agents.json"),
+            EXTERNAL_AGENT_CONFIG_PATH=_getenv("EXTERNAL_AGENT_CONFIG_PATH", "~/.config/eyra/agents.json"),
             MCP_TOOLS_ENABLED=_bool("MCP_TOOLS_ENABLED", "false"),
-            MCP_CONFIG_PATH=os.getenv("MCP_CONFIG_PATH", "~/.config/eyra/mcp.json"),
+            MCP_CONFIG_PATH=_getenv("MCP_CONFIG_PATH", "~/.config/eyra/mcp.json"),
             WEB_UI_ENABLED=_bool("WEB_UI_ENABLED", "false"),
-            WEB_UI_HOST=os.getenv("WEB_UI_HOST", "127.0.0.1"),
+            WEB_UI_HOST=_getenv("WEB_UI_HOST", "127.0.0.1"),
             WEB_UI_PORT=_int("WEB_UI_PORT", "8765"),
-            WEB_UI_TOKEN=os.getenv("WEB_UI_TOKEN", ""),
-            WEB_UI_REQUIRE_TOKEN=os.getenv("WEB_UI_REQUIRE_TOKEN", "auto").strip().lower(),
+            WEB_UI_TOKEN=_getenv("WEB_UI_TOKEN", ""),
+            WEB_UI_REQUIRE_TOKEN=_getenv("WEB_UI_REQUIRE_TOKEN", "auto").strip().lower(),
             WEB_UI_MAX_REQUEST_BYTES=_int("WEB_UI_MAX_REQUEST_BYTES", "1000000"),
             REALTIME_VOICE_ENABLED=_bool("REALTIME_VOICE_ENABLED", "false"),
-            REALTIME_MODEL=os.getenv("REALTIME_MODEL", "gpt-realtime"),
-            REALTIME_VOICE=os.getenv("REALTIME_VOICE", "marin"),
-            OPENAI_API_KEY=os.getenv("OPENAI_API_KEY", ""),
+            REALTIME_MODEL=_getenv("REALTIME_MODEL", "gpt-realtime"),
+            REALTIME_VOICE=_getenv("REALTIME_VOICE", "marin"),
+            OPENAI_API_KEY=_getenv("OPENAI_API_KEY", ""),
             REALTIME_TOOLS_ENABLED=_bool("REALTIME_TOOLS_ENABLED", "false"),
-            REALTIME_ALLOWED_TOOLS=os.getenv("REALTIME_ALLOWED_TOOLS", ""),
+            REALTIME_ALLOWED_TOOLS=_getenv("REALTIME_ALLOWED_TOOLS", ""),
             COMPLEXITY_ROUTING_ENABLED=_bool("COMPLEXITY_ROUTING_ENABLED", "false"),
             ROUTING_DEBUG=_bool("ROUTING_DEBUG", "false"),
             HANDS_FREE_MODE=_bool("HANDS_FREE_MODE", "false"),

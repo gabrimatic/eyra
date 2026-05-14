@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "eyra"
-version = "4.1.0"
+version = "4.2.0rc1"
 description = "Local-first voice agent for macOS terminals."
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"
@@ -43,6 +43,9 @@ dependencies = [
 [project.scripts]
 eyra = "main:run"
 eyra-web = "web.server:run"
+eyra-doctor = "runtime.cli:doctor"
+eyra-setup = "runtime.cli:setup"
+eyra-certify = "runtime.cli:certify"
 
 [project.urls]
 Homepage = "https://github.com/gabrimatic/eyra"

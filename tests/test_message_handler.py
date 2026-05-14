@@ -8,7 +8,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from chat.complexity_scorer import ComplexityScorer
 from chat.message_handler import process_task_stream
-from chat.session_state import QualityMode
+from chat.session_state import InteractionStyle, QualityMode
+from runtime.models import PreflightResult
+from runtime.routing.router import RuntimeRouter
+from runtime.routing.types import RequestEnvelope, RequestSource
+from runtime.tooling import build_tool_registry
 from tools.registry import ToolRegistry
 from utils.settings import Settings
 
@@ -169,6 +173,46 @@ class TestProcessTaskStream:
         )))
 
         assert "cannot use local tools" in "".join(chunks)
+
+    def test_routed_plain_text_chat_does_not_force_tool_sampling(self, monkeypatch):
+        client = _RecordingClient()
+        monkeypatch.setattr("chat.message_handler.get_ai_client", lambda *_, **__: client)
+        settings = Settings(USE_MOCK_CLIENT=True, MODEL="main")
+        registry = build_tool_registry(settings)
+        preflight = PreflightResult(
+            backend_reachable=True,
+            models_ready=settings.all_model_names,
+            tool_capability_checked_models=settings.all_model_names,
+            tool_capable_models=settings.all_model_names,
+        )
+        decision = _run(
+            RuntimeRouter(ComplexityScorer()).route(
+                RequestEnvelope(
+                    text="compose a warm sentence about focus",
+                    source=RequestSource.TEST,
+                    interaction_style=InteractionStyle.TEXT,
+                    quality_mode=QualityMode.BALANCED,
+                    messages=[],
+                    current_goal=None,
+                    is_worker=False,
+                    settings=settings,
+                    preflight=preflight,
+                ),
+                tool_registry=registry,
+            )
+        )
+
+        _run(_collect(process_task_stream(
+            "compose a warm sentence about focus",
+            complexity_scorer=ComplexityScorer(),
+            settings=settings,
+            messages=[{"role": "user", "content": "compose a warm sentence about focus"}],
+            tool_registry=registry,
+            routing_decision=decision,
+        )))
+
+        assert client.calls[-1]["allowed_tool_names"] == frozenset()
+        assert client.calls[-1]["require_tools"] is False
 
 
 async def _collect(stream):

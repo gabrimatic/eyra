@@ -8,6 +8,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from runtime.external_agents import AgentAdapterRegistry, AgentJobSpec, load_agent_config
+from runtime.tooling import build_tool_registry
+from tools.approval import ApprovalManager
 from utils.settings import Settings
 
 
@@ -147,3 +149,36 @@ class TestExternalAgentAdapters:
 
         assert config.status == "invalid"
         assert "timeout" in config.reason
+
+    def test_agent_task_tool_requires_configured_static_adapter_after_approval(self, tmp_path):
+        approvals = ApprovalManager()
+        registry = build_tool_registry(
+            Settings(
+                AGENT_TOOLS_ENABLED=True,
+                EXTERNAL_AGENT_TOOLS_ENABLED=False,
+                FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+                FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+            ),
+            approval_manager=approvals,
+        )
+
+        first = _run(
+            registry.execute(
+                "run_codex_task",
+                json.dumps({"task": "inspect files", "cwd": str(tmp_path)}),
+            )
+        )
+        pending = approvals.list_pending()
+        assert "Approval required" in first.content
+        assert len(pending) == 1
+        approvals.approve(pending[0].id)
+
+        second = _run(
+            registry.execute(
+                "run_codex_task",
+                json.dumps({"task": "inspect files", "cwd": str(tmp_path), "approval_id": pending[0].id}),
+            )
+        )
+
+        assert "not configured for execution" in second.content
+        assert "EXTERNAL_AGENT_CONFIG_PATH" in second.content

@@ -38,6 +38,24 @@ After your shell reloads `~/.local/bin`, the short command works too:
 eyra
 ```
 
+Useful install and support commands:
+
+```bash
+eyra setup
+eyra doctor
+eyra doctor --json
+eyra certify
+eyra web
+eyra version
+eyra paths
+eyra update
+eyra uninstall --dry-run
+```
+
+`eyra setup` preserves an existing `.env`. Source checkouts use the repo `.env`; installed tool environments can use `~/.config/eyra/.env`, and a local repo `.env` still wins when you run from a checkout. `eyra update` only explains the correct update path for the detected install source; it does not pull, overwrite, or delete user data. `eyra uninstall` removes Eyra-created command shims and preserves `.env`, jobs, triggers, logs, and the operation ledger unless you explicitly choose data removal.
+
+For CI or temp-home smoke tests, use `./setup.sh --non-interactive`. Non-interactive setup does not start Local Whisper or other services; it reports what is missing and leaves service startup to the user.
+
 Eyra runs preflight checks, then enters a live session:
 
 ```
@@ -66,6 +84,42 @@ WEB_UI_ENABLED=true eyra
 ```
 
 That shared Web frontend uses the terminal-owned approvals, jobs, task events, trigger state, tools, browser session, and operation history. Running `eyra-web` or `uv run python -m web.server` directly still starts a standalone Web runtime and reports that mode in `/api/health`.
+
+### Future install paths
+
+The source setup path above is the supported private-beta/developer path today.
+
+Future GitHub Release installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gabrimatic/eyra/master/install.sh | bash
+```
+
+If this repository is private, that command needs authenticated GitHub access, for example `GITHUB_TOKEN` in the environment. It is not a public install path until the repository or release asset is public.
+
+Future custom Homebrew tap path:
+
+```bash
+brew tap gabrimatic/eyra
+brew install eyra
+```
+
+or:
+
+```bash
+brew install gabrimatic/eyra/eyra
+```
+
+Eyra uses the PolyForm Noncommercial license, so the intended Homebrew path is a custom tap, not `homebrew/core`, unless the license and release policy change.
+
+Future Python tool paths, once package distribution is enabled:
+
+```bash
+uv tool install git+https://github.com/gabrimatic/eyra@v4.2.0rc1
+pipx install git+https://github.com/gabrimatic/eyra@v4.2.0rc1
+```
+
+Those installs should expose the same support commands as source installs. Run `eyra doctor --json` after installing to confirm local backend, models, Local Whisper, microphone, screen capture, sandbox paths, Web UI config, and optional tool flags.
 
 ---
 

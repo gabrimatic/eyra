@@ -1,7 +1,5 @@
 #!/bin/bash
-set -e
-
-# ── Style ─────────────────────────────────────────────────────────────────────
+set -euo pipefail
 
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
@@ -11,6 +9,22 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
+NON_INTERACTIVE=false
+for arg in "$@"; do
+    case "$arg" in
+        --non-interactive) NON_INTERACTIVE=true ;;
+        -h|--help)
+            echo "Usage: ./setup.sh [--non-interactive]"
+            exit 0
+            ;;
+        *) echo "Unknown option: $arg" >&2; exit 2 ;;
+    esac
+done
+START_SERVICES="${EYRA_SETUP_START_SERVICES:-true}"
+if "$NON_INTERACTIVE"; then
+    START_SERVICES=false
+fi
+
 log_step() { echo -e "\n${CYAN}▶${NC} $1"; }
 log_ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
 log_warn() { echo -e "  ${YELLOW}⚠${NC} $1"; }
@@ -19,163 +33,141 @@ fail()     { echo -e "\n  ${RED}✗${NC} $1\n"; exit 1; }
 
 trap 'echo ""; echo -e "  ${DIM}Setup cancelled.${NC}"; echo ""; exit 130' INT
 
-# ── Header ────────────────────────────────────────────────────────────────────
-
 EYRA_DIR="$(cd "$(dirname "$0")" && pwd)"
 command -v realpath &>/dev/null && EYRA_DIR="$(realpath "$EYRA_DIR")"
+BIN_DIR="$HOME/.local/bin"
 
 echo ""
 echo -e "${BOLD}╭────────────────────────────────────────╮${NC}"
-echo -e "${BOLD}│${NC}  ${CYAN}Eyra${NC} · Setup                         ${BOLD}│${NC}"
-echo -e "${BOLD}│${NC}  ${DIM}Local-first voice agent${NC}                 ${BOLD}│${NC}"
+echo -e "${BOLD}│${NC}  ${CYAN}Eyra${NC} · First-run setup               ${BOLD}│${NC}"
+echo -e "${BOLD}│${NC}  ${DIM}Local-first voice coordinator${NC}          ${BOLD}│${NC}"
 echo -e "${BOLD}╰────────────────────────────────────────╯${NC}"
 
-# ── System requirements ───────────────────────────────────────────────────────
+log_step "Checking this Mac"
+[[ "$(uname -s)" == "Darwin" ]] || fail "Eyra currently supports macOS."
+[[ "$(uname -m)" == "arm64" ]] || fail "Eyra currently supports Apple Silicon Macs."
+log_ok "macOS $(sw_vers -productVersion) on Apple Silicon"
 
-log_step "Checking system requirements..."
-
-[[ "$(uname -s)" == "Darwin" ]] || fail "macOS required."
-[[ "$(uname -m)" == "arm64" ]] || fail "Apple Silicon required."
-log_ok "macOS $(sw_vers -productVersion) (Apple Silicon)"
-
-if ! command -v brew &>/dev/null; then
-    fail "Homebrew required. Install: https://brew.sh"
+if command -v brew &>/dev/null; then
+    log_ok "Homebrew"
+else
+    log_warn "Homebrew is not installed."
+    log_info "Install it from https://brew.sh, then rerun setup if you want automatic Ollama/Local Whisper guidance."
 fi
-log_ok "Homebrew"
 
-if ! python3 -c "import sys; assert sys.version_info >= (3, 11)" 2>/dev/null; then
-    log_info "Installing Python 3.11+..."
-    brew install python@3.11 || fail "Failed to install Python"
+if python3 -c "import sys; assert sys.version_info >= (3, 11)" 2>/dev/null; then
+    log_ok "Python $(python3 --version 2>&1 | cut -d' ' -f2)"
+elif command -v brew &>/dev/null; then
+    log_info "Installing Python 3.11+ with Homebrew..."
+    brew install python@3.11 || fail "Failed to install Python 3.11+."
+else
+    fail "Python 3.11+ is required. Install Python or Homebrew, then rerun setup."
 fi
-log_ok "Python $(python3 --version 2>&1 | cut -d' ' -f2)"
 
-if ! command -v uv &>/dev/null; then
-    log_info "Installing uv..."
+if command -v uv &>/dev/null; then
+    log_ok "uv $(uv --version | awk '{print $2}')"
+else
+    log_info "Installing uv in your user account..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
+    # shellcheck disable=SC1091
     source "$HOME/.local/bin/env" 2>/dev/null || export PATH="$HOME/.local/bin:$PATH"
-    command -v uv &>/dev/null || fail "uv installation failed. Restart your terminal and try again."
+    command -v uv &>/dev/null || fail "uv installation finished but uv is not on PATH. Open a new terminal and rerun setup."
+    log_ok "uv"
 fi
-log_ok "uv"
 
-# ── Python dependencies ───────────────────────────────────────────────────────
-
-log_step "Installing Python dependencies..."
+log_step "Installing Eyra dependencies"
+cd "$EYRA_DIR"
 uv sync -q
-log_ok "Dependencies installed"
+log_ok "Python environment ready"
 
-# ── Permissions ───────────────────────────────────────────────────────────────
-
-log_step "Checking permissions..."
-
-if command -v screencapture &>/dev/null; then
-    if screencapture -x /tmp/eyra_setup_test.png 2>/dev/null; then
-        rm -f /tmp/eyra_setup_test.png
-        log_ok "Screen capture"
-    else
-        log_warn "Screen capture: grant permission in System Settings > Privacy > Screen Recording"
-    fi
+log_step "Preparing local configuration"
+if "$NON_INTERACTIVE"; then
+    uv run eyra setup --non-interactive
+else
+    uv run eyra setup
 fi
 
-# Local Whisper (voice features)
-if ! command -v wh &>/dev/null; then
-    log_info "Installing Local Whisper..."
-    brew tap gabrimatic/local-whisper 2>/dev/null
-    brew install gabrimatic/local-whisper/local-whisper
+log_step "Checking local voice dependencies"
+if command -v wh &>/dev/null; then
+    log_ok "Local Whisper command found"
+elif command -v brew &>/dev/null; then
+    log_info "Installing Local Whisper from the existing tap..."
+    brew tap gabrimatic/local-whisper 2>/dev/null || true
+    brew install gabrimatic/local-whisper/local-whisper || log_warn "Local Whisper install did not complete. Voice can be repaired later with: brew tap gabrimatic/local-whisper && brew install local-whisper"
+else
+    log_warn "Local Whisper is not installed. Voice input/output will stay unavailable until you install it."
 fi
 
 if command -v wh &>/dev/null; then
-    log_ok "Local Whisper (installed)"
     if wh status 2>&1 | grep -qi running; then
-        log_ok "Local Whisper: running (voice features)"
-    else
+        log_ok "Local Whisper is running"
+    elif [[ "$START_SERVICES" == "true" ]]; then
         log_info "Starting Local Whisper..."
-        wh start 2>/dev/null || brew services start gabrimatic/local-whisper/local-whisper 2>/dev/null
-        sleep 1
+        wh start 2>/dev/null || brew services start gabrimatic/local-whisper/local-whisper 2>/dev/null || true
         if wh status 2>&1 | grep -qi running; then
-            log_ok "Local Whisper: running (voice features)"
+            log_ok "Local Whisper is running"
         else
-            log_warn "Local Whisper: installed but not running"
-            log_info "Start: wh start"
+            log_warn "Local Whisper is installed but not running. Start it later with: wh start"
         fi
+    else
+        log_warn "Local Whisper is installed but not running. Start it later with: wh start"
     fi
+fi
+
+log_step "Checking default local model provider"
+if command -v ollama &>/dev/null; then
+    log_ok "Ollama command found"
 else
-    log_warn "Local Whisper: not installed (voice stays off)"
-    log_info "Install: brew tap gabrimatic/local-whisper && brew install local-whisper"
+    log_warn "Ollama is not installed. Install it from https://ollama.com if you want the default local backend."
 fi
 
-# ── Provider configuration ────────────────────────────────────────────────────
-
-log_step "Configuring AI provider..."
-if ! PYTHONPATH="$EYRA_DIR/src" uv run python -c "from runtime.startup import maybe_run_startup_selector; maybe_run_startup_selector()"; then
-    fail "Provider configuration failed."
-fi
-log_ok "Provider configuration saved"
-
-log_step "Verifying backend and models..."
-if ! PYTHONPATH="$EYRA_DIR/src" uv run python - <<'PY'
-import asyncio
-
-from runtime.preflight import PreflightManager
-from utils.settings import Settings
-
-
-async def main() -> None:
-    settings = Settings.load_from_env()
-    result = await PreflightManager(settings).run()
-    if not result.backend_reachable:
-        raise SystemExit("Backend is not reachable.")
-    if result.models_missing:
-        raise SystemExit("Missing models: " + ", ".join(result.models_missing))
-
-
-asyncio.run(main())
-PY
-then
-    fail "Backend/model verification failed."
-fi
-log_ok "Backend and models verified"
-
-# ── Register command ──────────────────────────────────────────────────────────
-
-log_step "Registering eyra command..."
-
-BIN_DIR="$HOME/.local/bin"
+log_step "Registering commands"
 mkdir -p "$BIN_DIR"
 
 cat > "$BIN_DIR/eyra" <<LAUNCHER
 #!/bin/bash
-cd "$EYRA_DIR" && exec uv run python src/main.py "\$@"
+cd "$EYRA_DIR" && exec uv run eyra "\$@"
 LAUNCHER
 chmod +x "$BIN_DIR/eyra"
 
 cat > "$BIN_DIR/eyra-web" <<LAUNCHER
 #!/bin/bash
-cd "$EYRA_DIR" && exec uv run python -m web.server "\$@"
+cd "$EYRA_DIR" && exec uv run eyra web "\$@"
 LAUNCHER
 chmod +x "$BIN_DIR/eyra-web"
 
-EYRA_PATH_LINE='export PATH="$HOME/.local/bin:$PATH" # eyra'
-EYRA_ALIAS="alias eyra='$BIN_DIR/eyra' # eyra"
-EYRA_WEB_ALIAS="alias eyra-web='$BIN_DIR/eyra-web' # eyra"
-for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
-    [[ -f "$rc" ]] || continue
-    sed -i '' '/# eyra$/d' "$rc"
-    if ! grep -qF '.local/bin' "$rc"; then
-        echo "$EYRA_PATH_LINE" >> "$rc"
-    fi
-    echo "$EYRA_ALIAS" >> "$rc"
-    echo "$EYRA_WEB_ALIAS" >> "$rc"
+for name in eyra-doctor eyra-certify eyra-setup; do
+    subcommand="${name#eyra-}"
+    cat > "$BIN_DIR/$name" <<LAUNCHER
+#!/bin/bash
+cd "$EYRA_DIR" && exec uv run eyra "$subcommand" "\$@"
+LAUNCHER
+    chmod +x "$BIN_DIR/$name"
 done
 
+PATH_LINE='export PATH="$HOME/.local/bin:$PATH" # eyra'
+for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
+    [[ -f "$rc" ]] || continue
+    if ! grep -qF "$PATH_LINE" "$rc"; then
+        echo "$PATH_LINE" >> "$rc"
+    fi
+done
 export PATH="$BIN_DIR:$PATH"
-log_ok "eyra and eyra-web commands registered"
+log_ok "Commands registered in $BIN_DIR"
 
-# ── Done ──────────────────────────────────────────────────────────────────────
+log_step "Running doctor"
+if uv run eyra doctor; then
+    log_ok "Doctor passed"
+else
+    log_warn "Doctor found something to fix. The report above tells you what is missing."
+fi
 
 echo ""
-echo -e "${GREEN}${BOLD}  Setup complete${NC}"
+echo -e "${GREEN}${BOLD}Setup complete${NC}"
 echo ""
-echo -e "  ${BOLD}Run now:${NC} uv run python src/main.py"
-echo -e "  ${DIM}After opening a new terminal, run: eyra${NC}"
-echo -e "  ${DIM}For phone/browser access: WEB_UI_ENABLED=true uv run python -m web.server${NC}"
+echo -e "  Start Eyra: ${BOLD}eyra${NC}"
+echo -e "  Open the Web UI: ${BOLD}eyra web${NC}"
+echo -e "  Check support diagnostics: ${BOLD}eyra doctor --json${NC}"
+echo -e "  Run certification: ${BOLD}eyra certify${NC}"
 echo ""
+echo -e "  ${DIM}Eyra preserved existing .env, jobs, triggers, logs, and local data.${NC}"

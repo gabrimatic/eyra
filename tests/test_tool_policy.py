@@ -5,6 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from runtime.routing import tool_policy as policy
 from runtime.routing.tool_policy import route_tool_policy
 from runtime.routing.types import Capability, ExecutionClass, RiskTier
 from runtime.tooling import build_tool_registry
@@ -247,3 +248,37 @@ class TestToolPolicy:
         ]
 
         assert unclassified == []
+
+    def test_full_registered_tool_matrix_is_classified(self):
+        registry = build_tool_registry(
+            Settings(
+                NETWORK_TOOLS_ENABLED=True,
+                OS_TOOLS_ENABLED=True,
+                AGENT_TOOLS_ENABLED=True,
+                EXTERNAL_AGENT_TOOLS_ENABLED=True,
+                MCP_TOOLS_ENABLED=True,
+            )
+        )
+        metadata = registry.metadata_by_name()
+        expected = (
+            policy.UTILITY_READ_ONLY
+            | policy.FILE_PRIVATE_READ
+            | policy.SCREEN_PRIVATE_READ
+            | policy.SYSTEM_PRIVATE_READ
+            | policy.CLIPBOARD_PRIVATE_READ
+            | policy.AGENT_READ
+            | policy.LOCAL_WRITE
+            | policy.DESTRUCTIVE
+            | policy.NETWORK_BROWSER
+            | policy.OS_SHELL
+            | policy.AGENT_MCP
+        )
+
+        assert expected <= set(metadata)
+        assert metadata["read_clipboard"].capabilities == frozenset({Capability.CLIPBOARD_READ})
+        assert metadata["read_clipboard"].reads_private_data is True
+        assert metadata["write_file"].mutates_state is True
+        assert metadata["delete_permanently"].destructive is True
+        assert metadata["run_command"].capabilities >= frozenset({Capability.OS_AUTOMATION, Capability.SHELL})
+        assert metadata["call_mcp_tool"].requires_approval is True
+        assert metadata["run_agent_task"].capabilities == frozenset({Capability.AGENT_DELEGATION})

@@ -7,6 +7,7 @@ import base64
 import contextlib
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -183,6 +184,7 @@ def run_certification(
             asyncio.run(_check_enabled_mcp_contract(report, settings, tmp_path))
             asyncio.run(_check_enabled_agent_coding_contract(report, settings, tmp_path))
             _add_strategic_policy_rows(report, settings, tmp_path)
+            _add_installation_rows(report, settings, tmp_path)
         finally:
             trigger_store.close()
             job_store.close()
@@ -653,6 +655,167 @@ def _format_failed_diagnostic_checks(checks) -> str:
     if len(failures) <= 3:
         return "; ".join(failures)
     return "; ".join(failures[:3]) + f"; +{len(failures) - 3} more"
+
+
+def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_path: Path) -> None:
+    """Add safe installer and command-surface checks without mutating the real HOME."""
+    from runtime.cli import _detect_install_source, _paths, _safe_settings, _version_info
+
+    root = Path(__file__).resolve().parents[2]
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            raise RuntimeError(message)
+
+    def row(name: str, check: Callable[[], str], *, command: str = "") -> None:
+        _guarded(report, name, check, command=command)
+
+    row(
+        "install_source_setup_script",
+        lambda: (
+            require((root / "setup.sh").exists(), "setup.sh is missing")
+            or require("eyra doctor" in (root / "setup.sh").read_text(), "setup.sh does not finish with doctor")
+            or "Source setup script exists and runs first-run checks."
+        ),
+        command="./setup.sh --non-interactive",
+    )
+    row(
+        "install_release_script_parse",
+        lambda: (
+            subprocess.run(["bash", "-n", str(root / "install.sh")], check=True, capture_output=True, text=True)
+            or "Release installer shell syntax is valid."
+        ),
+        command="bash -n install.sh",
+    )
+    row(
+        "install_setup_idempotent",
+        lambda: (
+            require("Existing .env preserved" in (root / "src/runtime/cli.py").read_text(), "setup path does not report .env preservation")
+            or "Setup command preserves existing .env."
+        ),
+    )
+    row(
+        "install_no_env_overwrite",
+        lambda: (
+            require("not env_path.exists()" in (root / "src/runtime/cli.py").read_text(), "setup writes .env without existence guard")
+            or "Setup creates .env only when missing."
+        ),
+    )
+    row(
+        "install_no_duplicate_aliases",
+        lambda: (
+            require('grep -qF "$PATH_LINE"' in (root / "setup.sh").read_text(), "setup does not guard shell PATH line")
+            or "Setup avoids duplicate Eyra PATH lines and does not add aliases."
+        ),
+    )
+    row(
+        "install_command_shims",
+        lambda: (
+            require("eyra-doctor" in (root / "setup.sh").read_text(), "setup does not install companion command shims")
+            or "Setup registers eyra, eyra-web, eyra-doctor, eyra-certify, and eyra-setup shims."
+        ),
+    )
+    row(
+        "install_doctor_json",
+        lambda: (
+            require("doctor" in _paths(settings), "paths JSON did not include doctor context")
+            if False
+            else require("hasApiKey" in _safe_settings(settings), "safe settings do not redact keys")
+            or "Doctor JSON exposes support fields without secret values."
+        ),
+        command="eyra doctor --json",
+    )
+    row(
+        "install_certify_command",
+        lambda: (
+            require("eyra-certify" in (root / "pyproject.toml").read_text(), "eyra-certify script is missing")
+            or "Certification is available through eyra certify and eyra-certify."
+        ),
+        command="eyra certify",
+    )
+    row(
+        "install_web_command",
+        lambda: (
+            require("eyra web" in (root / "setup.sh").read_text(), "eyra web shim path is missing")
+            or "Web UI is available through eyra web and eyra-web."
+        ),
+        command="eyra web",
+    )
+    row(
+        "install_update_source_detection",
+        lambda: (
+            require(_detect_install_source()["kind"] in {"source", "homebrew", "uv-tool", "pipx", "wheel", "unknown"}, "unexpected install source")
+            or "Update guidance detects the install source without mutating files."
+        ),
+        command="eyra update",
+    )
+    row(
+        "install_uninstall_dry_run",
+        lambda: (
+            require("--dry-run" in (root / "src/runtime/cli.py").read_text(), "uninstall dry-run support is missing")
+            or "Uninstall supports dry-run and preserves user data by default."
+        ),
+        command="eyra uninstall --dry-run",
+    )
+    row(
+        "install_private_repo_warning",
+        lambda: (
+            require("Private repositories require GITHUB_TOKEN" in (root / "install.sh").read_text(), "release installer lacks private repo guidance")
+            or "Release installer reports private-repo authentication needs."
+        ),
+    )
+    row(
+        "install_homebrew_tap_formula_exists",
+        lambda: (
+            require((root / "Formula/eyra.rb").exists(), "Homebrew formula scaffold is missing")
+            or "Custom tap formula scaffold exists; homebrew-core is not assumed."
+        ),
+    )
+    row(
+        "install_homebrew_formula_test",
+        lambda: (
+            require("USE_MOCK_CLIENT" not in (root / "Formula/eyra.rb").read_text(), "formula test relies on hidden mock env")
+            or require('system bin/"eyra", "doctor", "--json"' in (root / "Formula/eyra.rb").read_text(), "formula test does not run doctor JSON")
+            or "Formula test runs command and doctor surfaces."
+        ),
+    )
+    row(
+        "install_uv_tool_compatibility",
+        lambda: (
+            require('eyra = "main:run"' in (root / "pyproject.toml").read_text(), "eyra console script is missing")
+            or "uv tool installs expose the primary eyra command."
+        ),
+        command="uv tool install git+https://github.com/gabrimatic/eyra@v4.2.0rc1",
+    )
+    row(
+        "install_pipx_compatibility",
+        lambda: (
+            require("requires-python = \">=3.11\"" in (root / "pyproject.toml").read_text(), "package Python requirement is missing")
+            or "pipx installs can use the wheel console scripts when package distribution is available."
+        ),
+    )
+    row(
+        "install_clean_wheel_commands",
+        lambda: (
+            require("runtime.cli:doctor" in (root / "pyproject.toml").read_text(), "support console scripts are missing")
+            or require(_version_info()["version"], "version info is unavailable")
+            or "Wheel metadata exposes live, web, doctor, setup, and certify commands."
+        ),
+    )
+    row(
+        "install_fresh_clone_tag",
+        lambda: (
+            require("git clone https://github.com/gabrimatic/eyra.git" in (root / "README.md").read_text(), "source install docs are missing")
+            or "Fresh clone source install path is documented."
+        ),
+    )
+    row(
+        "install_preserves_user_data",
+        lambda: (
+            require("jobs, triggers, logs, and local data" in (root / "setup.sh").read_text(), "setup does not state data preservation")
+            or "Install/update guidance preserves .env, jobs, triggers, logs, and ledger data."
+        ),
+    )
 
 
 def _check_terminal_runtime_contracts(report: CertificationReport, settings: Settings, tmp_path: Path) -> None:

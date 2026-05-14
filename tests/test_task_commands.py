@@ -41,7 +41,13 @@ def _session() -> LiveSession:
     return session
 
 
-def _session_with_fs(tmp_path: Path, *, model_tools: bool = True, agent_tools: bool = False) -> LiveSession:
+def _session_with_fs(
+    tmp_path: Path,
+    *,
+    model_tools: bool = True,
+    agent_tools: bool = False,
+    configured_agent: bool = False,
+) -> LiveSession:
     desktop = tmp_path / "Desktop"
     downloads = tmp_path / "Downloads"
     documents = tmp_path / "Documents"
@@ -50,6 +56,12 @@ def _session_with_fs(tmp_path: Path, *, model_tools: bool = True, agent_tools: b
     music = tmp_path / "Music"
     for folder in (desktop, downloads, documents, pictures, movies, music):
         folder.mkdir()
+    agent_config = tmp_path / "agents.json"
+    if configured_agent:
+        agent_config.write_text(
+            '{"agents":[{"name":"codex","type":"cli","command":["/usr/bin/codex","exec"],'
+            '"cwdPolicy":"request","requiresApproval":true,"timeoutSeconds":5}]}'
+        )
     settings = Settings(
         USE_MOCK_CLIENT=True,
         LIVE_LISTENING_ENABLED=False,
@@ -63,6 +75,8 @@ def _session_with_fs(tmp_path: Path, *, model_tools: bool = True, agent_tools: b
         TRIGGER_CHECK_INTERVAL_SECONDS=0.01,
         TRIGGER_TIMEOUT_SECONDS=2,
         AGENT_TOOLS_ENABLED=agent_tools,
+        EXTERNAL_AGENT_TOOLS_ENABLED=configured_agent,
+        EXTERNAL_AGENT_CONFIG_PATH=str(agent_config),
     )
     preflight = PreflightResult(
         backend_reachable=True,
@@ -859,22 +873,22 @@ class TestTaskCommands:
 
     def test_coding_job_waits_for_voice_approval_then_runs_agent(self, tmp_path, capsys):
         async def run():
-            session = _session_with_fs(tmp_path, agent_tools=True)
+            session = _session_with_fs(tmp_path, agent_tools=True, configured_agent=True)
             created = {}
 
             class FakeProcess:
                 returncode = 0
 
-                async def communicate(self):
+                async def communicate(self, *_args):
                     return b"coding done", b""
 
-            async def fake_create_subprocess_exec(*argv, cwd=None, stdout=None, stderr=None):
+            async def fake_create_subprocess_exec(*argv, cwd=None, stdin=None, stdout=None, stderr=None):
                 created["argv"] = argv
                 created["cwd"] = cwd
                 return FakeProcess()
 
-            with patch("tools.operator.shutil.which", return_value="/usr/bin/codex"):
-                with patch("tools.operator.asyncio.create_subprocess_exec", fake_create_subprocess_exec):
+            with patch("runtime.external_agents.shutil.which", return_value="/usr/bin/codex"):
+                with patch("runtime.external_agents.asyncio.create_subprocess_exec", fake_create_subprocess_exec):
                     await session._handle_user_input("Start a coding job with Codex to update the README.")
                     task = session.task_manager.list_tasks(include_recent=True)[0]
                     for _ in range(20):
@@ -893,7 +907,7 @@ class TestTaskCommands:
         assert "Approved" in out
         assert task.status == TaskStatus.COMPLETED
         assert "coding done" in task.final_result
-        assert created["argv"] == ("/usr/bin/codex", "exec", "update the README")
+        assert created["argv"] == ("/usr/bin/codex", "exec")
         jobs = session.job_store.list_jobs()
         assert jobs[0].normalized_task_spec["task_type"] == "coding.agent_job"
 

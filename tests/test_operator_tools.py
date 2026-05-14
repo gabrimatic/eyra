@@ -12,6 +12,7 @@ from PIL import Image
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from runtime.external_agents import AgentAdapterRegistry
 from tools.approval import ApprovalManager
 from tools.operator import (
     ActivateAppTool,
@@ -577,25 +578,50 @@ class TestAgentSessionTools:
 
 class TestRunAgentTaskTool:
     def test_agent_task_uses_bounded_async_subprocess(self, tmp_path):
+        config_path = tmp_path / "agents.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "agents": [
+                        {
+                            "name": "codex",
+                            "type": "cli",
+                            "command": ["/usr/bin/codex", "exec"],
+                            "cwdPolicy": "request",
+                            "requiresApproval": True,
+                            "timeoutSeconds": 5,
+                        }
+                    ]
+                }
+            )
+        )
+        settings = Settings(EXTERNAL_AGENT_TOOLS_ENABLED=True, EXTERNAL_AGENT_CONFIG_PATH=str(config_path))
+        agent_registry = AgentAdapterRegistry.from_settings(settings, allowed_roots=(tmp_path,), default_path=tmp_path)
         created = {}
 
         class FakeProcess:
             returncode = 0
 
-            async def communicate(self):
+            async def communicate(self, *_args):
                 return b"ok", b""
 
-        async def fake_create_subprocess_exec(*argv, cwd=None, stdout=None, stderr=None):
+        async def fake_create_subprocess_exec(*argv, cwd=None, stdin=None, stdout=None, stderr=None):
             created["argv"] = argv
             created["cwd"] = cwd
+            created["stdin"] = stdin
             created["stdout"] = stdout
             created["stderr"] = stderr
             return FakeProcess()
 
-        with patch("tools.operator.shutil.which", return_value="/usr/bin/codex"):
-            with patch("tools.operator.asyncio.create_subprocess_exec", fake_create_subprocess_exec):
+        with patch("runtime.external_agents.shutil.which", return_value="/usr/bin/codex"):
+            with patch("runtime.external_agents.asyncio.create_subprocess_exec", fake_create_subprocess_exec):
                 manager = ApprovalManager(ttl_seconds=60)
-                tool = RunAgentTaskTool(allowed_roots=(tmp_path,), default_path=tmp_path, approval_manager=manager)
+                tool = RunAgentTaskTool(
+                    allowed_roots=(tmp_path,),
+                    default_path=tmp_path,
+                    approval_manager=manager,
+                    agent_registry=agent_registry,
+                )
                 pending = _run(tool.execute(agent="codex", task="do work", cwd=str(tmp_path)))
                 approval_id = pending.content.split("/approve ", 1)[1].split()[0]
                 assert manager.approve(approval_id) is True
@@ -609,16 +635,36 @@ class TestRunAgentTaskTool:
                 )
 
         assert "exit_code=0" in result.content
-        assert created["argv"] == ("/usr/bin/codex", "exec", "do work")
+        assert created["argv"] == ("/usr/bin/codex", "exec")
         assert created["stdout"] == PIPE
 
     def test_agent_task_kills_child_on_timeout(self, tmp_path):
+        config_path = tmp_path / "agents.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "agents": [
+                        {
+                            "name": "codex",
+                            "type": "cli",
+                            "command": ["/usr/bin/codex", "exec"],
+                            "cwdPolicy": "request",
+                            "requiresApproval": True,
+                            "timeoutSeconds": 1,
+                        }
+                    ]
+                }
+            )
+        )
+        settings = Settings(EXTERNAL_AGENT_TOOLS_ENABLED=True, EXTERNAL_AGENT_CONFIG_PATH=str(config_path))
+        agent_registry = AgentAdapterRegistry.from_settings(settings, allowed_roots=(tmp_path,), default_path=tmp_path)
+        agent_registry.get("codex")._timeout_seconds = 0.01
         killed = {"value": False}
 
         class SlowProcess:
             returncode = None
 
-            async def communicate(self):
+            async def communicate(self, *_args):
                 await asyncio.sleep(10)
                 return b"", b""
 
@@ -631,22 +677,26 @@ class TestRunAgentTaskTool:
         async def fake_create_subprocess_exec(*_argv, **_kwargs):
             return SlowProcess()
 
-        with patch("tools.operator.shutil.which", return_value="/usr/bin/codex"):
-            with patch("tools.operator.asyncio.create_subprocess_exec", fake_create_subprocess_exec):
-                with patch("tools.operator._AGENT_TIMEOUT_SECONDS", 0.01):
-                    manager = ApprovalManager(ttl_seconds=60)
-                    tool = RunAgentTaskTool(allowed_roots=(tmp_path,), default_path=tmp_path, approval_manager=manager)
-                    pending = _run(tool.execute(agent="codex", task="slow", cwd=str(tmp_path)))
-                    approval_id = pending.content.split("/approve ", 1)[1].split()[0]
-                    assert manager.approve(approval_id) is True
-                    result = _run(
-                        tool.execute(
-                            agent="codex",
-                            task="slow",
-                            cwd=str(tmp_path),
-                            approval_id=approval_id,
-                        )
+        with patch("runtime.external_agents.shutil.which", return_value="/usr/bin/codex"):
+            with patch("runtime.external_agents.asyncio.create_subprocess_exec", fake_create_subprocess_exec):
+                manager = ApprovalManager(ttl_seconds=60)
+                tool = RunAgentTaskTool(
+                    allowed_roots=(tmp_path,),
+                    default_path=tmp_path,
+                    approval_manager=manager,
+                    agent_registry=agent_registry,
+                )
+                pending = _run(tool.execute(agent="codex", task="slow", cwd=str(tmp_path)))
+                approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+                assert manager.approve(approval_id) is True
+                result = _run(
+                    tool.execute(
+                        agent="codex",
+                        task="slow",
+                        cwd=str(tmp_path),
+                        approval_id=approval_id,
                     )
+                )
 
         assert killed["value"] is True
         assert "timed out" in result.content

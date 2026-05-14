@@ -15,7 +15,7 @@ from chat.complexity_scorer import ComplexityLevel, ComplexityScorer
 from chat.session_state import InteractionStyle, QualityMode
 from clients.ai_client import AIClient
 from clients.base_client import BaseAIClient
-from runtime.routing.types import RoutingDecision
+from runtime.routing.types import ExecutionClass, RoutingDecision
 from tools.registry import ToolRegistry
 from utils.image_history import manage_message_history
 from utils.mock_client import MockAIClient
@@ -178,6 +178,8 @@ async def process_task_stream(
             is_complex = True
             allowed_tool_names = routing_decision.tool_policy.allowed_tool_names
             require_tools = routing_decision.require_tools
+            if routing_decision.execution_class == ExecutionClass.TEXT_CHAT and not require_tools:
+                allowed_tool_names = frozenset()
             if require_tools and tool_registry and not allowed_tool_names:
                 yield routing_decision.fallback_plan.on_capability_missing
                 return

@@ -6,7 +6,6 @@ and on-demand tool use. Screen capture is controller-owned and happens only
 for screen requests.
 """
 
-import asyncio
 import logging
 import os
 import warnings
@@ -120,16 +119,9 @@ async def main() -> None:
 
 def run() -> None:
     """Console-script entry point."""
-    from runtime.startup import maybe_run_startup_selector
+    from runtime.cli import cli
 
-    maybe_run_startup_selector()
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n  Interrupted.\n")
-    except Exception as e:
-        logging.getLogger("Main").exception("Unhandled: %s", e)
-        print(f"\n  {RED}Something went wrong.{NC} Check {get_log_file_path()} and try again.\n")
+    raise SystemExit(cli())
 
 
 if __name__ == "__main__":

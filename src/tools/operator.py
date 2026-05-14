@@ -1638,14 +1638,12 @@ class RunAgentTaskTool(BaseTool):
                         f"{result.output}"
                     )
                 )
-        binary = shutil.which(agent)
-        if not binary:
-            return ToolResult(content=f"{agent} is not installed or not on PATH.")
-        if agent == "codex":
-            argv = [binary, "exec", task]
-        else:
-            argv = [binary, task]
-        return await self._run_agent_process(agent, argv, workdir)
+        return ToolResult(
+            content=(
+                f"{agent} is not configured for execution. Add a static CLI adapter in "
+                "EXTERNAL_AGENT_CONFIG_PATH and enable EXTERNAL_AGENT_TOOLS_ENABLED=true."
+            )
+        )
 
     async def _run_agent_process(self, agent: str, argv: list[str], workdir: Path) -> ToolResult:
         proc = await asyncio.create_subprocess_exec(
