@@ -5,6 +5,8 @@ description: "Use optional terminal-agent and stdio MCP bridges under Eyra's pol
 
 External agents and MCP servers are optional workers. Eyra owns the route, sandbox, approvals, timeouts, output caps, logs, cancellation, and final status.
 
+For new worker integrations, prefer [Connectors](/guides/connectors). The connector manifest is the newer universal contract for CLI, MCP, local HTTP, remote HTTP, browser-agent, coding-agent, and guarded Python-module workers. The older external-agent and MCP tool gates remain available for built-in adapter workflows.
+
 ## Capability gates
 
 ```env

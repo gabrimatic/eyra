@@ -32,6 +32,13 @@ Every user request goes through `RuntimeRouter` before model execution. The rout
 | `FILESYSTEM_ACTION` | File action through tools |
 | `BROWSER_TASK` | Network/browser work |
 | `CODING_AGENT_TASK` | Agent status or delegation |
+| `CONNECTOR_TASK` | Connector mentioned but no configured connector metadata |
+| `CONNECTOR_LOCAL` | Accepted local connector |
+| `CONNECTOR_REMOTE` | Accepted remote connector |
+| `CONNECTOR_FILE_READ` | Connector with file-read capability |
+| `CONNECTOR_FILE_WRITE` | Connector with file-write capability |
+| `CONNECTOR_NETWORK` | Connector with network capability |
+| `CONNECTOR_UI_CONTROL` | Connector with UI-control capability |
 | `REALTIME_VOICE_TURN` | Online Realtime path |
 
 ## Capability examples
@@ -46,6 +53,10 @@ Every user request goes through `RuntimeRouter` before model execution. The rout
 | `NETWORK`, `BROWSER_CONTROL` | Remote web/browser work |
 | `OS_AUTOMATION`, `SHELL` | Local OS command/control |
 | `MCP`, `AGENT_DELEGATION` | External worker bridges |
+| `CONNECTOR_TASK`, `CONNECTOR_LOCAL` | Connector registry execution |
+| `CONNECTOR_REMOTE`, `CONNECTOR_NETWORK` | Connector leaves local-only boundary or uses network |
+| `CONNECTOR_FILE_READ`, `CONNECTOR_FILE_WRITE` | Connector file access |
+| `CONNECTOR_UI_CONTROL` | Connector controls browser or UI |
 
 ## Model selection
 
@@ -66,5 +77,8 @@ Settings gates deny whole categories:
 - `AGENT_TOOLS_ENABLED=false`
 - `EXTERNAL_AGENT_TOOLS_ENABLED=false`
 - `MCP_TOOLS_ENABLED=false`
+- `CONNECTORS_ENABLED=false`
 
 Denied tools stay visible in route traces with reasons.
+
+Connector jobs run through `ConnectorRegistry`, not model-selected tools. Route traces include connector id, risk tier, capabilities, privacy boundary, approval requirement, and acceptance state after redaction.

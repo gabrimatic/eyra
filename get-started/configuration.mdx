@@ -76,9 +76,23 @@ OS_TOOLS_ENABLED=false
 AGENT_TOOLS_ENABLED=false
 EXTERNAL_AGENT_TOOLS_ENABLED=false
 MCP_TOOLS_ENABLED=false
+CONNECTORS_ENABLED=false
 ```
 
 Enable only the surface you need. Eyra still applies route policy, sandboxing, approval checks, and privacy reporting after a capability is enabled.
+
+## Connectors
+
+```env
+CONNECTORS_CONFIG_PATH=~/.config/eyra/connectors.json
+CONNECTORS_ALLOWED_ROOTS=
+CONNECTORS_TIMEOUT_SECONDS=600
+CONNECTORS_OUTPUT_CAP_BYTES=32768
+CONNECTORS_ALLOW_REMOTE=false
+CONNECTORS_ALLOW_PYTHON_MODULE=false
+```
+
+Connectors are declared workers such as CLIs, MCP runners, local HTTP services, remote HTTP services, browser agents, coding agents, or guarded Python modules. Keep `CONNECTORS_ALLOWED_ROOTS` empty to reuse `FILESYSTEM_ALLOWED_PATHS`. Remote and Python-module connectors stay refused until their explicit opt-ins are enabled.
 
 ## Web UI
 

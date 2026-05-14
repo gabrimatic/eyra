@@ -64,6 +64,18 @@ description: "Complete .env reference for Eyra."
 | `MCP_TOOLS_ENABLED` | `false` | stdio MCP bridge |
 | `MCP_CONFIG_PATH` | `~/.config/eyra/mcp.json` | MCP config |
 
+## Connectors
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `CONNECTORS_ENABLED` | `false` | Enable universal connector workers |
+| `CONNECTORS_CONFIG_PATH` | `~/.config/eyra/connectors.json` | Connector manifest config |
+| `CONNECTORS_ALLOWED_ROOTS` | empty | Connector sandbox roots, falls back to `FILESYSTEM_ALLOWED_PATHS` |
+| `CONNECTORS_TIMEOUT_SECONDS` | `600` | Maximum connector runtime |
+| `CONNECTORS_OUTPUT_CAP_BYTES` | `32768` | Maximum connector output stored or returned |
+| `CONNECTORS_ALLOW_REMOTE` | `false` | Allow remote HTTP connectors |
+| `CONNECTORS_ALLOW_PYTHON_MODULE` | `false` | Allow guarded Python module connectors |
+
 ## Filesystem
 
 | Setting | Default | Purpose |

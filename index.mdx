@@ -15,7 +15,7 @@ Default behavior: Ollama at localhost, Local Whisper for voice, Silero VAD in pr
     Run spoken turns, dictation, approvals, interruption, and hands-free status.
   </Card>
   <Card title="Understand the architecture" icon="network" href="/architecture/overview">
-    Follow the runtime, router, tools, jobs, Web UI, and privacy boundary.
+    Follow the runtime, router, tools, connectors, jobs, Web UI, and privacy boundary.
   </Card>
   <Card title="Verify releases" icon="badge-check" href="/reference/certification">
     Run the local voice-to-computer certification matrix and project checks.
@@ -26,7 +26,7 @@ Default behavior: Ollama at localhost, Local Whisper for voice, Silero VAD in pr
 
 Eyra is the coordinator, not the worker pile.
 
-It keeps the local voice-to-computer workflow useful without making privacy and recovery vague. Tools, Web UI, Realtime voice, MCP, OS control, browser work, and terminal-agent delegation are available only when you enable the matching capability.
+It keeps the local voice-to-computer workflow useful without making privacy and recovery vague. Tools, Web UI, Realtime voice, connectors, MCP, OS control, browser work, and terminal-agent delegation are available only when you enable the matching capability.
 
 ## Runtime model
 
@@ -37,7 +37,7 @@ input
         ↓
 local policy router
         ↓
-deterministic action, model turn, tool loop, or background task
+deterministic action, model turn, tool loop, connector job, or background task
         ↓
 status, speech, logs, ledger, artifacts, cancellation, undo
 ```
@@ -54,9 +54,10 @@ status, speech, logs, ledger, artifacts, cancellation, undo
 | Network tools | Disabled |
 | Web UI | Disabled |
 | Realtime voice | Disabled |
+| Connectors | Disabled |
 | External agents and MCP | Disabled |
 
-Data leaves the machine only when you configure a remote model provider, enable Realtime voice, or enable network-backed tools and use them.
+Data leaves the machine only when you configure a remote model provider, enable Realtime voice, enable network-backed tools and use them, or opt into a remote connector.
 
 ## Main paths
 
@@ -65,5 +66,6 @@ Data leaves the machine only when you configure a remote model provider, enable 
 - Tune settings: [Configuration](/get-started/configuration)
 - Control files safely: [Local file work](/guides/local-file-work)
 - Run long work: [Background tasks](/guides/background-tasks)
+- Attach external workers: [Connectors](/guides/connectors)
 - Attach a browser or phone: [Web UI](/guides/web-ui)
 - Build or modify Eyra: [Local development](/development/local-development)

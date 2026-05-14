@@ -29,6 +29,8 @@ Token locations:
 | `/api/approvals` | Pending approvals | Yes |
 | `/api/capabilities` | Redacted capability snapshot | Yes |
 | `/api/route/last` | Last route trace | Yes |
+| `/api/connectors` | Connector config, manifest snapshots, acceptance states, and privacy summaries | Yes |
+| `/api/connector/<id>` | One connector snapshot | Yes |
 
 ## POST endpoints
 
@@ -44,10 +46,13 @@ Token locations:
 | `/api/local-speak` | Speak local text through Local Whisper |
 | `/api/realtime-session` | Mint OpenAI Realtime ephemeral client secret |
 | `/api/realtime-tool-call` | Call a safe server-side Realtime tool |
+| `/api/connector/test` | Run connector acceptance checks |
+| `/api/connector/run` | Start a connector background job |
+| `/api/connector/cancel` | Cancel a running connector job by connector id |
 
 ## Request limits
 
-`WEB_UI_MAX_REQUEST_BYTES` applies to chat requests, task APIs, and browser audio uploads. `/api/local-voice-turn` has a hard server-side cap for browser audio.
+`WEB_UI_MAX_REQUEST_BYTES` applies to chat requests, task APIs, connector APIs, and browser audio uploads. `/api/local-voice-turn` has a hard server-side cap for browser audio.
 
 ## Redaction
 
@@ -57,6 +62,7 @@ Web payload helpers redact:
 - Key, secret, password, and token-looking values.
 - OpenAI-style API keys.
 - Local home paths.
+- Connector privacy destinations and connector output.
 
 ## Runtime scope
 

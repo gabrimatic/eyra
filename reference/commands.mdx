@@ -53,6 +53,17 @@ Commands are controller-owned. They are intercepted before model routing and nev
 | `/approve <id>` | Approve one exact action |
 | `/reject <id>` | Reject one exact action |
 
+## Connectors
+
+| Command | Behavior |
+| --- | --- |
+| `/connectors` | Show configured connectors and acceptance states |
+| `/connector <id>` | Show one connector's type, risk, capabilities, privacy, and acceptance state |
+| `/connector test <id>` | Run the connector acceptance checks |
+| `/connector enable <id>` | Enable a connector for this session |
+| `/connector disable <id>` | Disable a connector for this session |
+| `/connector run <id> <task>` | Start a connector background job |
+
 ## Local state
 
 | Command | Behavior |
@@ -76,6 +87,10 @@ Eyra also handles common voice phrases locally:
 - `what changed`
 - `approve that`
 - `reject that`
+- `list connectors`
+- `show connector <id>`
+- `ask connector <id> to ...`
+- `cancel connector <id>`
 - `read the options`
 - `choose number two`
 - `start dictation`

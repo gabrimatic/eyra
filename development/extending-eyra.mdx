@@ -42,6 +42,22 @@ No provider class is needed when the provider speaks OpenAI-compatible `/v1/chat
 
 Document the required `API_BASE_URL`, `API_KEY`, and model names. Preflight should keep failures human-readable.
 
+## Add a connector type or connector behavior
+
+Use `src/runtime/connectors/` when Eyra needs to hand work to an external worker while keeping route policy, approval, logs, artifacts, and cancellation in Eyra.
+
+Required pieces:
+
+- Manifest validation in `manifest.py`.
+- Structured contracts in `types.py`.
+- Registry snapshots and acceptance state in `registry.py`.
+- Bounded execution in `runner.py`.
+- Terminal and Web command/API wiring.
+- Route execution class and capability mapping.
+- Redaction, sandbox, timeout, and output-cap tests.
+- Certification rows when the behavior is release-critical.
+- Updates to [Connectors](/guides/connectors), [Settings](/reference/settings), [Commands](/reference/commands), and [Web endpoints](/reference/web-endpoints).
+
 ## Add a long-running capability
 
 Use background tasks when work can outlive the immediate turn.

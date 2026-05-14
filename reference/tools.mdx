@@ -62,6 +62,8 @@ Enabled by `OS_TOOLS_ENABLED=true`.
 
 Enabled by `AGENT_TOOLS_ENABLED`, `EXTERNAL_AGENT_TOOLS_ENABLED`, or `MCP_TOOLS_ENABLED`.
 
+Connector jobs are separate from model-selected function tools. They run through `ConnectorRegistry`, background tasks, approvals, and the durable job ledger after `CONNECTORS_ENABLED=true` and acceptance checks pass.
+
 | Tool | Purpose |
 | --- | --- |
 | `get_agent_status`, `list_agent_sessions`, `get_agent_session_content` | Agent state reads |
