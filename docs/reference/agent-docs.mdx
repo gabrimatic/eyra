@@ -73,6 +73,16 @@ cd docs
 mint dev --no-open --disable-openapi
 ```
 
+## GitHub Pages
+
+The repository also publishes the Mintlify export to GitHub Pages from the `docs/` directory. On every push to `master` that changes docs, `.github/workflows/docs-pages.yml` runs `mint export`, patches root-relative paths for GitHub project Pages, uploads the static artifact, and deploys it.
+
+The public GitHub Pages URL is:
+
+```text
+https://gabrimatic.github.io/eyra/
+```
+
 Score a hosted site:
 
 ```bash

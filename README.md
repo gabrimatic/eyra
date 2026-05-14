@@ -547,6 +547,7 @@ eyra/
 ├── setup.sh
 ├── docs/                         # Mintlify documentation site
 ├── internal-docs/                # Source notes that are not part of the public docs site
+├── scripts/build_github_pages_docs.py
 ├── src/
 │   ├── main.py                     # Entry point, preflight, live session launch
 │   ├── runtime/
