@@ -44,6 +44,7 @@ Mintlify requires Node.js 20.17+ for the CLI.
 
 ```bash
 npm i -g mint
+cd docs
 mint validate --disable-openapi
 mint broken-links --check-anchors
 mint a11y
@@ -52,12 +53,14 @@ mint a11y
 Preview:
 
 ```bash
+cd docs
 mint dev --no-open --disable-openapi
 ```
 
 Disable Mintlify CLI telemetry for local checks:
 
 ```bash
+cd docs
 MINTLIFY_TELEMETRY_DISABLED=1 mint validate --disable-openapi
 ```
 

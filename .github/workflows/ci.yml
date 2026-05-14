@@ -95,14 +95,17 @@ jobs:
       - name: Validate docs
         env:
           MINTLIFY_TELEMETRY_DISABLED: "1"
+        working-directory: docs
         run: mint validate --disable-openapi
 
       - name: Check docs links
         env:
           MINTLIFY_TELEMETRY_DISABLED: "1"
+        working-directory: docs
         run: mint broken-links --check-anchors
 
       - name: Check docs accessibility
         env:
           MINTLIFY_TELEMETRY_DISABLED: "1"
+        working-directory: docs
         run: mint a11y
