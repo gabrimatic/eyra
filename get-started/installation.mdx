@@ -5,15 +5,17 @@ description: "Install Eyra, configure the local runtime, and start the terminal 
 
 Runtime: macOS, Python 3.11+, Homebrew, `uv`, and an OpenAI-compatible provider. Preferred setup: Ollama at `localhost:11434` and Local Whisper for speech.
 
+## Source checkout
+
 ```bash
 git clone https://github.com/gabrimatic/eyra.git
 cd eyra
 chmod +x setup.sh && ./setup.sh
 ```
 
-`setup.sh` creates `.env`, installs dependencies, checks the backend and models, checks Local Whisper when voice is enabled, and registers the `eyra` command.
+`setup.sh` creates `.env`, installs dependencies, checks the backend and models, checks Local Whisper when voice is enabled, and registers the `eyra` command. It preserves an existing `.env`, removes older shell lines ending in `# eyra`, then adds one current `~/.local/bin` PATH line.
 
-## Run from source
+Run from source:
 
 ```bash
 uv run python src/main.py
@@ -24,6 +26,49 @@ After your shell sees `~/.local/bin`, run:
 ```bash
 eyra
 ```
+
+## Installer script
+
+`install.sh` installs a release archive into a managed directory and runs non-interactive setup.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gabrimatic/eyra/master/install.sh | bash
+```
+
+Safety checks:
+
+- Requires macOS on Apple Silicon.
+- Requires Python 3.11+; installs `python@3.11` through Homebrew when possible.
+- Installs `uv` when missing.
+- Allows install directories only under `~/.local/share/eyra/`, `~/Applications/`, or `/opt/`.
+- Refuses `/`, `$HOME`, and `~/.local` as install targets.
+- Preserves existing installs by moving them to a timestamped backup.
+- Rolls back the install directory if first-run setup fails.
+
+Supported overrides:
+
+```bash
+EYRA_VERSION=v4.2.0rc1 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
+```
+
+Private repositories require `GITHUB_TOKEN`.
+
+## Homebrew tap
+
+Current formula status: private beta scaffold.
+
+```bash
+brew install gabrimatic/eyra/eyra
+```
+
+The checked-in formula installs from the `master` branch and reports `4.2.0rc1` until a signed/tagged release asset and checksum exist. Treat it as tap preparation, not a stable public formula.
+
+Formula behavior:
+
+- Runs `uv sync --frozen --no-dev` at install time.
+- Command shims use `uv run --frozen --no-sync`.
+- Provides `eyra`, `eyra-web`, `eyra-doctor`, and `eyra-certify`.
+- Runs `eyra version` and mock `eyra doctor --json` in the formula test without requiring a live backend.
 
 ## Local provider
 

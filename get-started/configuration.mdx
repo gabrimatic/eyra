@@ -3,7 +3,19 @@ title: "Configuration"
 description: "Configure providers, models, voice, tools, Web UI, Realtime voice, and sandbox roots."
 ---
 
-`.env` is the single source of truth. `Settings.load_from_env()` reads every setting with defaults, validates booleans and numeric ranges, and feeds the runtime, Web UI, routing, tools, and voice stack.
+`.env` is the single source of truth for an Eyra runtime. `Settings.load_from_env()` reads every setting with defaults, validates booleans and numeric ranges, and feeds the runtime, Web UI, routing, tools, and voice stack.
+
+## File precedence
+
+Installed Eyra reads:
+
+```text
+~/.config/eyra/.env
+```
+
+A source checkout can override that with the repo-local `.env`, but only when the current directory looks like the Eyra source tree (`pyproject.toml` names `eyra` and `src/main.py` exists). Eyra does not read unrelated project `.env` files from arbitrary current directories.
+
+Process environment variables override both files.
 
 ## Provider
 

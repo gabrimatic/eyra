@@ -10,6 +10,7 @@ Use this page when you need to jump from docs to implementation.
 | Topic | Source | Tests |
 | --- | --- | --- |
 | Entry point | `src/main.py` | `tests/test_main.py` |
+| CLI support commands | `src/runtime/cli.py` | `tests/test_main.py`, `tests/test_package_metadata.py` |
 | Startup setup | `src/runtime/startup.py` | `tests/test_startup.py` |
 | Preflight | `src/runtime/preflight.py` | `tests/test_preflight.py` |
 | Live session | `src/runtime/live_session.py` | `tests/test_runtime.py` |
@@ -69,5 +70,7 @@ Use this page when you need to jump from docs to implementation.
 | Topic | Source | Tests |
 | --- | --- | --- |
 | Certification | `scripts/certify_voice_to_computer.py`, `src/runtime/certification.py` | `tests/test_certification.py` |
+| Installer script | `install.sh`, `setup.sh` | `tests/test_main.py`, certification matrix |
+| Homebrew formula | `Formula/eyra.rb` | `tests/test_package_metadata.py`, certification matrix |
 | Package metadata | `pyproject.toml` | `tests/test_package_metadata.py` |
 | Public docs | `README.md`, `docs/PRODUCT_STRATEGY.md`, Mintlify MDX | Mintlify CLI checks |
