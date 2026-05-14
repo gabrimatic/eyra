@@ -63,7 +63,7 @@ logger = logging.getLogger(__name__)
 
 _COMMANDS = {
     "/voice", "/voice-diagnose", "/voice-test", "/mute", "/unmute",
-    "/goal", "/status", "/quit", "/clear", "/route",
+    "/goal", "/status", "/quit", "/clear", "/route", "/handsfree",
     "/mode", "/help", "/tasks", "/task", "/cancel", "/pause", "/resume",
     "/approvals", "/approve", "/reject", "/operations", "/capabilities", "/context", "/triggers", "/trigger",
 }
@@ -134,6 +134,7 @@ class LiveSession:
         self._pending_correction: dict[str, str] | None = None
         self._pending_options: dict | None = None
         self._dictation = DictationState()
+        self._hands_free_mode = _settings_bool(settings, "HANDS_FREE_MODE", False)
         self.job_store = DurableJobStore(_settings_str(settings, "JOB_STORE_PATH", "~/.local/share/eyra/jobs.sqlite3"))
         self.trigger_store = TriggerStore(
             _settings_str(settings, "TRIGGER_STORE_PATH", "~/.local/share/eyra/triggers.sqlite3")
@@ -301,8 +302,8 @@ class LiveSession:
                 self.state.current_status = RuntimeStatus.LISTENING
                 try:
                     # This blocks until speech is detected and transcribed,
-                    # or until cancelled. The mic remains active during TTS so
-                    # a real user barge-in can interrupt speech output.
+                    # or until cancelled. Normal TTS barge-in is handled by
+                    # _stream_response() while the main voice loop yields.
                     text = await self.speech.listen()
                 except Exception as e:
                     consecutive_errors += 1
@@ -398,6 +399,9 @@ class LiveSession:
             if not self.state.speech_enabled:
                 print("  Speech output is off. Run /voice on or /unmute after Local Whisper is available.")
                 return True
+            if not self.state.listening_enabled:
+                print("  Voice listening is off. Run /voice on before testing voice interruption.")
+                return True
             print("  Voice interruption test started. Speak over Eyra now; TTS should stop and your next input should process.")
             await self.speech.speak(
                 "This is Eyra's voice interruption test. Start speaking now. "
@@ -429,6 +433,21 @@ class LiveSession:
 
         if command == "/status":
             self._print_status()
+            return True
+
+        if command == "/handsfree":
+            arg = lower_parts[1] if len(lower_parts) > 1 else ""
+            if arg == "on":
+                self._hands_free_mode = True
+                print_status_change("Hands-free mode on")
+            elif arg == "off":
+                self._hands_free_mode = False
+                print_status_change("Hands-free mode off")
+            else:
+                print(
+                    "  Hands-free mode is "
+                    f"{'on' if self._hands_free_mode else 'off'}. Usage: /handsfree on|off"
+                )
             return True
 
         if command == "/route":
@@ -624,6 +643,7 @@ class LiveSession:
                 ("MCP", "on" if _settings_bool(self.settings, "MCP_TOOLS_ENABLED", False) else "off"),
                 ("Agents", "on" if _settings_bool(self.settings, "AGENT_TOOLS_ENABLED", False) else "off"),
                 ("Realtime", "on" if _settings_bool(self.settings, "REALTIME_VOICE_ENABLED", False) else "off"),
+                ("Hands-free", "on" if self._hands_free_mode else "off"),
                 ("Sandbox", _settings_str(self.settings, "FILESYSTEM_ALLOWED_PATHS", "")),
             ],
         )
@@ -1041,10 +1061,13 @@ class LiveSession:
         return True
 
     async def _run_coding_job_task(self, task: BackgroundTask, *, agent: str, instruction: str) -> str:
-        tool_name = "run_codex_task" if agent == "codex" else "run_openclaw_agent"
+        tool_name = "run_codex_task" if agent == "codex" else "run_openclaw_agent" if agent == "openclaw" else "run_agent_task"
         cwd = _settings_str(self.settings, "FILESYSTEM_DEFAULT_PATH", "")
         task.mark_progress(f"Waiting for approval to run {agent}")
-        pending = await self._tool_registry.execute(tool_name, json.dumps({"task": instruction, "cwd": cwd}))
+        payload = {"task": instruction, "cwd": cwd}
+        if tool_name == "run_agent_task":
+            payload["agent"] = agent
+        pending = await self._tool_registry.execute(tool_name, json.dumps(payload))
         approval_id = approval_id_from_text(pending.content)
         if not approval_id:
             if pending.content.startswith(f"{agent} is not installed"):
@@ -1059,11 +1082,11 @@ class LiveSession:
                 raise RuntimeError("Coding job rejected.")
             if approval.approved:
                 task.mark_progress(f"Running coding job with {agent}")
-                result = await self._tool_registry.execute(
-                    tool_name,
-                    json.dumps({"task": instruction, "cwd": cwd, "approval_id": approval_id}),
-                )
-                if "exit_code=0" in result.content:
+                run_payload = {"task": instruction, "cwd": cwd, "approval_id": approval_id}
+                if tool_name == "run_agent_task":
+                    run_payload["agent"] = agent
+                result = await self._tool_registry.execute(tool_name, json.dumps(run_payload))
+                if "exit_code=0" in result.content or "status=completed" in result.content:
                     return result.content
                 raise RuntimeError(result.content)
             await asyncio.sleep(0.05)
@@ -2143,6 +2166,7 @@ class LiveSession:
     ):
         self._busy.set()
         self.speech.cancel_listen()
+        barge_in_text: str | None = None
         try:
             self.state.current_status = RuntimeStatus.THINKING
             await play_sound("process")
@@ -2215,12 +2239,18 @@ class LiveSession:
             if full_response.strip():
                 self.state.conversation_messages.append({"role": "assistant", "content": full_response})
                 self.state.current_status = RuntimeStatus.SPEAKING
-                await self.speech.speak(full_response.strip()[:200])
-                await self.speech.wait_for_speech()
+                spoken_text = full_response.strip()[:200]
+                await self.speech.speak(spoken_text)
+                barge_in_text = await self.speech.wait_for_speech_or_barge_in(spoken_text)
 
             self.state.current_status = RuntimeStatus.IDLE
         finally:
             self._busy.clear()
+        if barge_in_text:
+            self.state.last_user_input_at = time.time()
+            await play_sound("listen")
+            print(f"\r\033[2K  {YELLOW}(voice){NC} {barge_in_text}")
+            self._schedule_input(barge_in_text, InteractionStyle.VOICE)
 
     def _on_task_event(self, task: BackgroundTask, event: str) -> None:
         if not _settings_bool(self.settings, "TASK_STATUS_UPDATES", True):

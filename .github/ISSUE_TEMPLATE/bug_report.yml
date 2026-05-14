@@ -122,6 +122,33 @@ body:
       required: false
 
   - type: textarea
+    id: capabilities_route
+    attributes:
+      label: /capabilities and /route last
+      description: Paste `/capabilities` and `/route last` output when the issue involves routing, tools, privacy, Web UI, Realtime, MCP, or external agents. Redact paths, URLs with tokens, and secrets.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: certification
+    attributes:
+      label: Certification output
+      description: Paste relevant `uv run python scripts/certify_voice_to_computer.py` output if you ran it.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: web_agent_context
+    attributes:
+      label: Web, Realtime, MCP, or external-agent context
+      description: Include Web URL mode (localhost/phone), redacted `/api/health` or `/api/capabilities`, task/job id, approval id/type, enabled tools, external agents configured, and job logs/artifacts with secrets redacted.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
     id: voice_diagnose
     attributes:
       label: /voice-diagnose output for voice issues

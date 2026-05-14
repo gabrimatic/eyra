@@ -9,8 +9,8 @@ def parse_coding_job_request(text: str) -> tuple[str, str] | None:
     """Return the requested terminal agent and instruction when text asks for a coding job."""
     stripped = " ".join(text.strip().split())
     patterns = [
-        r"(?:start|create|run)\s+(?:a\s+)?coding job(?:\s+with\s+(?P<agent>codex|openclaw))?\s+to\s+(?P<task>.+)",
-        r"(?:ask|tell)\s+(?P<agent>codex|openclaw)\s+to\s+(?P<task>.+)",
+        r"(?:start|create|run)\s+(?:a\s+)?coding job(?:\s+with\s+(?P<agent>[a-z0-9_.-]+))?\s+to\s+(?P<task>.+)",
+        r"(?:ask|tell)\s+(?P<agent>[a-z0-9_.-]+)\s+to\s+(?P<task>.+)",
     ]
     for pattern in patterns:
         match = re.fullmatch(pattern, stripped, re.I)

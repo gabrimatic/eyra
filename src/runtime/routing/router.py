@@ -97,13 +97,18 @@ class RuntimeRouter:
         text = envelope.text
         if envelope.source.value == "realtime_voice":
             return ExecutionClass.REALTIME_VOICE_TURN
-        if self._requires_shell(text) or self._requires_os_automation(text) or self._requires_mcp(text):
+        if (
+            self._requires_shell(text)
+            or self._requires_os_automation(text)
+            or self._requires_mcp(text)
+            or self._requires_clipboard_read(text)
+        ):
             return ExecutionClass.TOOL_ASSISTED_CHAT
         if needs_screen_context(text):
             return ExecutionClass.SCREEN_ANALYSIS
         if extract_pdf_path(text):
             return ExecutionClass.PDF_ANALYSIS
-        if re.search(r"\b(codex|openclaw|agent|coding job)\b", text, re.I):
+        if self._requires_agent_status(text) or re.search(r"\b(codex|openclaw|agent|coding job)\b", text, re.I):
             return ExecutionClass.CODING_AGENT_TASK
         if requires_network(text):
             return ExecutionClass.BROWSER_TASK
@@ -125,7 +130,10 @@ class RuntimeRouter:
         elif execution_class == ExecutionClass.BROWSER_TASK:
             caps.update({Capability.NATIVE_TOOLS, Capability.NETWORK, Capability.BROWSER_CONTROL})
         elif execution_class == ExecutionClass.CODING_AGENT_TASK:
-            caps.update({Capability.AGENT_DELEGATION, Capability.FILE_READ, Capability.FILE_WRITE})
+            if RuntimeRouter._requires_agent_delegation(envelope.text):
+                caps.update({Capability.AGENT_DELEGATION, Capability.FILE_READ, Capability.FILE_WRITE})
+            else:
+                caps.add(Capability.AGENT_READ)
         elif execution_class in {
             ExecutionClass.TOOL_ASSISTED_CHAT,
             ExecutionClass.BACKGROUND_TASK,
@@ -144,6 +152,8 @@ class RuntimeRouter:
                 caps.add(Capability.OS_AUTOMATION)
             if RuntimeRouter._requires_mcp(envelope.text):
                 caps.add(Capability.MCP)
+            if RuntimeRouter._requires_clipboard_read(envelope.text):
+                caps.add(Capability.CLIPBOARD_READ)
         return frozenset(caps)
 
     @staticmethod
@@ -177,10 +187,36 @@ class RuntimeRouter:
         )
 
     @staticmethod
+    def _requires_clipboard_read(text: str) -> bool:
+        return bool(re.search(r"\b(what'?s|what is|read|show|paste|check).{0,30}\bclipboard\b", text, re.I))
+
+    @staticmethod
+    def _requires_agent_status(text: str) -> bool:
+        return bool(
+            re.search(
+                r"\b(agent|codex|openclaw).{0,40}\b(status|sessions?|history|content|logs?)\b|"
+                r"\b(list|show|read|get).{0,30}\b(agent|codex|openclaw)\s+(sessions?|status|history)\b",
+                text,
+                re.I,
+            )
+        )
+
+    @staticmethod
+    def _requires_agent_delegation(text: str) -> bool:
+        return bool(
+            re.search(
+                r"\b(start|create|run|delegate|ask|tell)\b.{0,40}\b(coding job|codex|openclaw|agent)\b|"
+                r"\b(coding job)\b",
+                text,
+                re.I,
+            )
+        )
+
+    @staticmethod
     def _risk_tier(text: str, execution_class: ExecutionClass) -> RiskTier:
         lowered = text.lower()
         if execution_class == ExecutionClass.CODING_AGENT_TASK:
-            return RiskTier.DELEGATED_AGENT
+            return RiskTier.DELEGATED_AGENT if RuntimeRouter._requires_agent_delegation(text) else RiskTier.PRIVATE_READ
         if re.search(r"\b(delete permanently|permanent delete|erase)\b", lowered):
             return RiskTier.DESTRUCTIVE
         if execution_class == ExecutionClass.BROWSER_TASK:
@@ -193,6 +229,8 @@ class RuntimeRouter:
             return RiskTier.OS_CONTROL
         if re.search(r"\b(write|edit|create|move|copy|rename|trash|remove|organize)\b", lowered):
             return RiskTier.LOCAL_WRITE
+        if RuntimeRouter._requires_clipboard_read(text):
+            return RiskTier.PRIVATE_READ
         if execution_class in {ExecutionClass.SCREEN_ANALYSIS, ExecutionClass.PDF_ANALYSIS, ExecutionClass.FILESYSTEM_ACTION}:
             return RiskTier.PRIVATE_READ
         return RiskTier.LOW_READ_ONLY if execution_class != ExecutionClass.TEXT_CHAT else RiskTier.NONE

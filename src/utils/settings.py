@@ -58,6 +58,8 @@ class Settings:
     SCREEN_OCR_COMMAND: str = ""
     # External agent bridges are opt-in and disabled by default.
     AGENT_TOOLS_ENABLED: bool = False
+    EXTERNAL_AGENT_TOOLS_ENABLED: bool = False
+    EXTERNAL_AGENT_CONFIG_PATH: str = "~/.config/eyra/agents.json"
     # MCP bridges are opt-in and disabled by default.
     MCP_TOOLS_ENABLED: bool = False
     MCP_CONFIG_PATH: str = "~/.config/eyra/mcp.json"
@@ -78,6 +80,7 @@ class Settings:
     # Complexity-based model tiers. When disabled, all requests use MODEL after policy routing.
     COMPLEXITY_ROUTING_ENABLED: bool = False
     ROUTING_DEBUG: bool = False
+    HANDS_FREE_MODE: bool = False
 
     @classmethod
     def load_from_env(cls):
@@ -144,6 +147,11 @@ class Settings:
             OS_TOOLS_ENABLED=_bool("OS_TOOLS_ENABLED", "false"),
             SCREEN_OCR_COMMAND=os.getenv("SCREEN_OCR_COMMAND", ""),
             AGENT_TOOLS_ENABLED=_bool("AGENT_TOOLS_ENABLED", "false"),
+            EXTERNAL_AGENT_TOOLS_ENABLED=_bool(
+                "EXTERNAL_AGENT_TOOLS_ENABLED",
+                os.getenv("AGENT_TOOLS_ENABLED", "false"),
+            ),
+            EXTERNAL_AGENT_CONFIG_PATH=os.getenv("EXTERNAL_AGENT_CONFIG_PATH", "~/.config/eyra/agents.json"),
             MCP_TOOLS_ENABLED=_bool("MCP_TOOLS_ENABLED", "false"),
             MCP_CONFIG_PATH=os.getenv("MCP_CONFIG_PATH", "~/.config/eyra/mcp.json"),
             WEB_UI_ENABLED=_bool("WEB_UI_ENABLED", "false"),
@@ -160,6 +168,7 @@ class Settings:
             REALTIME_ALLOWED_TOOLS=os.getenv("REALTIME_ALLOWED_TOOLS", ""),
             COMPLEXITY_ROUTING_ENABLED=_bool("COMPLEXITY_ROUTING_ENABLED", "false"),
             ROUTING_DEBUG=_bool("ROUTING_DEBUG", "false"),
+            HANDS_FREE_MODE=_bool("HANDS_FREE_MODE", "false"),
         )
 
     @property

@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 
 from chat.capture import capture_screenshot_in_memory
 from runtime.capabilities import build_capability_snapshot
+from runtime.external_agents import AgentAdapterRegistry, AgentJobSpec
 from tools.approval import GLOBAL_APPROVAL_MANAGER, ApprovalManager, approval_required_message
 from tools.base import BaseTool, ToolResult
 from tools.filesystem import _resolve
@@ -1484,7 +1485,7 @@ class ListAgentSessionsTool(BaseTool):
     parameters = {
         "type": "object",
         "properties": {
-            "agent": {"type": "string", "enum": ["codex", "openclaw"]},
+            "agent": {"type": "string"},
             "limit": {"type": "integer", "minimum": 1, "maximum": 50},
         },
     }
@@ -1591,10 +1592,12 @@ class RunAgentTaskTool(BaseTool):
         allowed_roots: tuple[Path, ...],
         default_path: Path,
         approval_manager: ApprovalManager | None = None,
+        agent_registry: AgentAdapterRegistry | None = None,
     ):
         self._roots = tuple(_as_default_path(root) for root in allowed_roots)
         self._default_path = _as_default_path(default_path)
         self._approvals = approval_manager or GLOBAL_APPROVAL_MANAGER
+        self._agent_registry = agent_registry
 
     async def execute(
         self,
@@ -1620,6 +1623,18 @@ class RunAgentTaskTool(BaseTool):
         )
         if approval is not None:
             return approval
+        if self._agent_registry is not None:
+            adapter = self._agent_registry.get(agent)
+            if adapter is not None:
+                result = await self._agent_registry.run(AgentJobSpec(agent_name=agent, task=task, cwd=str(workdir)))
+                return ToolResult(
+                    content=(
+                        f"agent={result.agent_name}\n"
+                        f"status={result.status}\n"
+                        f"exit_code={result.exit_code}\n\n"
+                        f"{result.output}"
+                    )
+                )
         binary = shutil.which(agent)
         if not binary:
             return ToolResult(content=f"{agent} is not installed or not on PATH.")

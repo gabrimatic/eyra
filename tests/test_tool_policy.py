@@ -8,6 +8,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from runtime.routing.tool_policy import route_tool_policy
 from runtime.routing.types import Capability, ExecutionClass, RiskTier
 from runtime.tooling import build_tool_registry
+from tools.base import BaseTool, ToolResult
+from tools.registry import ToolRegistry
 from utils.settings import Settings
 
 
@@ -103,6 +105,55 @@ class TestToolPolicy:
         assert "copy_path" not in policy.allowed_tool_names
         assert policy.denied_tool_reasons["write_file"] == "mutating filesystem tools require a file-write route"
 
+    def test_clipboard_read_is_private_read_not_os_gated(self):
+        generic = _policy(
+            Settings(),
+            ExecutionClass.TEXT_CHAT,
+            {Capability.TEXT},
+            RiskTier.NONE,
+        )
+        clipboard = _policy(
+            Settings(OS_TOOLS_ENABLED=False),
+            ExecutionClass.TOOL_ASSISTED_CHAT,
+            {Capability.TEXT, Capability.NATIVE_TOOLS, Capability.CLIPBOARD_READ},
+            RiskTier.PRIVATE_READ,
+        )
+
+        assert "read_clipboard" not in generic.allowed_tool_names
+        assert "read_clipboard" in clipboard.allowed_tool_names
+
+    def test_realtime_route_exposes_no_registered_local_tools_by_default(self):
+        policy = _policy(
+            Settings(),
+            ExecutionClass.REALTIME_VOICE_TURN,
+            {Capability.TEXT, Capability.VOICE_RESPONSE},
+            RiskTier.LOW_READ_ONLY,
+        )
+
+        assert policy.allowed_tool_names == frozenset()
+
+    def test_unknown_registered_tool_is_blocked_by_default(self):
+        class UnknownTool(BaseTool):
+            name = "mystery_tool"
+            description = "A deliberately unclassified test tool."
+            parameters = {"type": "object", "properties": {}}
+
+            async def execute(self, **kwargs) -> ToolResult:
+                return ToolResult(content="ok")
+
+        registry = ToolRegistry()
+        registry.register(UnknownTool())
+        policy = route_tool_policy(
+            execution_class=ExecutionClass.TOOL_ASSISTED_CHAT,
+            required_capabilities=frozenset({Capability.TEXT, Capability.NATIVE_TOOLS}),
+            risk_tier=RiskTier.LOW_READ_ONLY,
+            settings=Settings(),
+            tool_registry=registry,
+        )
+
+        assert "mystery_tool" not in policy.allowed_tool_names
+        assert policy.denied_tool_reasons["mystery_tool"] == "tool lacks explicit safe route classification"
+
     def test_agent_read_tools_require_agent_route(self):
         normal = _policy(
             Settings(AGENT_TOOLS_ENABLED=True),
@@ -113,8 +164,8 @@ class TestToolPolicy:
         agent = _policy(
             Settings(AGENT_TOOLS_ENABLED=True),
             ExecutionClass.CODING_AGENT_TASK,
-            {Capability.TEXT, Capability.AGENT_DELEGATION},
-            RiskTier.DELEGATED_AGENT,
+            {Capability.TEXT, Capability.AGENT_READ},
+            RiskTier.PRIVATE_READ,
         )
 
         assert "get_agent_status" not in normal.allowed_tool_names
@@ -134,6 +185,33 @@ class TestToolPolicy:
         assert "run_agent_task" not in disabled.allowed_tool_names
         assert "call_mcp_tool" not in disabled.allowed_tool_names
 
+    def test_os_route_does_not_expose_shell_command_tool(self):
+        policy = _policy(
+            Settings(OS_TOOLS_ENABLED=True),
+            ExecutionClass.TOOL_ASSISTED_CHAT,
+            {Capability.TEXT, Capability.NATIVE_TOOLS, Capability.OS_AUTOMATION},
+            RiskTier.OS_CONTROL,
+        )
+
+        assert "ui_click" in policy.allowed_tool_names
+        assert "run_command" not in policy.allowed_tool_names
+        assert policy.denied_tool_reasons["run_command"] == "shell tools require a shell route"
+
+    def test_agent_status_route_does_not_expose_agent_run_tools(self):
+        policy = _policy(
+            Settings(AGENT_TOOLS_ENABLED=True),
+            ExecutionClass.CODING_AGENT_TASK,
+            {Capability.TEXT, Capability.AGENT_READ},
+            RiskTier.PRIVATE_READ,
+        )
+
+        assert "get_agent_status" in policy.allowed_tool_names
+        assert "list_agent_sessions" in policy.allowed_tool_names
+        assert "run_agent_task" not in policy.allowed_tool_names
+        assert policy.denied_tool_reasons["run_agent_task"] == (
+            "agent delegation tools require an agent delegation route"
+        )
+
     def test_delete_permanently_is_destructive_and_approval_protected(self):
         registry = build_tool_registry(Settings())
         meta = registry.metadata_by_name()["delete_permanently"]
@@ -141,3 +219,21 @@ class TestToolPolicy:
         assert meta.destructive is True
         assert meta.requires_approval is True
         assert meta.risk_tier == RiskTier.DESTRUCTIVE
+
+    def test_all_registered_tools_have_explicit_route_classification(self):
+        registry = build_tool_registry(
+            Settings(
+                NETWORK_TOOLS_ENABLED=True,
+                OS_TOOLS_ENABLED=True,
+                AGENT_TOOLS_ENABLED=True,
+                MCP_TOOLS_ENABLED=True,
+            )
+        )
+
+        unclassified = [
+            name
+            for name, meta in registry.metadata_by_name().items()
+            if not meta.capabilities and not meta.allowed_execution_classes
+        ]
+
+        assert unclassified == []

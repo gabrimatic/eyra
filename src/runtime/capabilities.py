@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import shutil
+from pathlib import Path
 from urllib.parse import urlparse
 
+from runtime.external_agents import AgentAdapterRegistry
 from runtime.models import LiveRuntimeState, PreflightResult
 from runtime.privacy import evaluate_privacy_boundary, privacy_decision_dict
 from utils.settings import Settings
@@ -79,6 +81,11 @@ def build_capability_snapshot(
         remote_paths.append("realtime_voice")
     if settings.REALTIME_TOOLS_ENABLED:
         remote_paths.append("realtime_tools")
+    external_agent_registry = AgentAdapterRegistry.from_settings(
+        settings,
+        allowed_roots=tuple(Path(root.strip()).expanduser() for root in settings.FILESYSTEM_ALLOWED_PATHS.split(",") if root.strip()),
+        default_path=Path(settings.FILESYSTEM_DEFAULT_PATH).expanduser(),
+    )
 
     return {
         "localFirst": True,
@@ -93,6 +100,7 @@ def build_capability_snapshot(
             "visionImages": _model_capability(settings, preflight, vision_model, "vision"),
         },
         "voice": {
+            "handsFreeMode": settings.HANDS_FREE_MODE,
             "localWhisper": {
                 "enabled": settings.LIVE_LISTENING_ENABLED or settings.LIVE_SPEECH_ENABLED,
                 "listeningReady": listening_ready,
@@ -122,7 +130,10 @@ def build_capability_snapshot(
             "os": {"enabled": settings.OS_TOOLS_ENABLED},
             "browser": {"enabled": settings.NETWORK_TOOLS_ENABLED},
             "mcp": {"enabled": settings.MCP_TOOLS_ENABLED, "configPath": settings.MCP_CONFIG_PATH},
-            "agents": {"enabled": settings.AGENT_TOOLS_ENABLED},
+            "agents": {
+                "enabled": settings.AGENT_TOOLS_ENABLED or settings.EXTERNAL_AGENT_TOOLS_ENABLED,
+                "external": external_agent_registry.capability_snapshot(),
+            },
             "web": {
                 "enabled": settings.WEB_UI_ENABLED,
                 "host": settings.WEB_UI_HOST,

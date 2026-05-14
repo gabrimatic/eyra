@@ -30,12 +30,15 @@ def test_default_capability_snapshot_is_local_first():
 
     assert snapshot["localFirst"] is True
     assert snapshot["models"]["providerLocal"] is True
+    assert snapshot["voice"]["handsFreeMode"] is False
     assert snapshot["voice"]["localWhisper"]["ready"] is True
     assert snapshot["screen"]["captureReady"] is True
     assert snapshot["tools"]["filesystem"]["enabled"] is True
     assert snapshot["tools"]["filesystem"]["permanentDeleteRequiresApproval"] is True
     assert snapshot["tools"]["network"]["enabled"] is False
     assert snapshot["tools"]["os"]["enabled"] is False
+    assert snapshot["tools"]["agents"]["enabled"] is False
+    assert "codex" in snapshot["tools"]["agents"]["external"]["agents"]
     assert snapshot["privacy"]["leavesMachineByDefault"] is False
     assert snapshot["privacy"]["remotePaths"] == []
     assert snapshot["privacy"]["boundaries"][0]["action"] == "model.screen_summary"

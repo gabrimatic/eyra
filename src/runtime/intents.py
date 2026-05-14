@@ -33,7 +33,7 @@ def requires_filesystem(text: str) -> bool:
     """Return True when a request likely needs local filesystem context."""
     return bool(
         re.search(
-            r"\b(file|folder|pdf|desktop|documents|downloads|clipboard|move|copy|write|create|open|read|remove|delete|trash)\b",
+            r"\b(file|folder|pdf|desktop|documents|downloads|move|copy|write|create|open|read|remove|delete|trash)\b",
             text,
             re.I,
         )

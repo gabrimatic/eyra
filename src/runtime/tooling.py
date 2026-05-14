@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from runtime.external_agents import AgentAdapterRegistry
 from tools.approval import ApprovalManager
 from tools.browser import (
     BrowserSession,
@@ -199,7 +200,11 @@ def build_tool_registry(
         registry.register(RunShortcutTool(approval_manager=approval_manager))
         registry.register(SetClipboardTool(approval_manager=approval_manager))
 
-    if settings.AGENT_TOOLS_ENABLED:
+    external_agents_enabled = bool(
+        getattr(settings, "AGENT_TOOLS_ENABLED", False) or getattr(settings, "EXTERNAL_AGENT_TOOLS_ENABLED", False)
+    )
+    if external_agents_enabled:
+        agent_registry = AgentAdapterRegistry.from_settings(settings, allowed_roots=fs_roots, default_path=fs_default)
         registry.register(GetAgentStatusTool())
         registry.register(ListAgentSessionsTool())
         registry.register(GetAgentSessionContentTool())
@@ -207,9 +212,30 @@ def build_tool_registry(
         registry.register(ListOpenClawSessionsTool())
         registry.register(GetCodexSessionContentTool())
         registry.register(GetOpenClawStatusTool())
-        registry.register(RunAgentTaskTool(allowed_roots=fs_roots, default_path=fs_default, approval_manager=approval_manager))
-        registry.register(RunCodexTaskTool(allowed_roots=fs_roots, default_path=fs_default, approval_manager=approval_manager))
-        registry.register(RunOpenClawAgentTool(allowed_roots=fs_roots, default_path=fs_default, approval_manager=approval_manager))
+        registry.register(
+            RunAgentTaskTool(
+                allowed_roots=fs_roots,
+                default_path=fs_default,
+                approval_manager=approval_manager,
+                agent_registry=agent_registry,
+            )
+        )
+        registry.register(
+            RunCodexTaskTool(
+                allowed_roots=fs_roots,
+                default_path=fs_default,
+                approval_manager=approval_manager,
+                agent_registry=agent_registry,
+            )
+        )
+        registry.register(
+            RunOpenClawAgentTool(
+                allowed_roots=fs_roots,
+                default_path=fs_default,
+                approval_manager=approval_manager,
+                agent_registry=agent_registry,
+            )
+        )
 
     if settings.MCP_TOOLS_ENABLED:
         registry.register(ListMcpTools(config_path=settings.MCP_CONFIG_PATH))

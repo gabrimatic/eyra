@@ -28,6 +28,22 @@ body:
       required: true
 
   - type: textarea
+    id: safety
+    attributes:
+      label: Safety and privacy model
+      description: What should stay local, what may leave the machine, what needs approval, and how should cancellation or undo work?
+    validations:
+      required: false
+
+  - type: textarea
+    id: certification
+    attributes:
+      label: Acceptance and certification
+      description: What tests, docs, route policy, or certification rows would prove the feature works?
+    validations:
+      required: false
+
+  - type: textarea
     id: alternatives
     attributes:
       label: Alternatives considered

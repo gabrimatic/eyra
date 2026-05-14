@@ -20,6 +20,7 @@ from utils.settings import Settings
 from web.server import (
     WebAssistantRuntime,
     _EyraWebHandler,
+    build_capabilities_payload,
     build_health_payload,
     create_realtime_session_payload,
     realtime_tools,
@@ -44,6 +45,7 @@ class TestWebServerHelpers:
         assert payload["voice"]["realtime"] is False
         assert payload["capabilities"]["localFirst"] is True
         assert payload["capabilities"]["privacy"]["leavesMachineByDefault"] is False
+        assert "tools" not in payload["capabilities"]
 
     def test_health_payload_can_report_shared_runtime_scope(self):
         payload = build_health_payload(Settings(WEB_UI_ENABLED=True), runtime_scope="shared")
@@ -67,6 +69,19 @@ class TestWebServerHelpers:
         assert payload["capabilities"]["models"]["backendReady"] is True
         assert payload["capabilities"]["models"]["mainToolCalling"] == "no"
         assert payload["capabilities"]["models"]["visionImages"] == "yes"
+
+    def test_authenticated_capabilities_payload_redacts_local_paths(self):
+        settings = Settings(
+            WEB_UI_ENABLED=True,
+            FILESYSTEM_ALLOWED_PATHS="/Users/soroush/Documents,/tmp",
+            JOB_STORE_PATH="/Users/soroush/.local/share/eyra/jobs.sqlite3",
+        )
+
+        payload = build_capabilities_payload(settings)
+        rendered = json.dumps(payload)
+
+        assert "/Users/soroush" not in rendered
+        assert "~/[user]" in rendered
 
     def test_index_html_has_phone_ready_controls(self):
         html = render_index_html(Settings(WEB_UI_ENABLED=True, REALTIME_VOICE_ENABLED=True))
@@ -428,6 +443,33 @@ class TestWebServerHelpers:
         assert listed["approvals"][0]["id"] == approval.id
         assert approved["approved"] is True
         runtime.close()
+
+    def test_web_runtime_returns_persisted_job_detail_with_redaction(self, tmp_path):
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+        )
+        runtime = WebAssistantRuntime(settings)
+        job = runtime.job_store.create_job(
+            title="Saved job",
+            original_user_input="Open this URL with token=secret-token",
+            source_frontend="web",
+            normalized_task_spec={"url": "https://example.com/?token=secret-token"},
+            required_capabilities=["network"],
+        )
+
+        try:
+            detail = runtime.run_sync(runtime.task_detail(job.id))
+        finally:
+            runtime.close()
+
+        rendered = json.dumps(detail)
+        assert detail["job"]["id"] == job.id
+        assert detail["job"]["riskLevel"] == "read_only"
+        assert "secret-token" not in rendered
+        assert "token=[REDACTED]" in rendered
 
     def test_web_runtime_file_appears_trigger_moves_file_when_created(self, tmp_path):
         desktop = tmp_path / "Desktop"

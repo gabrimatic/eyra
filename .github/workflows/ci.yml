@@ -61,7 +61,7 @@ jobs:
         run: uv run --frozen playwright install chromium
 
       - name: Test
-        run: uv run --frozen pytest -q
+        run: uv run --frozen python -m pytest -q
 
       - name: Build wheel
         run: uv build --wheel

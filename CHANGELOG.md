@@ -13,12 +13,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Local policy routing is now always on. Complexity routing only selects model tiers; every request still goes through policy planning for execution class, required capabilities, model capability, tool allowlists, risk, fallback, and route traces.
 - Removed the `ROUTING_POLICY_ENABLED` compatibility switch from generated and example environment files; there is no separate legacy request path.
 - Tool-assisted model streams now use deterministic sampling for more reliable local tool selection and final answers.
+- Clipboard reads are now an explicit local private-read route: hidden from generic text chat, not gated by broad OS automation, and only exposed for clipboard-intent routes.
+- Agent status/session routes are separated from agent delegation routes, so read-only agent questions do not expose run-agent tools.
+- Normal TTS responses now use a barge-in wait path with an echo guard instead of relying only on the idle voice loop.
 
 ### Fixed
 
 - Terminal and Web open-ended local tool requests now fail before background-task creation when no configured model can satisfy the required tool capabilities.
 - Read-only file routes no longer expose mutating filesystem tools such as write, edit, append, copy, or create.
+- OS automation routes no longer expose the shell command tool unless the route explicitly requires shell execution.
 - Async scheduler, worker-pool, retry, cancellation, and persistence architecture prompts now classify as complex routing work.
+
+### Added
+
+- `docs/PRODUCT_STRATEGY.md` defines Eyra's stance as a local-first voice coordinator and safety layer, not a clone of coding agents, browser agents, or generic agent frameworks.
+- Optional configured external-agent adapters through `EXTERNAL_AGENT_TOOLS_ENABLED` and `EXTERNAL_AGENT_CONFIG_PATH`, using static argv, sandboxed cwd, bounded timeouts, capped redacted output, and clean unavailable/unknown-agent reporting.
+- `/handsfree on|off` and `HANDS_FREE_MODE` to make no-hands operation visible in status and capability snapshots.
+- Web capability responses are split from unauthenticated health and redacted before returning local paths, job details, logs, artifacts, or approval details.
+- Certification rows for route policy, hands-free controls, barge-in boundaries, external-agent adapter safety, and competitor-positioning documentation.
 
 ## [4.1.0] - 2026-05-14
 

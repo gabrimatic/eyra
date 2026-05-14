@@ -222,7 +222,11 @@ class TestSpeechController:
         mock_speech_proc = MagicMock()
         mock_speech_proc.returncode = None
         mock_speech_proc.terminate = MagicMock()
-        mock_speech_proc.wait = AsyncMock(return_value=0)
+        async def slow_wait():
+            await asyncio.sleep(60)
+            return 0
+
+        mock_speech_proc.wait = AsyncMock(side_effect=slow_wait)
         ctrl._speaking_proc = mock_speech_proc
 
         async def fake_listen(on_speech_start=None):
@@ -240,6 +244,90 @@ class TestSpeechController:
         assert result == "stop please"
         mock_speech_proc.terminate.assert_called_once()
         assert ctrl._speaking_proc is None
+
+    def test_barge_in_wait_interrupts_tts_and_returns_user_phrase(self):
+        ctrl, state = self._make_controller()
+        state.listening_enabled = True
+
+        mock_speech_proc = MagicMock()
+        mock_speech_proc.returncode = None
+        mock_speech_proc.terminate = MagicMock(side_effect=lambda: setattr(mock_speech_proc, "returncode", -15))
+
+        async def wait_until_terminated():
+            while mock_speech_proc.returncode is None:
+                await asyncio.sleep(0.01)
+            return mock_speech_proc.returncode
+
+        mock_speech_proc.wait = AsyncMock(side_effect=wait_until_terminated)
+        ctrl._speaking_proc = mock_speech_proc
+
+        async def fake_listen(on_speech_start=None):
+            assert on_speech_start is not None
+            on_speech_start()
+            await asyncio.sleep(0)
+            return "cancel that"
+
+        voice_input = MagicMock()
+        voice_input.listen = fake_listen
+
+        with patch.object(ctrl, "_get_voice_input", return_value=voice_input):
+            result = _run(ctrl.wait_for_speech_or_barge_in("Here is a long spoken response."))
+
+        assert result == "cancel that"
+        mock_speech_proc.terminate.assert_called_once()
+
+    def test_barge_in_wait_drops_echo_similar_to_tts(self):
+        ctrl, state = self._make_controller()
+        state.listening_enabled = True
+
+        mock_speech_proc = MagicMock()
+        mock_speech_proc.returncode = None
+        mock_speech_proc.terminate = MagicMock(side_effect=lambda: setattr(mock_speech_proc, "returncode", -15))
+
+        async def wait_until_terminated():
+            while mock_speech_proc.returncode is None:
+                await asyncio.sleep(0.01)
+            return mock_speech_proc.returncode
+
+        mock_speech_proc.wait = AsyncMock(side_effect=wait_until_terminated)
+        ctrl._speaking_proc = mock_speech_proc
+
+        async def fake_listen(on_speech_start=None):
+            assert on_speech_start is not None
+            on_speech_start()
+            await asyncio.sleep(0)
+            return "Here is a long spoken response"
+
+        voice_input = MagicMock()
+        voice_input.listen = fake_listen
+
+        with patch.object(ctrl, "_get_voice_input", return_value=voice_input):
+            result = _run(ctrl.wait_for_speech_or_barge_in("Here is a long spoken response."))
+
+        assert result is None
+
+    def test_barge_in_wait_cancels_listener_when_tts_finishes(self):
+        ctrl, state = self._make_controller()
+        state.listening_enabled = True
+
+        mock_speech_proc = MagicMock()
+        mock_speech_proc.returncode = None
+        mock_speech_proc.wait = AsyncMock(return_value=0)
+        ctrl._speaking_proc = mock_speech_proc
+        ctrl.cancel_listen = MagicMock()
+
+        async def fake_listen(on_speech_start=None):
+            await asyncio.sleep(60)
+            return "too late"
+
+        voice_input = MagicMock()
+        voice_input.listen = fake_listen
+
+        with patch.object(ctrl, "_get_voice_input", return_value=voice_input):
+            result = _run(ctrl.wait_for_speech_or_barge_in("short response"))
+
+        assert result is None
+        ctrl.cancel_listen.assert_called_once()
 
     def test_listen_does_not_interrupt_speech_on_silence(self):
         ctrl, state = self._make_controller()
@@ -398,6 +486,7 @@ class TestLiveSessionCommands:
     def test_voice_test_speaks_diagnostic_when_speech_enabled(self, capsys):
         session = self._make_session()
         session.state.speech_enabled = True
+        session.state.listening_enabled = True
         session.speech = MagicMock()
         session.speech.speak = AsyncMock()
 
@@ -405,6 +494,18 @@ class TestLiveSessionCommands:
 
         session.speech.speak.assert_called_once()
         assert "Voice interruption test started" in capsys.readouterr().out
+
+    def test_voice_test_requires_listening_for_interruption_check(self, capsys):
+        session = self._make_session()
+        session.state.speech_enabled = True
+        session.state.listening_enabled = False
+        session.speech = MagicMock()
+        session.speech.speak = AsyncMock()
+
+        assert _run(session._handle_command("/voice-test")) is True
+
+        session.speech.speak.assert_not_called()
+        assert "Voice listening is off" in capsys.readouterr().out
 
     def test_goal_command_sets_goal(self):
         session = self._make_session()
@@ -464,6 +565,18 @@ class TestLiveSessionCommands:
         out = capsys.readouterr().out
         assert "complexity routing" in out.lower()
         assert session.quality_mode.value == "balanced"
+
+    def test_handsfree_command_toggles_mode(self, capsys):
+        session = self._make_session()
+
+        _run(session._handle_command("/handsfree on"))
+        assert session._hands_free_mode is True
+
+        _run(session._handle_command("/handsfree"))
+        assert "Hands-free mode is on" in capsys.readouterr().out
+
+        _run(session._handle_command("/handsfree off"))
+        assert session._hands_free_mode is False
 
 
 # ---------------------------------------------------------------------------

@@ -56,6 +56,10 @@ from utils.settings import Settings
 
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 _SAFE_REALTIME_TOOLS = {"get_current_time", "discover_capabilities"}
+_WEB_TOKEN_QUERY_RE = re.compile(r"(?i)(token=)[^&\s]+")
+_WEB_SECRET_RE = re.compile(r"(?i)(api[_-]?key|secret|password|token)([=:]\s*)([^\s,}]+)")
+_WEB_OPENAI_KEY_RE = re.compile(r"sk-[A-Za-z0-9_-]{16,}")
+_WEB_HOME_RE = re.compile(r"/Users/[^/\s]+")
 
 
 class EyraThreadingHTTPServer(ThreadingHTTPServer):
@@ -97,7 +101,19 @@ def build_health_payload(
             "scope": runtime_scope,
             "sharedState": runtime_scope == "shared",
         },
-        "capabilities": capabilities,
+        "capabilities": {
+            "localFirst": capabilities["localFirst"],
+            "models": {
+                "providerLocal": capabilities["models"]["providerLocal"],
+                "backendReady": capabilities["models"]["backendReady"],
+                "mainToolCalling": capabilities["models"]["mainToolCalling"],
+                "visionImages": capabilities["models"]["visionImages"],
+            },
+            "privacy": {
+                "leavesMachineByDefault": capabilities["privacy"]["leavesMachineByDefault"],
+                "remotePaths": list(capabilities["privacy"]["remotePaths"]),
+            },
+        },
         "web": {
             "enabled": settings.WEB_UI_ENABLED,
             "host": settings.WEB_UI_HOST,
@@ -124,6 +140,18 @@ def build_health_payload(
     }
 
 
+def build_capabilities_payload(
+    settings: Settings,
+    runtime_scope: str = "standalone",
+    preflight: PreflightResult | None = None,
+) -> dict[str, Any]:
+    """Authenticated redacted capability payload for Web UI clients."""
+    return {
+        "runtime": {"scope": runtime_scope, "sharedState": runtime_scope == "shared"},
+        "capabilities": _redact_api_value(build_capability_snapshot(settings, preflight=preflight)),
+    }
+
+
 def web_auth_required(settings: Settings) -> bool:
     mode = settings.WEB_UI_REQUIRE_TOKEN.strip().lower()
     if mode == "true":
@@ -137,6 +165,22 @@ def web_auth_required(settings: Settings) -> bool:
 
 def validate_request_size(settings: Settings, length: int) -> bool:
     return 0 <= length <= max(1, int(settings.WEB_UI_MAX_REQUEST_BYTES))
+
+
+def _redact_api_value(value):
+    if isinstance(value, dict):
+        return {key: _redact_api_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_api_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_api_value(item) for item in value]
+    if isinstance(value, str):
+        redacted = _WEB_TOKEN_QUERY_RE.sub(r"\1[REDACTED]", value)
+        redacted = _WEB_SECRET_RE.sub(r"\1\2[REDACTED]", redacted)
+        redacted = _WEB_OPENAI_KEY_RE.sub("[REDACTED_KEY]", redacted)
+        redacted = _WEB_HOME_RE.sub("~/[user]", redacted)
+        return redacted
+    return value
 
 
 def _task_payload(task: BackgroundTask) -> dict[str, Any]:
@@ -790,6 +834,13 @@ class WebAssistantRuntime:
             trace = self.shared.last_route_trace
         return {"route": trace_to_dict(trace) if trace is not None else None}
 
+    async def capabilities(self) -> dict[str, Any]:
+        return build_capabilities_payload(
+            self.settings,
+            runtime_scope=self.runtime_scope,
+            preflight=self.preflight,
+        )
+
     async def list_tasks(self) -> dict[str, Any]:
         return {"tasks": [_task_payload(task) for task in self.task_manager.list_tasks(include_recent=True)]}
 
@@ -820,9 +871,24 @@ class WebAssistantRuntime:
                     "id": job.id,
                     "title": job.title,
                     "status": job.status.value,
-                    "request": job.original_user_input,
-                    "result": job.final_result,
-                    "error": job.error,
+                    "sourceFrontend": job.source_frontend,
+                    "request": _redact_api_value(job.original_user_input),
+                    "createdAt": job.created_at,
+                    "updatedAt": job.updated_at,
+                    "completedAt": job.completed_at,
+                    "normalizedTaskSpec": _redact_api_value(job.normalized_task_spec),
+                    "currentPlan": job.current_plan,
+                    "currentStep": job.current_step,
+                    "artifacts": _redact_api_value(job.artifacts),
+                    "approvals": list(job.approvals),
+                    "cancellationRequested": job.cancellation_requested,
+                    "rollback": _redact_api_value(job.rollback),
+                    "riskLevel": job.risk_level.value,
+                    "requiredCapabilities": job.required_capabilities,
+                    "usedCapabilities": job.used_capabilities,
+                    "affectedTargets": _redact_api_value(job.affected_targets),
+                    "result": _redact_api_value(job.final_result),
+                    "error": _redact_api_value(job.error),
                 }
             }
         return {"task": _task_payload(task)}
@@ -835,8 +901,8 @@ class WebAssistantRuntime:
                     "jobId": entry.job_id,
                     "timestamp": entry.timestamp,
                     "level": entry.level,
-                    "message": entry.message,
-                    "data": entry.data,
+                    "message": _redact_api_value(entry.message),
+                    "data": _redact_api_value(entry.data),
                 }
                 for entry in self.job_store.list_logs(job_id, limit=50)
             ]
@@ -846,7 +912,7 @@ class WebAssistantRuntime:
         job = self.job_store.get_job(job_id)
         if job is None:
             return {"error": "No job found.", "status": "missing"}
-        return {"artifacts": job.artifacts}
+        return {"artifacts": _redact_api_value(job.artifacts)}
 
     async def clear_completed_tasks(self) -> dict[str, Any]:
         memory_count = self.task_manager.clear_terminal_tasks()
@@ -870,7 +936,7 @@ class WebAssistantRuntime:
                     "id": approval.id,
                     "tool": approval.tool_name,
                     "title": approval.title,
-                    "details": approval.details,
+                    "details": _redact_api_value(approval.details),
                     "expiresAt": approval.expires_at,
                 }
                 for approval in self.approvals.list_pending()
@@ -1441,6 +1507,11 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(200, self.runtime.run_sync(self.runtime.list_tasks()))
             return
+        if parsed.path == "/api/capabilities":
+            if not self._authorized():
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.capabilities()))
+            return
         if parsed.path == "/api/route/last":
             if not self._authorized():
                 return
@@ -1474,7 +1545,7 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
                 return
             task_id = parsed.path.rsplit("/", 1)[-1]
             payload = self.runtime.run_sync(self.runtime.task_detail(task_id))
-            self._send_json(200 if "task" in payload else 404, payload)
+            self._send_json(200 if "task" in payload or "job" in payload else 404, payload)
             return
         self._send_json(404, {"error": "Not found."})
 

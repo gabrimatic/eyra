@@ -8,7 +8,7 @@ Eyra is a local-first voice agent for the macOS terminal.
 
 Speak or type. Eyra routes the request to an OpenAI-compatible model, calls local tools when needed, and speaks back through Local Whisper. Long work runs as owned background tasks, so the main coordinator stays available for quick questions, status, and cancellation. The default path stays on your machine: Ollama at localhost, Silero VAD in process, screenshots in memory, local PDFs/files, no telemetry.
 
-Cloud providers, network-backed tools, full OS command tools, MCP bridges, external agent delegation, Realtime voice, and the Web UI are opt-in.
+Cloud providers, network-backed tools, full OS command tools, MCP bridges, external agent delegation, Realtime voice, and the Web UI are opt-in. Current `master` contains unreleased post-4.1.0 routing and voice hardening intended for a future 4.2.0 release candidate.
 
 <p align="center"><img src="screenshot.png" width="800" alt="Eyra terminal screenshot"></p>
 
@@ -82,7 +82,7 @@ That shared Web frontend uses the terminal-owned approvals, jobs, task events, t
 - Optional UI actions: approved coordinate click, scroll, drag, focused text entry, and hotkey tools are available only when `OS_TOOLS_ENABLED=true`.
 - Optional app/window control: list visible apps, list app windows, activate apps, quit apps with approval, and apply approved window actions such as close, minimize, zoom, fullscreen, move, and resize when `OS_TOOLS_ENABLED=true`.
 - Optional MCP tools: list stdio MCP servers from `MCP_CONFIG_PATH` and call tools only after action-specific approval.
-- Optional agent delegation: inspect Codex/OpenClaw availability and sessions, read bounded redacted session content, use Codex/OpenClaw-compatible tool names, and hand complex work to terminal agents when `AGENT_TOOLS_ENABLED=true`.
+- Optional agent delegation: inspect Codex/OpenClaw availability and sessions, read bounded redacted session content, use Codex/OpenClaw-compatible tool names, and hand complex work to terminal agents when `AGENT_TOOLS_ENABLED=true`. BYO agents use static argv from `EXTERNAL_AGENT_CONFIG_PATH`, sandboxed cwd, bounded timeouts, capped redacted output, and exact approval.
 - Coding jobs: when agent tools are enabled, “Start a coding job with Codex to …” creates an owned background task, waits for server-side approval, then runs the bounded terminal-agent bridge.
 - Dictation: “Start dictation”, “End dictation”, and “Cancel dictation” capture text locally without model routing. Dictation can save directly to a sandboxed file and supports simple “Literal …” spelling for filenames, codes, and exact text.
 - Corrections: after a failed direct file move/copy/remove, “No, I meant …” can safely retry the same local action with the corrected target name.
@@ -157,6 +157,7 @@ When `USE_MOCK_CLIENT=true`, backend and model checks are skipped on purpose so 
 | Command | What it does |
 |---------|-------------|
 | `/voice on\|off` | Toggle voice input and speech output, with runtime recovery |
+| `/handsfree on\|off` | Make no-hands operation explicit in status and capabilities |
 | `/voice-diagnose` | Run local microphone, VAD, and Local Whisper diagnostics |
 | `/voice-test` | Start the manual voice interruption diagnostic |
 | `/mute` | Mute speech output only |
@@ -186,6 +187,8 @@ When `USE_MOCK_CLIENT=true`, backend and model checks are skipped on purpose so 
 | `/quit` | Exit |
 
 Unknown commands are caught locally and never sent to the model.
+
+Hands-free control phrases are handled locally: “read the options,” “choose number two,” “approve that,” “reject that,” “undo that,” “stop,” “cancel that,” “pause that,” “resume that,” “show status,” “what are you doing,” “what changed,” “start dictation,” and “end dictation.”
 
 To attach the Web UI to the terminal-owned runtime:
 
@@ -304,6 +307,8 @@ OS_TOOLS_ENABLED=false
 # Optional local OCR command for screen text extraction. Must read PNG bytes from stdin.
 SCREEN_OCR_COMMAND=
 AGENT_TOOLS_ENABLED=false
+EXTERNAL_AGENT_TOOLS_ENABLED=false
+EXTERNAL_AGENT_CONFIG_PATH=~/.config/eyra/agents.json
 MCP_TOOLS_ENABLED=false
 MCP_CONFIG_PATH=~/.config/eyra/mcp.json
 
@@ -329,12 +334,34 @@ REALTIME_ALLOWED_TOOLS=
 # Optional model-tier routing. Local policy routing is always on.
 COMPLEXITY_ROUTING_ENABLED=false
 ROUTING_DEBUG=false
+HANDS_FREE_MODE=false
 
 # Filesystem sandbox: comma-separated allowed root paths.
 FILESYSTEM_ALLOWED_PATHS=~/Documents,~/Desktop,~/Downloads,/tmp
 # Relative file paths are resolved under this directory, then checked against the sandbox.
 FILESYSTEM_DEFAULT_PATH=~/Documents
 ```
+
+Configured external agents use JSON like:
+
+```json
+{
+  "agents": [
+    {
+      "name": "openhands",
+      "type": "cli",
+      "command": ["openhands", "run"],
+      "cwdPolicy": "filesystem_default_path",
+      "network": false,
+      "mutatesFiles": true,
+      "requiresApproval": true,
+      "timeoutSeconds": 600
+    }
+  ]
+}
+```
+
+Use static argv only. Eyra does not accept dynamic model-selected commands.
 
 `API_BASE_URL` accepts any OpenAI-compatible endpoint: Ollama (default), LM Studio, vLLM, OpenRouter, Groq, or OpenAI itself. Local providers ignore `API_KEY`; cloud providers require it.
 
@@ -585,7 +612,7 @@ Run:
 
 Eyra speaks a long diagnostic sentence. Start talking into the microphone while it is speaking. Passing behavior: TTS stops, your new input is recorded and processed, the session stays alive, and background tasks keep their state unless you cancel them.
 
-Eyra uses local VAD for barge-in. It does not perform full acoustic echo cancellation; if your speakers feed back into the microphone, lower the volume or use headphones for the physical test. During normal responses, Eyra pauses listening while it is thinking or speaking to avoid treating its own TTS as the next user turn.
+Eyra uses local VAD for barge-in. It does not perform full acoustic echo cancellation; if your speakers feed back into the microphone, lower the volume or use headphones for the physical test. During normal responses, Eyra pauses listening while it is thinking, then runs a TTS barge-in listener while speaking. An echo guard drops transcripts that look like Eyra's own spoken output.
 
 For deterministic local certification on macOS, feed generated speech through a virtual microphone such as BlackHole 2ch, then run:
 
@@ -623,7 +650,7 @@ VOICE_INPUT_DEVICE=USB Headset
 
 Diagnostic audio is not saved unless `VOICE_DIAGNOSTIC_SAVE_AUDIO=true`.
 
-During normal responses, Eyra pauses the microphone while it is thinking or speaking so speaker output is not mistaken for the next user turn. `/voice-test` and physical certification still exercise attended interruption behavior; use headphones for those checks if the microphone hears the speakers.
+During normal responses, Eyra pauses the microphone while it is thinking, then listens for speech onset during TTS. `/voice-test` and physical certification still remain separate checks; use headphones for those checks if the microphone hears the speakers.
 
 </details>
 
@@ -649,7 +676,7 @@ You can also toggle voice at runtime with `/voice on|off`. If voice was disabled
 git clone https://github.com/gabrimatic/eyra.git
 cd eyra
 ./setup.sh
-uv run pytest -q
+uv run python -m pytest -q
 uv run ruff check src tests
 uv lock --check
 bash -n setup.sh

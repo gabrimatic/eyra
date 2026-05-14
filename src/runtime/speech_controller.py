@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
 import logging
+import re
 import time
 
 from runtime.models import LiveRuntimeState
@@ -91,6 +93,40 @@ class SpeechController:
                 pass
             self._speaking_proc = None
 
+    async def wait_for_speech_or_barge_in(self, spoken_text: str) -> str | None:
+        """Wait for TTS while listening for human barge-in.
+
+        Returns a transcript when speech starts over TTS and does not look like
+        echo of the spoken output. Returns None when TTS finishes normally or
+        the captured audio looks self-generated.
+        """
+        if not self.is_speaking:
+            await self.wait_for_speech()
+            return None
+        if not self.state.listening_enabled:
+            await self.wait_for_speech()
+            return None
+
+        listen_task = asyncio.create_task(self.listen(), name="tts-barge-in-listen")
+        speech_task = asyncio.create_task(self.wait_for_speech(), name="tts-complete")
+        done, pending = await asyncio.wait({listen_task, speech_task}, return_when=asyncio.FIRST_COMPLETED)
+        if speech_task in done:
+            self.cancel_listen()
+            listen_task.cancel()
+            await asyncio.gather(listen_task, return_exceptions=True)
+            return None
+
+        speech_task.cancel()
+        await asyncio.gather(speech_task, return_exceptions=True)
+        transcript = await listen_task
+        if not transcript:
+            if self.is_speaking:
+                await self.wait_for_speech()
+            return None
+        if _looks_like_echo(transcript, spoken_text):
+            return None
+        return transcript
+
     async def interrupt(self):
         """Stop any ongoing speech immediately."""
         if self._speaking_proc and self._speaking_proc.returncode is None:
@@ -145,3 +181,18 @@ class SpeechController:
         """Cancel an in-progress listen from another coroutine."""
         if self._voice_input is not None:
             self._voice_input.cancel()
+
+
+def _looks_like_echo(transcript: str, spoken_text: str) -> bool:
+    """Return True when ASR text is likely Eyra's own TTS."""
+    heard = _normalize_for_echo(transcript)
+    spoken = _normalize_for_echo(spoken_text)
+    if not heard or not spoken:
+        return False
+    if len(heard) >= 12 and heard in spoken:
+        return True
+    return difflib.SequenceMatcher(None, heard, spoken).ratio() >= 0.78
+
+
+def _normalize_for_echo(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", text.lower())).strip()

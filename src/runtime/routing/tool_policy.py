@@ -34,11 +34,12 @@ SCREEN_PRIVATE_READ = {
 }
 
 SYSTEM_PRIVATE_READ = {
-    "read_clipboard",
     "get_system_snapshot",
     "list_processes",
     "get_launch_agent_status",
 }
+
+CLIPBOARD_PRIVATE_READ = {"read_clipboard"}
 
 AGENT_READ = {
     "get_agent_status",
@@ -50,7 +51,7 @@ AGENT_READ = {
     "get_openclaw_status",
 }
 
-PRIVATE_READ = FILE_PRIVATE_READ | SCREEN_PRIVATE_READ | SYSTEM_PRIVATE_READ | AGENT_READ
+PRIVATE_READ = FILE_PRIVATE_READ | SCREEN_PRIVATE_READ | SYSTEM_PRIVATE_READ | CLIPBOARD_PRIVATE_READ | AGENT_READ
 
 LOCAL_WRITE = {
     "write_file",
@@ -67,7 +68,6 @@ LOCAL_WRITE = {
     "open_path",
     "reveal_path",
     "restore_from_trash",
-    "set_clipboard_text",
 }
 
 DESTRUCTIVE = {"move_to_trash", "delete_permanently"}
@@ -98,6 +98,7 @@ OS_SHELL = {
     "press_hotkey",
     "run_shortcut",
     "show_notification",
+    "set_clipboard_text",
 }
 
 AGENT_MCP = {
@@ -141,11 +142,14 @@ def metadata_for_tool(tool: BaseTool) -> ToolMetadata:
             capabilities.update({Capability.PDF_READ})
         if name in SYSTEM_PRIVATE_READ:
             capabilities.add(Capability.OS_AUTOMATION)
+        if name in CLIPBOARD_PRIVATE_READ:
+            capabilities.add(Capability.CLIPBOARD_READ)
         if name in AGENT_READ:
-            capabilities.add(Capability.AGENT_DELEGATION)
+            capabilities.add(Capability.AGENT_READ)
             allowed_execution_classes = {
                 ExecutionClass.BACKGROUND_TASK,
                 ExecutionClass.CODING_AGENT_TASK,
+                ExecutionClass.TOOL_ASSISTED_CHAT,
             }
         return ToolMetadata(
             name=name,
@@ -300,11 +304,26 @@ def _deny_reason(
     if execution_class == ExecutionClass.PDF_ANALYSIS:
         return "PDF extraction and summarization are controller-owned"
 
+    if not meta.capabilities and not meta.allowed_execution_classes:
+        return "tool lacks explicit safe route classification"
+
     if Capability.SCREEN_CAPTURE in meta.capabilities:
         return "screen capture is controller-owned"
 
     if meta.network_access and not settings.NETWORK_TOOLS_ENABLED:
         return "network tools are disabled"
+    if Capability.SHELL in meta.capabilities and Capability.SHELL not in required_capabilities:
+        return "shell tools require a shell route"
+    if Capability.PDF_READ in meta.capabilities and Capability.PDF_READ not in required_capabilities:
+        return "PDF tools require a PDF route"
+    if Capability.MCP in meta.capabilities and Capability.MCP not in required_capabilities:
+        return "MCP tools require an MCP route"
+    if Capability.AGENT_DELEGATION in meta.capabilities and Capability.AGENT_DELEGATION not in required_capabilities:
+        return "agent delegation tools require an agent delegation route"
+    if Capability.AGENT_READ in meta.capabilities and Capability.AGENT_READ not in required_capabilities:
+        return "agent read tools require an agent status route"
+    if Capability.CLIPBOARD_READ in meta.capabilities and Capability.CLIPBOARD_READ not in required_capabilities:
+        return "clipboard reads require a clipboard route"
     if Capability.OS_AUTOMATION in meta.capabilities and not settings.OS_TOOLS_ENABLED:
         return "OS tools are disabled"
     if Capability.SHELL in meta.capabilities and not settings.OS_TOOLS_ENABLED:

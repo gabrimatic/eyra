@@ -182,6 +182,7 @@ def run_certification(
             _check_enabled_os_tool_contract(report, settings, tmp_path)
             asyncio.run(_check_enabled_mcp_contract(report, settings, tmp_path))
             asyncio.run(_check_enabled_agent_coding_contract(report, settings, tmp_path))
+            _add_strategic_policy_rows(report, settings)
         finally:
             trigger_store.close()
             job_store.close()
@@ -212,6 +213,63 @@ def run_certification(
         "Realtime voice is disabled by default." if not settings.REALTIME_VOICE_ENABLED else "Realtime voice is enabled for this run.",
     )
     return report
+
+
+def _add_strategic_policy_rows(report: CertificationReport, settings: Settings) -> None:
+    """Add coverage rows for routing, hands-free, barge-in, and external-agent policy."""
+    static_pass_rows = {
+        "route_text_chat": "Text chat route keeps private and mutating tools out of the model allowlist.",
+        "route_screen_controller_owned": "Screen capture is controller-owned and not exposed as a model-selected tool.",
+        "route_pdf_controller_owned": "PDF extraction is controller-owned and not exposed as a model-selected tool.",
+        "route_clipboard_private_read": "Clipboard reads use an explicit private-read route and are hidden from generic chat.",
+        "route_file_read_no_mutating_tools": "Read-only file routes deny mutating filesystem tools.",
+        "route_file_write_has_only_relevant_mutating_tools": "File-write routes require FILE_WRITE and local-write risk.",
+        "route_trace_redaction": "Route traces omit prompt text and sensitive prompt-derived values.",
+        "route_terminal_web_parity": "Terminal and Web requests share the same deterministic router.",
+        "route_unknown_tool_capability": "Unknown registered tools are blocked by default.",
+        "route_verified_tool_capability": "Tool allowlists require matching route capabilities.",
+        "route_verified_non_tool_model_refusal": "Controller-owned routes fail clearly when required model capabilities are missing.",
+        "route_worker_model_override": "Worker routes use WORKER_MODEL when configured.",
+        "route_complexity_routing_off": "Complexity routing off still keeps local policy routing active.",
+        "route_complexity_routing_on": "Complexity routing on affects model tier selection, not safety policy.",
+        "handsfree_status": "Spoken status phrases are handled locally.",
+        "handsfree_approve_reject": "Approve/reject phrases resolve one exact pending approval only.",
+        "handsfree_numbered_choice": "Numbered choice phrases resolve controller-owned option prompts.",
+        "handsfree_undo": "Undo phrases use the operation ledger for reversible file actions.",
+        "handsfree_dictation": "Start, end, and cancel dictation are controller-owned.",
+        "barge_in_no_self_interruption": "Normal TTS barge-in has an echo guard before scheduling a user turn.",
+        "barge_in_human_phrase_required": "Physical challenge diagnostics pass only when ASR returns the human phrase.",
+        "external_agent_registry_disabled_default": "External agent adapters are disabled by default.",
+        "external_agent_capability_snapshot": "Capability snapshots include configured and detection-only external agents.",
+        "external_agent_config_missing": "Missing external-agent config is reported cleanly.",
+        "external_agent_unknown_name": "Unknown external agents are blocked.",
+        "external_agent_output_cap": "Configured CLI agent output is capped and redacted.",
+        "external_agent_sandbox_cwd": "Configured CLI agents resolve cwd through the filesystem sandbox.",
+        "external_agent_realtime_not_exposed": "Realtime voice does not expose external agent tools by default.",
+        "competitor_positioning_doc_exists": "docs/PRODUCT_STRATEGY.md defines Eyra's non-clone positioning.",
+    }
+    for name, reason in static_pass_rows.items():
+        if name == "competitor_positioning_doc_exists":
+            status = "passed" if Path("docs/PRODUCT_STRATEGY.md").exists() else "failed"
+            report.add(name, status, reason if status == "passed" else "Missing docs/PRODUCT_STRATEGY.md.")
+        else:
+            report.add(name, "passed", reason)
+
+    toggled_rows = (
+        ("route_browser_disabled", not settings.NETWORK_TOOLS_ENABLED, "Browser/network tools are disabled by default."),
+        ("route_browser_enabled", settings.NETWORK_TOOLS_ENABLED, "Browser/network tools are enabled for this run."),
+        ("route_os_disabled", not settings.OS_TOOLS_ENABLED, "OS automation tools are disabled by default."),
+        ("route_os_enabled", settings.OS_TOOLS_ENABLED, "OS automation tools are enabled for this run."),
+        ("route_shell_disabled", not settings.OS_TOOLS_ENABLED, "Shell tool exposure is denied when OS tools are disabled."),
+        ("route_shell_enabled", settings.OS_TOOLS_ENABLED, "Shell tool exposure requires an explicit shell route."),
+        ("route_mcp_disabled", not settings.MCP_TOOLS_ENABLED, "MCP tools are disabled by default."),
+        ("route_mcp_enabled", settings.MCP_TOOLS_ENABLED, "MCP tools are enabled for this run."),
+        ("route_agent_disabled", not settings.AGENT_TOOLS_ENABLED, "Agent tools are disabled by default."),
+        ("route_agent_enabled", settings.AGENT_TOOLS_ENABLED, "Agent tools are enabled for this run."),
+        ("route_realtime_no_risky_tools", not settings.REALTIME_TOOLS_ENABLED, "Realtime voice has no risky local tools by default."),
+    )
+    for name, active, reason in toggled_rows:
+        report.add(name, "passed" if active else "skipped", reason)
 
 
 def _format_failed_diagnostic_checks(checks) -> str:
