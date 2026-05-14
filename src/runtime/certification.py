@@ -659,7 +659,7 @@ def _format_failed_diagnostic_checks(checks) -> str:
 
 def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_path: Path) -> None:
     """Add safe installer and command-surface checks without mutating the real HOME."""
-    from runtime.cli import _detect_install_source, _paths, _safe_settings, _version_info
+    from runtime.cli import _detect_install_source, _safe_settings, _version_info
 
     root = Path(__file__).resolve().parents[2]
 
@@ -704,8 +704,8 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
     row(
         "install_no_duplicate_aliases",
         lambda: (
-            require('grep -qF "$PATH_LINE"' in (root / "setup.sh").read_text(), "setup does not guard shell PATH line")
-            or "Setup avoids duplicate Eyra PATH lines and does not add aliases."
+            require("sed -i '' '/# eyra$/d'" in (root / "setup.sh").read_text(), "setup does not clean old Eyra shell lines")
+            or "Setup avoids duplicate Eyra PATH lines and removes old Eyra aliases."
         ),
     )
     row(
@@ -718,9 +718,7 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
     row(
         "install_doctor_json",
         lambda: (
-            require("doctor" in _paths(settings), "paths JSON did not include doctor context")
-            if False
-            else require("hasApiKey" in _safe_settings(settings), "safe settings do not redact keys")
+            require("hasApiKey" in _safe_settings(settings), "safe settings do not redact keys")
             or "Doctor JSON exposes support fields without secret values."
         ),
         command="eyra doctor --json",
@@ -774,9 +772,10 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
     row(
         "install_homebrew_formula_test",
         lambda: (
-            require("USE_MOCK_CLIENT" not in (root / "Formula/eyra.rb").read_text(), "formula test relies on hidden mock env")
-            or require('system bin/"eyra", "doctor", "--json"' in (root / "Formula/eyra.rb").read_text(), "formula test does not run doctor JSON")
-            or "Formula test runs command and doctor surfaces."
+            require(("0" * 64) not in (root / "Formula/eyra.rb").read_text(), "formula contains placeholder checksum")
+            or require("USE_MOCK_CLIENT" in (root / "Formula/eyra.rb").read_text(), "formula test does not use a non-interactive mock smoke")
+            or require('bin/"eyra", "doctor", "--json"' in (root / "Formula/eyra.rb").read_text(), "formula test does not run doctor JSON")
+            or "Formula test runs command and doctor surfaces without requiring a live backend."
         ),
     )
     row(

@@ -59,7 +59,7 @@ class TestSettingsRoutingDefaults:
 
         assert settings.ROUTING_DEBUG is False
 
-    def test_load_from_env_reads_user_config_before_cwd_env(self, monkeypatch, tmp_path):
+    def test_load_from_env_reads_user_config_before_source_checkout_env(self, monkeypatch, tmp_path):
         from utils.settings import Settings
 
         home = tmp_path / "home"
@@ -67,7 +67,9 @@ class TestSettingsRoutingDefaults:
         config.mkdir(parents=True)
         (config / ".env").write_text("MODEL=user-config-model\nNETWORK_TOOLS_ENABLED=true\n")
         cwd = tmp_path / "cwd"
-        cwd.mkdir()
+        (cwd / "src").mkdir(parents=True)
+        (cwd / "pyproject.toml").write_text('[project]\nname = "eyra"\n')
+        (cwd / "src" / "main.py").write_text("")
         (cwd / ".env").write_text("MODEL=cwd-model\n")
         monkeypatch.delenv("MODEL", raising=False)
         monkeypatch.delenv("NETWORK_TOOLS_ENABLED", raising=False)
@@ -79,6 +81,26 @@ class TestSettingsRoutingDefaults:
         assert settings.MODEL == "cwd-model"
         assert settings.NETWORK_TOOLS_ENABLED is True
 
+    def test_load_from_env_ignores_unrelated_cwd_env(self, monkeypatch, tmp_path):
+        from utils.settings import Settings
+
+        home = tmp_path / "home"
+        config = home / ".config" / "eyra"
+        config.mkdir(parents=True)
+        (config / ".env").write_text("MODEL=user-config-model\nNETWORK_TOOLS_ENABLED=true\n")
+        cwd = tmp_path / "project"
+        cwd.mkdir()
+        (cwd / ".env").write_text("MODEL=unrelated-project-model\nNETWORK_TOOLS_ENABLED=false\n")
+        monkeypatch.delenv("MODEL", raising=False)
+        monkeypatch.delenv("NETWORK_TOOLS_ENABLED", raising=False)
+        monkeypatch.setattr("utils.settings.Path.home", lambda: home)
+        monkeypatch.chdir(cwd)
+
+        settings = Settings.load_from_env()
+
+        assert settings.MODEL == "user-config-model"
+        assert settings.NETWORK_TOOLS_ENABLED is True
+
     def test_process_environment_overrides_env_files(self, monkeypatch, tmp_path):
         from utils.settings import Settings
 
@@ -87,7 +109,9 @@ class TestSettingsRoutingDefaults:
         config.mkdir(parents=True)
         (config / ".env").write_text("LIVE_LISTENING_ENABLED=true\n")
         cwd = tmp_path / "cwd"
-        cwd.mkdir()
+        (cwd / "src").mkdir(parents=True)
+        (cwd / "pyproject.toml").write_text('[project]\nname = "eyra"\n')
+        (cwd / "src" / "main.py").write_text("")
         (cwd / ".env").write_text("LIVE_LISTENING_ENABLED=true\n")
         monkeypatch.setattr("utils.settings.Path.home", lambda: home)
         monkeypatch.chdir(cwd)

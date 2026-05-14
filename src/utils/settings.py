@@ -89,8 +89,9 @@ class Settings:
         file_values = {}
         if user_env.exists():
             file_values.update({key: value for key, value in dotenv_values(user_env).items() if value is not None})
-        cwd_env = Path.cwd() / ".env"
-        if cwd_env.exists():
+        cwd = Path.cwd()
+        cwd_env = cwd / ".env"
+        if cwd_env.exists() and _looks_like_eyra_source_checkout(cwd):
             file_values.update({key: value for key, value in dotenv_values(cwd_env).items() if value is not None})
         values = {**file_values, **os.environ}
 
@@ -198,3 +199,13 @@ class Settings:
             if name and name not in seen:
                 seen.append(name)
         return seen
+
+
+def _looks_like_eyra_source_checkout(path: Path) -> bool:
+    pyproject = path / "pyproject.toml"
+    if not pyproject.exists() or not (path / "src" / "main.py").exists():
+        return False
+    try:
+        return 'name = "eyra"' in pyproject.read_text()
+    except OSError:
+        return False

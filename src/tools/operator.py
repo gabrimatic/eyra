@@ -23,7 +23,6 @@ from utils.settings import Settings
 _MAX_OUTPUT = 12_000
 _MAX_TIMEOUT = 120
 _MAX_SESSION_BYTES = 64_000
-_AGENT_TIMEOUT_SECONDS = 25
 _DANGEROUS_TOKENS = {
     "rm",
     "rmdir",
@@ -1644,28 +1643,6 @@ class RunAgentTaskTool(BaseTool):
                 "EXTERNAL_AGENT_CONFIG_PATH and enable EXTERNAL_AGENT_TOOLS_ENABLED=true."
             )
         )
-
-    async def _run_agent_process(self, agent: str, argv: list[str], workdir: Path) -> ToolResult:
-        proc = await asyncio.create_subprocess_exec(
-            *argv,
-            cwd=workdir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_AGENT_TIMEOUT_SECONDS)
-        except asyncio.TimeoutError:
-            if proc.returncode is None:
-                proc.kill()
-                await proc.wait()
-            return ToolResult(content=f"agent={agent}\nCommand timed out after {_AGENT_TIMEOUT_SECONDS}s.")
-        except asyncio.CancelledError:
-            if proc.returncode is None:
-                proc.kill()
-                await proc.wait()
-            raise
-        output = stdout.decode(errors="replace") + stderr.decode(errors="replace")
-        return ToolResult(content=f"agent={agent}\nexit_code={proc.returncode}\n\n{_clip(output)}")
 
 
 class RunCodexTaskTool(RunAgentTaskTool):

@@ -8,7 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from main import get_log_file_path
-from runtime.cli import _safe_settings, _update_guidance, _version_info
+from runtime.cli import _safe_settings, _uninstall, _update_guidance, _version_info
 from utils.settings import Settings
 
 
@@ -48,3 +48,26 @@ class TestCliSupportCommands:
 
         assert info["version"]
         assert info["installSource"] in {"source", "homebrew", "uv-tool", "pipx", "wheel", "unknown"}
+
+    def test_uninstall_removes_shims_and_shell_lines_without_data(self, monkeypatch, tmp_path):
+        home = tmp_path / "home"
+        bin_dir = home / ".local" / "bin"
+        bin_dir.mkdir(parents=True)
+        shim = bin_dir / "eyra"
+        shim.write_text("#!/bin/bash\n")
+        zshrc = home / ".zshrc"
+        zshrc.write_text(
+            'export PATH="$HOME/.local/bin:$PATH" # eyra\n'
+            "alias eyra='/tmp/old-eyra' # eyra\n"
+            "export KEEP_ME=true\n"
+        )
+        monkeypatch.setattr("runtime.cli.Path.home", lambda: home)
+        monkeypatch.setattr("utils.settings.Path.home", lambda: home)
+
+        result = _uninstall(dry_run=False, assume_yes=True, with_data=False)
+
+        assert result.ok is True
+        assert not shim.exists()
+        assert "KEEP_ME" in zshrc.read_text()
+        assert "# eyra" not in zshrc.read_text()
+        assert (home / ".config" / "eyra").exists() is False

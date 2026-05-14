@@ -52,7 +52,7 @@ eyra update
 eyra uninstall --dry-run
 ```
 
-`eyra setup` preserves an existing `.env`. Source checkouts use the repo `.env`; installed tool environments can use `~/.config/eyra/.env`, and a local repo `.env` still wins when you run from a checkout. `eyra update` only explains the correct update path for the detected install source; it does not pull, overwrite, or delete user data. `eyra uninstall` removes Eyra-created command shims and preserves `.env`, jobs, triggers, logs, and the operation ledger unless you explicitly choose data removal.
+`eyra setup` preserves an existing `.env`. Source checkouts use the repo `.env`; installed tool environments use `~/.config/eyra/.env`, and the repo `.env` still wins when you run from an Eyra source checkout. Eyra does not read unrelated project `.env` files from arbitrary current directories. `eyra update` only explains the correct update path for the detected install source; it does not pull, overwrite, or delete user data. `eyra uninstall` removes Eyra-created command shims and preserves `.env`, jobs, triggers, logs, and the operation ledger unless you explicitly choose data removal.
 
 For CI or temp-home smoke tests, use `./setup.sh --non-interactive`. Non-interactive setup does not start Local Whisper or other services; it reports what is missing and leaves service startup to the user.
 
@@ -110,7 +110,7 @@ or:
 brew install gabrimatic/eyra/eyra
 ```
 
-Eyra uses the PolyForm Noncommercial license, so the intended Homebrew path is a custom tap, not `homebrew/core`, unless the license and release policy change.
+Eyra uses the PolyForm Noncommercial license, so the intended Homebrew path is a custom tap, not `homebrew/core`, unless the license and release policy change. The checked-in formula is a private-beta scaffold that installs from `master` until a signed/tagged release asset and checksum exist. Treat it as tap preparation, not a public stable formula.
 
 Future Python tool paths, once package distribution is enabled:
 

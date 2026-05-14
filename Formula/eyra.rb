@@ -3,9 +3,10 @@ class Eyra < Formula
   homepage "https://github.com/gabrimatic/eyra"
   license "PolyForm-Noncommercial-1.0.0"
 
-  # Replace the URL and sha256 when the v4.2.0 release candidate asset exists.
-  url "https://github.com/gabrimatic/eyra/archive/refs/tags/v4.2.0rc1.tar.gz"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  # Private beta formula: tracks the unreleased release-candidate branch until a
+  # signed/tagged release asset exists.
+  url "https://github.com/gabrimatic/eyra.git", branch: "master"
+  version "4.2.0rc1"
   head "https://github.com/gabrimatic/eyra.git", branch: "master"
 
   depends_on "python@3.11"
@@ -14,21 +15,22 @@ class Eyra < Formula
 
   def install
     libexec.install Dir["*"]
+    system Formula["uv"].opt_bin/"uv", "sync", "--frozen", "--no-dev", chdir: libexec
     (bin/"eyra").write <<~SH
       #!/bin/bash
-      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run eyra "$@"
+      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run --frozen --no-sync eyra "$@"
     SH
     (bin/"eyra-web").write <<~SH
       #!/bin/bash
-      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run eyra web "$@"
+      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run --frozen --no-sync eyra web "$@"
     SH
     (bin/"eyra-doctor").write <<~SH
       #!/bin/bash
-      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run eyra doctor "$@"
+      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run --frozen --no-sync eyra doctor "$@"
     SH
     (bin/"eyra-certify").write <<~SH
       #!/bin/bash
-      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run eyra certify "$@"
+      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run --frozen --no-sync eyra certify "$@"
     SH
   end
 
@@ -40,6 +42,9 @@ class Eyra < Formula
       First run:
         eyra setup
         eyra doctor
+
+      This private beta formula installs from the master branch. Switch it to a
+      tagged release asset and sha256 before using it as a stable public tap.
 
       Voice requires Local Whisper:
         brew tap gabrimatic/local-whisper
@@ -53,6 +58,7 @@ class Eyra < Formula
 
   test do
     system bin/"eyra", "version"
-    system bin/"eyra", "doctor", "--json"
+    system({ "USE_MOCK_CLIENT" => "true", "LIVE_LISTENING_ENABLED" => "false", "LIVE_SPEECH_ENABLED" => "false" },
+           bin/"eyra", "doctor", "--json")
   end
 end

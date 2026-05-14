@@ -346,11 +346,17 @@ def _uninstall(*, dry_run: bool, assume_yes: bool, with_data: bool) -> CommandRe
     candidates = [Path(paths["userBin"]) / name for name in ("eyra", "eyra-web", "eyra-doctor", "eyra-certify", "eyra-setup")]
     existing = [path for path in candidates if path.exists()]
     data_paths = [Path(paths[name]).expanduser() for name in ("configDir", "dataDir", "logDir")]
+    shell_rc_paths = _shell_rc_paths()
     if dry_run:
         return CommandResult(
             True,
-            _format_uninstall(existing, data_paths, dry_run=True, with_data=with_data),
-            {"removed": [], "wouldRemove": [str(path) for path in existing], "dataPaths": [str(path) for path in data_paths]},
+            _format_uninstall(existing, data_paths, shell_rc_paths, dry_run=True, with_data=with_data),
+            {
+                "removed": [],
+                "wouldRemove": [str(path) for path in existing],
+                "wouldCleanShellRc": [str(path) for path in shell_rc_paths],
+                "dataPaths": [str(path) for path in data_paths],
+            },
         )
     if not assume_yes:
         answer = input("Remove Eyra command shims from ~/.local/bin? Type yes to continue: ").strip().lower()
@@ -363,6 +369,7 @@ def _uninstall(*, dry_run: bool, assume_yes: bool, with_data: bool) -> CommandRe
             removed.append(str(path))
         except OSError:
             pass
+    cleaned_shell_rc = _remove_shell_rc_lines(shell_rc_paths)
     data_removed: list[str] = []
     if with_data:
         if not assume_yes:
@@ -374,17 +381,27 @@ def _uninstall(*, dry_run: bool, assume_yes: bool, with_data: bool) -> CommandRe
                 if path.exists():
                     shutil.rmtree(path, ignore_errors=True)
                     data_removed.append(str(path))
-    message = _format_uninstall(existing, data_paths, dry_run=False, with_data=with_data)
-    return CommandResult(True, message, {"removed": removed, "dataRemoved": data_removed})
+    message = _format_uninstall(existing, data_paths, shell_rc_paths, dry_run=False, with_data=with_data)
+    return CommandResult(True, message, {"removed": removed, "cleanedShellRc": cleaned_shell_rc, "dataRemoved": data_removed})
 
 
-def _format_uninstall(command_paths: list[Path], data_paths: list[Path], *, dry_run: bool, with_data: bool) -> str:
+def _format_uninstall(
+    command_paths: list[Path],
+    data_paths: list[Path],
+    shell_rc_paths: list[Path],
+    *,
+    dry_run: bool,
+    with_data: bool,
+) -> str:
     action = "Would remove" if dry_run else "Removed"
     lines = ["Eyra uninstall", ""]
     if command_paths:
         lines.extend(f"{action}: {path}" for path in command_paths)
     else:
         lines.append("No Eyra command shims found in ~/.local/bin.")
+    if shell_rc_paths:
+        lines.append("")
+        lines.extend(f"{'Would clean' if dry_run else 'Cleaned'} Eyra shell lines in: {path}" for path in shell_rc_paths)
     if with_data:
         lines.append("")
         lines.extend(f"{action} data path: {path}" for path in data_paths)
@@ -393,6 +410,27 @@ def _format_uninstall(command_paths: list[Path], data_paths: list[Path], *, dry_
         lines.append("User data is preserved by default:")
         lines.extend(f"- {path}" for path in data_paths)
     return "\n".join(lines)
+
+
+def _shell_rc_paths() -> list[Path]:
+    home = Path.home()
+    return [path for path in (home / ".zshrc", home / ".bashrc") if path.exists()]
+
+
+def _remove_shell_rc_lines(paths: list[Path]) -> list[str]:
+    cleaned: list[str] = []
+    for path in paths:
+        try:
+            original = path.read_text()
+        except OSError:
+            continue
+        kept = [line for line in original.splitlines() if not line.rstrip().endswith("# eyra")]
+        trailing_newline = "\n" if original.endswith("\n") and kept else ""
+        new_content = "\n".join(kept) + trailing_newline
+        if new_content != original:
+            path.write_text(new_content)
+            cleaned.append(str(path))
+    return cleaned
 
 
 def _version_result() -> CommandResult:

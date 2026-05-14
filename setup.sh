@@ -148,9 +148,8 @@ done
 PATH_LINE='export PATH="$HOME/.local/bin:$PATH" # eyra'
 for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
     [[ -f "$rc" ]] || continue
-    if ! grep -qF "$PATH_LINE" "$rc"; then
-        echo "$PATH_LINE" >> "$rc"
-    fi
+    sed -i '' '/# eyra$/d' "$rc"
+    echo "$PATH_LINE" >> "$rc"
 done
 export PATH="$BIN_DIR:$PATH"
 log_ok "Commands registered in $BIN_DIR"

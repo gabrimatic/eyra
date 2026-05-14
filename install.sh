@@ -37,6 +37,16 @@ download() {
     curl -fsSL "${auth_header_args[@]}" "$url" -o "$output"
 }
 
+require_safe_install_dir() {
+    local target="$1"
+    [[ -n "$target" ]] || fail "Install directory cannot be empty."
+    [[ "$target" != "/" ]] || fail "Install directory cannot be /."
+    [[ "$target" != "$HOME" ]] || fail "Install directory cannot be your home directory."
+    [[ "$target" != "$HOME/.local" ]] || fail "Install directory cannot be ~/.local."
+    [[ "$target" == "$HOME"/.local/share/eyra/* || "$target" == "$HOME"/Applications/* || "$target" == /opt/* ]] || \
+        fail "Choose an install directory under ~/.local/share/eyra, ~/Applications, or /opt."
+}
+
 echo ""
 echo -e "${BOLD}Eyra installer${NC}"
 echo "Local-first voice coordinator for macOS."
@@ -54,6 +64,15 @@ if ! command -v brew &>/dev/null; then
     log_warn "Homebrew is not installed. Install it from https://brew.sh for Ollama and Local Whisper guidance."
 else
     log_ok "Homebrew"
+fi
+
+if python3 -c "import sys; assert sys.version_info >= (3, 11)" 2>/dev/null; then
+    log_ok "Python $(python3 --version 2>&1 | cut -d' ' -f2)"
+elif command -v brew &>/dev/null; then
+    log_warn "Python 3.11+ is missing. Installing Python with Homebrew."
+    brew install python@3.11
+else
+    fail "Python 3.11+ is required. Install Python or Homebrew, then rerun the installer."
 fi
 
 if ! command -v uv &>/dev/null; then
@@ -114,6 +133,7 @@ else
 fi
 
 log_step "Installing into ${INSTALL_DIR}"
+require_safe_install_dir "$INSTALL_DIR"
 staging="$tmp_dir/staging"
 mkdir -p "$staging"
 tar -xzf "$archive" -C "$staging" --strip-components 1
