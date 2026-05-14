@@ -1,4 +1,4 @@
-"""Effort estimation wrapper for the legacy complexity scorer."""
+"""Effort estimation wrapper for the deterministic complexity scorer."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ async def estimate_effort(
     text: str,
     messages: list[dict] | None = None,
 ) -> EffortEstimate:
-    """Return a routing effort estimate without changing scorer compatibility."""
+    """Return a routing effort estimate for the local policy router."""
     response = await scorer.score_complexity(text, messages=messages)
     return EffortEstimate(
         level=response.classification,

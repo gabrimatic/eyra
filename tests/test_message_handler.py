@@ -45,7 +45,7 @@ class _NoToolClient:
 
 
 class TestProcessTaskStream:
-    def test_legacy_routing_off_uses_model_and_costly_tools(self, monkeypatch):
+    def test_internal_default_uses_model_and_costly_tools(self, monkeypatch):
         client = _RecordingClient()
         monkeypatch.setattr("chat.message_handler.get_ai_client", lambda *_, **__: client)
 
@@ -62,7 +62,7 @@ class TestProcessTaskStream:
         assert client.calls[-1]["model_name"] == "main"
         assert client.calls[-1]["include_costly"] is True
 
-    def test_legacy_fast_complex_prompt_does_not_expose_costly_tools(self, monkeypatch):
+    def test_fast_complex_prompt_does_not_expose_costly_tools(self, monkeypatch):
         client = _RecordingClient()
         monkeypatch.setattr("chat.message_handler.get_ai_client", lambda *_, **__: client)
 
@@ -86,7 +86,7 @@ class TestProcessTaskStream:
         assert client.calls[-1]["include_costly"] is False
         assert client.calls[-1]["require_tools"] is True
 
-    def test_legacy_balanced_simple_moderate_excludes_costly_tools(self, monkeypatch):
+    def test_balanced_simple_moderate_excludes_costly_tools(self, monkeypatch):
         client = _RecordingClient()
         monkeypatch.setattr("chat.message_handler.get_ai_client", lambda *_, **__: client)
 
@@ -101,7 +101,7 @@ class TestProcessTaskStream:
 
         assert client.calls[-1]["include_costly"] is False
 
-    def test_legacy_balanced_complex_includes_costly_tools(self, monkeypatch):
+    def test_balanced_complex_includes_costly_tools(self, monkeypatch):
         client = _RecordingClient()
         monkeypatch.setattr("chat.message_handler.get_ai_client", lambda *_, **__: client)
 
@@ -117,7 +117,7 @@ class TestProcessTaskStream:
         assert client.calls[-1]["model_name"] == "main"
         assert client.calls[-1]["include_costly"] is True
 
-    def test_legacy_best_simple_prompt_uses_model_and_costly_tools(self, monkeypatch):
+    def test_best_simple_prompt_uses_model_and_costly_tools(self, monkeypatch):
         client = _RecordingClient()
         monkeypatch.setattr("chat.message_handler.get_ai_client", lambda *_, **__: client)
 

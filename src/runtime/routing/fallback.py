@@ -30,7 +30,10 @@ def build_fallback_plan(execution_class: ExecutionClass) -> FallbackPlan:
         )
     if execution_class in {ExecutionClass.BACKGROUND_TASK, ExecutionClass.TOOL_ASSISTED_CHAT, ExecutionClass.FILESYSTEM_ACTION}:
         return FallbackPlan(
-            on_model_missing="No configured model can handle this local tool task.",
+            on_model_missing=(
+                "This local tool task requires a model with native tool calling. Configure a tool-capable model "
+                "and try again."
+            ),
             on_tools_unsupported=(
                 "The selected model cannot use local tools. Text chat still works, but this task needs a "
                 "tool-capable model."

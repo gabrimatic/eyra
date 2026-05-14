@@ -75,10 +75,8 @@ class Settings:
     OPENAI_API_KEY: str = ""
     REALTIME_TOOLS_ENABLED: bool = False
     REALTIME_ALLOWED_TOOLS: str = ""
-    # Experimental: complexity-based routing. When disabled, all requests use MODEL.
+    # Complexity-based model tiers. When disabled, all requests use MODEL after policy routing.
     COMPLEXITY_ROUTING_ENABLED: bool = False
-    # Experimental: local policy router. Disabled by default for compatibility.
-    ROUTING_POLICY_ENABLED: bool = False
     ROUTING_DEBUG: bool = False
 
     @classmethod
@@ -161,7 +159,6 @@ class Settings:
             REALTIME_TOOLS_ENABLED=_bool("REALTIME_TOOLS_ENABLED", "false"),
             REALTIME_ALLOWED_TOOLS=os.getenv("REALTIME_ALLOWED_TOOLS", ""),
             COMPLEXITY_ROUTING_ENABLED=_bool("COMPLEXITY_ROUTING_ENABLED", "false"),
-            ROUTING_POLICY_ENABLED=_bool("ROUTING_POLICY_ENABLED", "false"),
             ROUTING_DEBUG=_bool("ROUTING_DEBUG", "false"),
         )
 

@@ -129,8 +129,7 @@ def _write_env(base_url: str, api_key: str, model: str):
         "REALTIME_TOOLS_ENABLED", "REALTIME_ALLOWED_TOOLS",
         "BACKGROUND_TASKS_ENABLED", "MAX_BACKGROUND_TASKS", "WORKER_MODEL", "TASK_TIMEOUT_SECONDS",
         "MAX_WORKER_TOOL_STEPS", "TOOL_TIMEOUT_SECONDS", "MODEL_CONCURRENCY", "TASK_STATUS_UPDATES",
-        "FILESYSTEM_ALLOWED_PATHS", "FILESYSTEM_DEFAULT_PATH", "COMPLEXITY_ROUTING_ENABLED",
-        "ROUTING_POLICY_ENABLED", "ROUTING_DEBUG",
+        "FILESYSTEM_ALLOWED_PATHS", "FILESYSTEM_DEFAULT_PATH", "COMPLEXITY_ROUTING_ENABLED", "ROUTING_DEBUG",
     }
     extra: list[str] = []
     existing: dict[str, str] = {}
@@ -149,7 +148,7 @@ def _write_env(base_url: str, api_key: str, model: str):
                     "# Optional OS, agent, MCP, and network tools",
                     "# Filesystem sandbox",
                     "# Optional network tools",
-                    "# Experimental routing",
+                    "# Routing",
                     "# Custom",
                 ):
                     extra.append(line)
@@ -219,9 +218,8 @@ def _write_env(base_url: str, api_key: str, model: str):
         f"FILESYSTEM_ALLOWED_PATHS={existing.get('FILESYSTEM_ALLOWED_PATHS', '~/Documents,~/Desktop,~/Downloads,/tmp')}",
         f"FILESYSTEM_DEFAULT_PATH={existing.get('FILESYSTEM_DEFAULT_PATH', '~/Documents')}",
         "",
-        "# Experimental routing",
+        "# Routing",
         f"COMPLEXITY_ROUTING_ENABLED={existing.get('COMPLEXITY_ROUTING_ENABLED', 'false')}",
-        f"ROUTING_POLICY_ENABLED={existing.get('ROUTING_POLICY_ENABLED', 'false')}",
         f"ROUTING_DEBUG={existing.get('ROUTING_DEBUG', 'false')}",
     ]
     if extra:

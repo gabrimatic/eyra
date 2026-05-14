@@ -52,10 +52,9 @@ class TestModelSelection:
 
 
 class TestSettingsRoutingDefaults:
-    def test_policy_routing_is_off_by_default(self):
+    def test_route_debug_is_off_by_default(self):
         from utils.settings import Settings
 
         settings = Settings()
 
-        assert settings.ROUTING_POLICY_ENABLED is False
         assert settings.ROUTING_DEBUG is False

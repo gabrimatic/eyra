@@ -3,11 +3,9 @@
 """
 Message Handler
 
-Routes requests through either a precomputed local policy routing decision or
-the legacy complexity scorer, selects the appropriate model tier, and streams
-responses. Images are provided by controller-owned flows or tools, not captured
-here. In the legacy path, an active tool registry uses the tool-calling
-pipeline; tool exposure is controlled by include_costly.
+Streams responses from a local policy routing decision when available, or from
+the same deterministic scorer for internal controller prompts. Images are
+provided by controller-owned flows or tools, not captured here.
 """
 
 import logging
@@ -102,14 +100,14 @@ def select_model(
     return model_mapping.get(complexity_level, settings.SIMPLE_MODEL)
 
 
-def _legacy_include_costly(
+def _include_costly_from_effort(
     *,
-    routing_enabled: bool,
+    tiered_model_routing_enabled: bool,
     quality_mode: QualityMode,
     complexity_level: ComplexityLevel | None,
 ) -> bool:
-    """Compute legacy costly-tool exposure separately from model choice."""
-    if not routing_enabled:
+    """Compute costly-tool exposure for internal calls without a RoutingDecision."""
+    if not tiered_model_routing_enabled:
         return True
     if quality_mode == QualityMode.FAST:
         return False
@@ -157,9 +155,9 @@ async def process_task_stream(
     """
     Score complexity, select a model, and stream the response.
 
-    Legacy behavior uses stream_with_tools() whenever a registry is provided;
-    include_costly controls costly tool exposure. When a RoutingDecision is
-    provided, that policy decides the model, required tool use, and allowlist.
+    A RoutingDecision is the normal user-facing path and decides the model,
+    required tool use, and allowlist. Internal controller prompts can still use
+    the same deterministic complexity scorer without exposing policy toggles.
     """
     if messages is None:
         messages = []
@@ -187,15 +185,15 @@ async def process_task_stream(
             response = await complexity_scorer.score_complexity(text_content, messages=messages)
             logger.debug("Complexity: %s (%.2f)", response.classification, response.confidence)
             model_name = select_model(response.classification, settings, quality_mode)
-            is_complex = _legacy_include_costly(
-                routing_enabled=True,
+            is_complex = _include_costly_from_effort(
+                tiered_model_routing_enabled=True,
                 quality_mode=quality_mode,
                 complexity_level=response.classification,
             )
         else:
             model_name = settings.MODEL
-            is_complex = _legacy_include_costly(
-                routing_enabled=False,
+            is_complex = _include_costly_from_effort(
+                tiered_model_routing_enabled=False,
                 quality_mode=quality_mode,
                 complexity_level=None,
             )

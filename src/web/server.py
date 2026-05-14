@@ -34,7 +34,6 @@ from runtime.intents import (
     extract_pdf_path,
     needs_screen_context,
     requires_filesystem,
-    requires_model_driven_tools,
     requires_network,
     should_background_task,
     task_title,
@@ -244,9 +243,8 @@ class WebAssistantRuntime:
         if not text:
             return {"reply": "Message is empty."}
         if requires_network(text) and not self.settings.NETWORK_TOOLS_ENABLED:
-            if self.settings.ROUTING_POLICY_ENABLED:
-                interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
-                await self._route_decision(text, voice_mode=voice_mode, interaction=interaction, is_worker=False)
+            interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
+            await self._route_decision(text, voice_mode=voice_mode, interaction=interaction, is_worker=False)
             return {
                 "reply": (
                     "Network tools are disabled. Enable NETWORK_TOOLS_ENABLED=true before asking Eyra to browse, "
@@ -254,9 +252,8 @@ class WebAssistantRuntime:
                 )
             }
         if needs_screen_context(text) and not self._vision_available():
-            if self.settings.ROUTING_POLICY_ENABLED:
-                interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
-                await self._route_decision(text, voice_mode=voice_mode, interaction=interaction, is_worker=False)
+            interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
+            await self._route_decision(text, voice_mode=voice_mode, interaction=interaction, is_worker=False)
             return {
                 "reply": (
                     "Screen analysis needs a vision-capable model. Set VISION_MODEL to a model that can process "
@@ -280,22 +277,22 @@ class WebAssistantRuntime:
         trigger_result = await self._handle_direct_trigger_intent(text)
         if trigger_result is not None:
             return trigger_result
-        if (
-            requires_model_driven_tools(text)
-            and not self._tool_actions_available()
-            and not self.settings.ROUTING_POLICY_ENABLED
-        ):
-            return {
-                "reply": (
-                    "This open-ended local tool task requires a model with native tool calling. Text chat and "
-                    "recognized controller-owned actions still work with the selected model."
-                )
-            }
         if self.settings.BACKGROUND_TASKS_ENABLED and should_background_task(text):
+            interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
+            route_preview = await self._route_decision(
+                text,
+                voice_mode=voice_mode,
+                interaction=interaction,
+                is_worker=True,
+            )
+            if route_preview.selected_model is None:
+                return {"reply": route_preview.fallback_plan.on_model_missing}
+            if route_preview.require_tools and not route_preview.tool_policy.allowed_tool_names:
+                return {"reply": route_preview.fallback_plan.on_capability_missing}
             task = self.task_manager.create_task(
                 title=task_title(text),
                 original_request=text,
-                worker=lambda task: self._run_worker_task(task, text, voice_mode),
+                worker=lambda task: self._run_worker_task(task, text, voice_mode, routing_decision=route_preview),
                 related_context=list(self.conversation[-6:]),
                 used_tools=True,
                 required_network=requires_network(text),
@@ -331,12 +328,6 @@ class WebAssistantRuntime:
         self.dictation.append(text)
         return {"reply": "Captured dictation."}
 
-    def _tool_actions_available(self) -> bool:
-        model = self.settings.WORKER_MODEL or self.settings.MODEL
-        checked = set(self.preflight.tool_capability_checked_models)
-        capable = set(self.preflight.tool_capable_models)
-        return model not in checked or model in capable
-
     def _vision_available(self) -> bool:
         model = self.settings.VISION_MODEL or self.settings.MODEL
         checked = set(self.preflight.vision_capability_checked_models)
@@ -368,15 +359,22 @@ class WebAssistantRuntime:
         self.conversation.append({"role": "assistant", "content": reply})
         return reply
 
-    async def _run_worker_task(self, task: BackgroundTask, text: str, voice_mode: str) -> str:
+    async def _run_worker_task(
+        self,
+        task: BackgroundTask,
+        text: str,
+        voice_mode: str,
+        routing_decision: RoutingDecision | None = None,
+    ) -> str:
         task.mark_progress("Working")
         interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
-        routing_decision = await self._route_decision(
-            text,
-            voice_mode=voice_mode,
-            interaction=interaction,
-            is_worker=True,
-        )
+        if routing_decision is None:
+            routing_decision = await self._route_decision(
+                text,
+                voice_mode=voice_mode,
+                interaction=interaction,
+                is_worker=True,
+            )
         if needs_screen_context(text):
             task.mark_progress("Capturing screenshot locally")
             return await analyze_screen(
@@ -423,9 +421,7 @@ class WebAssistantRuntime:
         voice_mode: str,
         interaction: InteractionStyle,
         is_worker: bool,
-    ) -> RoutingDecision | None:
-        if not self.settings.ROUTING_POLICY_ENABLED:
-            return None
+    ) -> RoutingDecision:
         envelope = RequestEnvelope(
             text=text,
             source=self._source_for_voice_mode(voice_mode),

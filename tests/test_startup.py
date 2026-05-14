@@ -31,7 +31,6 @@ class TestStartupSelector:
                     "REALTIME_TOOLS_ENABLED=true",
                     "REALTIME_ALLOWED_TOOLS=get_current_time",
                     "VISION_MODEL=gemma3:4b",
-                    "ROUTING_POLICY_ENABLED=true",
                     "ROUTING_DEBUG=true",
                     "",
                 ]
@@ -50,7 +49,7 @@ class TestStartupSelector:
         assert "REALTIME_TOOLS_ENABLED=true" in content
         assert "REALTIME_ALLOWED_TOOLS=get_current_time" in content
         assert "VISION_MODEL=gemma3:4b" in content
-        assert "ROUTING_POLICY_ENABLED=true" in content
+        assert "ROUTING_POLICY_ENABLED" not in content
         assert "ROUTING_DEBUG=true" in content
         assert "REALTIME_VOICE_ENABLED=true" in content
         assert "REALTIME_MODEL=gpt-realtime" in content

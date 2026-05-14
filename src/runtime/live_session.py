@@ -24,7 +24,6 @@ from runtime.intents import (
     extract_pdf_path,
     needs_screen_context,
     requires_filesystem,
-    requires_model_driven_tools,
     requires_network,
     should_background_task,
     task_title,
@@ -798,12 +797,18 @@ class LiveSession:
                 return
             quality = QualityMode.BEST
         if _settings_bool(self.settings, "BACKGROUND_TASKS_ENABLED", True) and self._should_background_task(text):
-            if (
-                self._requires_model_driven_tools(text)
-                and not self._tool_actions_available()
-                and not _settings_bool(self.settings, "ROUTING_POLICY_ENABLED", False)
-            ):
-                self._print_model_without_tools()
+            route_preview = await self._route_decision(
+                text,
+                quality_mode=quality,
+                interaction_style=interaction_style,
+                source=self._source_for_interaction(interaction_style),
+                is_worker=True,
+            )
+            if route_preview.selected_model is None:
+                print(f"  {route_preview.fallback_plan.on_model_missing}")
+                return
+            if route_preview.require_tools and not route_preview.tool_policy.allowed_tool_names:
+                print(f"  {route_preview.fallback_plan.on_capability_missing}")
                 return
             title = self._task_title(text)
             task = self.task_manager.create_task(
@@ -814,6 +819,7 @@ class LiveSession:
                     text_content=text,
                     quality_mode=quality,
                     interaction_style=interaction_style,
+                    routing_decision=route_preview,
                 ),
                 related_context=list(self.state.conversation_messages[-6:]),
                 used_tools=True,
@@ -1940,24 +1946,11 @@ class LiveSession:
         else:
             print(f"  Could not undo {operation.normalized_action.get('type', 'operation')}: {result.content}")
 
-    def _tool_actions_available(self) -> bool:
-        model = _settings_str(self.settings, "WORKER_MODEL", "") or _settings_str(self.settings, "MODEL", "")
-        checked = set(getattr(self.preflight, "tool_capability_checked_models", []))
-        capable = set(getattr(self.preflight, "tool_capable_models", []))
-        return model not in checked or model in capable
-
     def _vision_available(self) -> bool:
         model = _settings_str(self.settings, "VISION_MODEL", "") or _settings_str(self.settings, "MODEL", "")
         checked = set(getattr(self.preflight, "vision_capability_checked_models", []))
         capable = set(getattr(self.preflight, "vision_capable_models", []))
         return model not in checked or model in capable
-
-    @staticmethod
-    def _print_model_without_tools() -> None:
-        print(
-            "  This open-ended local tool task requires a model with native tool calling. Text chat and recognized "
-            "controller-owned actions still work with the selected model."
-        )
 
     @staticmethod
     def _path_in_named_folder(folder: str, name: str) -> str:
@@ -1974,9 +1967,6 @@ class LiveSession:
 
     def _requires_network(self, text: str) -> bool:
         return requires_network(text)
-
-    def _requires_model_driven_tools(self, text: str) -> bool:
-        return requires_model_driven_tools(text)
 
     def _task_title(self, text: str) -> str:
         return task_title(text)
@@ -1995,9 +1985,7 @@ class LiveSession:
         interaction_style: InteractionStyle,
         source: RequestSource,
         is_worker: bool,
-    ) -> RoutingDecision | None:
-        if not _settings_bool(self.settings, "ROUTING_POLICY_ENABLED", False):
-            return None
+    ) -> RoutingDecision:
         envelope = RequestEnvelope(
             text=text,
             source=source,
@@ -2019,15 +2007,17 @@ class LiveSession:
         text_content: str,
         quality_mode: QualityMode,
         interaction_style: InteractionStyle,
+        routing_decision: RoutingDecision | None = None,
     ) -> str:
         task.mark_progress("Working")
-        routing_decision = await self._route_decision(
-            text_content,
-            quality_mode=quality_mode,
-            interaction_style=interaction_style,
-            source=self._source_for_interaction(interaction_style),
-            is_worker=True,
-        )
+        if routing_decision is None:
+            routing_decision = await self._route_decision(
+                text_content,
+                quality_mode=quality_mode,
+                interaction_style=interaction_style,
+                source=self._source_for_interaction(interaction_style),
+                is_worker=True,
+            )
         direct_screen_result = await self._run_direct_screen_task(task, text_content)
         if direct_screen_result is not None:
             return direct_screen_result

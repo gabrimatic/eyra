@@ -89,7 +89,7 @@ class TestModelRegistry:
         assert caps.supports_tools == CapabilityState.UNKNOWN
         assert caps.supports_vision == CapabilityState.UNKNOWN
 
-    def test_worker_model_settings_pins_all_legacy_tiers(self):
+    def test_worker_model_settings_pins_all_tiers(self):
         settings = worker_model_settings(Settings(MODEL="main", SIMPLE_MODEL="simple", MODERATE_MODEL="moderate", WORKER_MODEL="worker"))
 
         assert settings.MODEL == "worker"

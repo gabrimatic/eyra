@@ -312,7 +312,7 @@ class TestWebServerHelpers:
         assert tasks["tasks"] == []
         runtime.close()
 
-    def test_web_generic_worker_uses_worker_model_across_legacy_tiers(self, monkeypatch, tmp_path):
+    def test_web_generic_worker_uses_worker_model_across_tiers(self, monkeypatch, tmp_path):
         from runtime.models import PreflightResult
 
         seen = {}
@@ -360,7 +360,6 @@ class TestWebServerHelpers:
             USE_MOCK_CLIENT=True,
             LIVE_LISTENING_ENABLED=False,
             LIVE_SPEECH_ENABLED=False,
-            ROUTING_POLICY_ENABLED=True,
         )
         preflight = PreflightResult(
             backend_reachable=True,
