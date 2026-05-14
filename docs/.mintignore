@@ -7,12 +7,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Exclude project source and test internals from hidden public docs.
-src/
-tests/
-scripts/
-docs/
-
 # Exclude local/runtime files if they exist in a checkout.
 .env
 .env.*

@@ -7,18 +7,19 @@ Mintlify-hosted docs are AI-native by default: pages are available as Markdown, 
 
 ## Local docs structure
 
-This repo keeps the source docs in MDX with explicit frontmatter and navigation in `docs.json`.
+This repo keeps the public docs site in `docs/`, with source pages in MDX, explicit frontmatter, and navigation in `docs/docs.json`.
 
 ```text
-docs.json
-index.mdx
-get-started/
-guides/
-reference/
-architecture/
-development/
-security/
-project/
+docs/
+  docs.json
+  index.mdx
+  get-started/
+  guides/
+  reference/
+  architecture/
+  development/
+  security/
+  project/
 ```
 
 ## Agent usefulness
@@ -59,6 +60,7 @@ npm i -g mint
 Validate locally:
 
 ```bash
+cd docs
 mint validate --disable-openapi
 mint broken-links --check-anchors
 mint a11y
@@ -67,6 +69,7 @@ mint a11y
 Preview locally:
 
 ```bash
+cd docs
 mint dev --no-open --disable-openapi
 ```
 
