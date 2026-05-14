@@ -29,6 +29,8 @@ from chat.message_handler import process_task_stream
 from chat.session_state import InteractionStyle, QualityMode
 from runtime.capabilities import build_capability_snapshot, format_capability_answer
 from runtime.coding_jobs import approval_id_from_text, parse_coding_job_request
+from runtime.connectors.registry import ConnectorRegistry
+from runtime.connectors.types import ConnectorJobSpec
 from runtime.dictation import DictationState, dictation_command, parse_dictation_target
 from runtime.intents import (
     extract_pdf_path,
@@ -136,6 +138,7 @@ def build_health_payload(
             "os": settings.OS_TOOLS_ENABLED,
             "agents": settings.AGENT_TOOLS_ENABLED or settings.EXTERNAL_AGENT_TOOLS_ENABLED,
             "mcp": settings.MCP_TOOLS_ENABLED,
+            "connectors": settings.CONNECTORS_ENABLED,
         },
     }
 
@@ -239,6 +242,7 @@ class WebAssistantRuntime:
             self.job_store = shared.job_store
             self.trigger_store = shared.trigger_store
             self.task_manager = shared.task_manager
+            self.connector_registry = shared.connector_registry
         else:
             self.scorer = ComplexityScorer()
             self.conversation: list[dict[str, str]] = []
@@ -257,6 +261,11 @@ class WebAssistantRuntime:
                 on_event=self._on_task_event,
                 job_store=self.job_store,
                 source_frontend="web",
+            )
+            self.connector_registry = ConnectorRegistry.from_settings(
+                settings,
+                approvals=self.approvals,
+                job_store=self.job_store,
             )
         self.router = RuntimeRouter(self.scorer)
         self.last_route_trace = shared.last_route_trace if shared is not None else None
@@ -311,6 +320,9 @@ class WebAssistantRuntime:
         ):
             snapshot = build_capability_snapshot(self.settings, preflight=self.preflight)
             return {"reply": format_capability_answer(snapshot)}
+        connector_result = await self._handle_connector_input(text)
+        if connector_result is not None:
+            return connector_result
         dictation_result = await self._handle_dictation_input(text)
         if dictation_result is not None:
             return dictation_result
@@ -371,6 +383,36 @@ class WebAssistantRuntime:
             return {"reply": f"Dictation ended.\n{content or '(empty)'}"}
         self.dictation.append(text)
         return {"reply": "Captured dictation."}
+
+    async def _handle_connector_input(self, text: str) -> dict[str, Any] | None:
+        lowered = text.lower()
+        if re.search(r"\b(what connectors do i have|list connectors|show connectors)\b", lowered):
+            return {"reply": json.dumps(self.connector_registry.capability_snapshot(), indent=2, sort_keys=True)}
+        connector_id = self._extract_connector_id(text)
+        if connector_id is None:
+            return None
+        if re.search(r"\b(can you use|connector status|show connector|what is)\b", lowered):
+            return {"reply": json.dumps(self.connector_registry.snapshot_for(connector_id), indent=2, sort_keys=True)}
+        if re.search(r"\bcancel\b", lowered):
+            cancelled = self.connector_registry.cancel(connector_id)
+            return {"reply": f"Cancelled connector job for {connector_id}." if cancelled else f"No running connector job found for {connector_id}."}
+        task_match = re.search(
+            r"\b(?:connect this task to|ask|tell|use)\s+[a-z][a-z0-9_-]{1,63}\s+(?:to\s+)?(?P<task>.+)$",
+            text,
+            re.I,
+        )
+        task_text = task_match.group("task").strip() if task_match else text
+        return await self.run_connector(connector_id, task_text)
+
+    def _extract_connector_id(self, text: str) -> str | None:
+        configured = {item["id"].lower() for item in self.connector_registry.list_connectors()}
+        for connector_id in configured:
+            if re.search(rf"\b{re.escape(connector_id)}\b", text, re.I):
+                return connector_id
+        if "connector" not in text.lower():
+            return None
+        match = re.search(r"\b(?:connector|use|ask|tell|cancel|connect(?: this task)? to)\s+([a-z][a-z0-9_-]{1,63})\b", text, re.I)
+        return match.group(1).lower() if match else None
 
     def _vision_available(self) -> bool:
         model = self.settings.VISION_MODEL or self.settings.MODEL
@@ -477,7 +519,11 @@ class WebAssistantRuntime:
             settings=self.settings,
             preflight=self.preflight,
         )
-        decision = await self.router.route(envelope, tool_registry=self.registry)
+        decision = await self.router.route(
+            envelope,
+            tool_registry=self.registry,
+            connector_registry=self.connector_registry,
+        )
         self.last_route_trace = decision.trace
         if self.shared is not None:
             self.shared.last_route_trace = decision.trace
@@ -852,6 +898,89 @@ class WebAssistantRuntime:
             preflight=self.preflight,
         )
 
+    async def connectors(self) -> dict[str, Any]:
+        return self.connector_registry.capability_snapshot()
+
+    async def connector_detail(self, connector_id: str) -> dict[str, Any]:
+        return {"connector": self.connector_registry.snapshot_for(connector_id)}
+
+    async def test_connector(self, connector_id: str) -> dict[str, Any]:
+        result = await self.connector_registry.test(connector_id)
+        return {"connectorId": result.connector_id, "state": result.state.value, "reason": result.reason, "checks": list(result.checks)}
+
+    async def run_connector(self, connector_id: str, task_text: str) -> dict[str, Any]:
+        route_preview = await self._route_decision(
+            f"ask connector {connector_id}",
+            voice_mode="text",
+            interaction=InteractionStyle.TEXT,
+            is_worker=True,
+        )
+        job = self.job_store.create_job(
+            title=f"Connector job: {connector_id}",
+            original_user_input=f"connector:{connector_id}",
+            source_frontend="web",
+            normalized_task_spec={"task_type": "connector.job", "connector_id": connector_id},
+            risk_level=RiskLevel.MEDIUM_RISK_CHANGE,
+            required_capabilities=[cap.value for cap in route_preview.required_capabilities],
+        )
+
+        async def worker(task: BackgroundTask) -> str:
+            result = await self.connector_registry.run(
+                ConnectorJobSpec(
+                    connector_id=connector_id,
+                    task=task_text,
+                    cwd=self.settings.FILESYSTEM_DEFAULT_PATH,
+                    source="web",
+                    job_id=job.id,
+                )
+            )
+            if result.status == "approval_required":
+                task.mark_progress(f"Waiting for connector approval {result.approval_id}")
+                while not task.cancellation_requested:
+                    approval = self.approvals.get(result.approval_id)
+                    if approval is None:
+                        raise RuntimeError("Connector approval expired.")
+                    if approval.rejected:
+                        raise RuntimeError("Connector job rejected.")
+                    if approval.approved:
+                        rerun = await self.connector_registry.run(
+                            ConnectorJobSpec(
+                                connector_id=connector_id,
+                                task=task_text,
+                                cwd=self.settings.FILESYSTEM_DEFAULT_PATH,
+                                source="web",
+                                job_id=job.id,
+                                approval_id=result.approval_id,
+                            )
+                        )
+                        if rerun.status == "completed":
+                            return rerun.output
+                        if rerun.status == "cancelled":
+                            return rerun.output
+                        raise RuntimeError(rerun.output)
+                    await asyncio.sleep(0.05)
+                self.connector_registry.cancel(job.id)
+                return "Connector job cancelled."
+            if result.status == "completed":
+                return result.output
+            if result.status == "cancelled":
+                return result.output
+            raise RuntimeError(result.output)
+
+        task = self.task_manager.create_task(
+            title=f"Connector job: {connector_id}",
+            original_request=f"connector:{connector_id}",
+            worker=worker,
+            used_tools=True,
+            required_filesystem=True,
+            normalized_task_spec={"task_type": "connector.job", "connector_id": connector_id, "job_id": job.id},
+            risk_level=RiskLevel.MEDIUM_RISK_CHANGE,
+        )
+        return {"reply": f"Connector job {task.id} accepted with {connector_id}", "taskId": task.id, "jobId": job.id}
+
+    async def cancel_connector(self, connector_id: str) -> dict[str, Any]:
+        return {"cancelled": self.connector_registry.cancel(connector_id)}
+
     async def list_tasks(self) -> dict[str, Any]:
         return {"tasks": [_task_payload(task) for task in self.task_manager.list_tasks(include_recent=True)]}
 
@@ -1108,9 +1237,15 @@ def render_index_html(settings: Settings) -> str:
       color: var(--muted);
       font-size: 13px;
     }}
-    .task {{
+    #connectors, #approvals {{
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    .task, .connector, .approval {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
       gap: 8px;
       align-items: center;
       border: 1px solid var(--line);
@@ -1188,9 +1323,12 @@ def render_index_html(settings: Settings) -> str:
         <span class="pill">Network {'on' if settings.NETWORK_TOOLS_ENABLED else 'off'}</span>
         <span class="pill">OS tools {'on' if settings.OS_TOOLS_ENABLED else 'off'}</span>
         <span class="pill">MCP {'on' if settings.MCP_TOOLS_ENABLED else 'off'}</span>
+        <span class="pill">Connectors {'on' if settings.CONNECTORS_ENABLED else 'off'}</span>
       </div>
     </header>
     <section id="messages" aria-live="polite"></section>
+    <section id="connectors" aria-live="polite"></section>
+    <section id="approvals" aria-live="polite"></section>
     <section id="tasks" aria-live="polite"></section>
     <form id="chatForm">
       <select id="voiceMode" aria-label="Voice mode">
@@ -1210,6 +1348,8 @@ def render_index_html(settings: Settings) -> str:
     const micButton = document.getElementById('micButton');
     const voiceMode = document.getElementById('voiceMode');
     const tasks = document.getElementById('tasks');
+    const connectors = document.getElementById('connectors');
+    const approvals = document.getElementById('approvals');
     let currentTasks = [];
 
     function addMessage(role, text, extraClass = '') {{
@@ -1234,6 +1374,8 @@ def render_index_html(settings: Settings) -> str:
         reply.textContent = data.reply || data.error || '';
         if (!response.ok) reply.classList.add('error');
         loadTasks();
+        loadConnectors();
+        loadApprovals();
       }} catch (error) {{
         reply.textContent = 'Could not reach Eyra on this machine.';
         reply.classList.add('error');
@@ -1283,6 +1425,83 @@ def render_index_html(settings: Settings) -> str:
         if (!response.ok) return;
         const data = await response.json();
         renderTasks(data.tasks || []);
+      }} catch (_) {{}}
+    }}
+
+    function renderConnectors(rows) {{
+      connectors.replaceChildren();
+      for (const connector of (rows || []).slice(0, 6)) {{
+        const row = document.createElement('div');
+        row.className = 'connector';
+        const label = document.createElement('div');
+        label.textContent = `${{connector.id}} · ${{connector.enabled ? 'on' : 'off'}} · ${{connector.acceptanceState}} · ${{connector.riskTier}}`;
+        row.appendChild(label);
+        const test = document.createElement('button');
+        test.textContent = 'Test';
+        test.onclick = async () => {{
+          await fetch('/api/connector/test', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json', 'X-Eyra-Web-Token': webToken }},
+            body: JSON.stringify({{ connectorId: connector.id }}),
+          }});
+          loadConnectors();
+        }};
+        row.appendChild(test);
+        const cancel = document.createElement('button');
+        cancel.textContent = 'Cancel';
+        cancel.onclick = async () => {{
+          await fetch('/api/connector/cancel', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json', 'X-Eyra-Web-Token': webToken }},
+            body: JSON.stringify({{ connectorId: connector.id }}),
+          }});
+          loadTasks();
+        }};
+        row.appendChild(cancel);
+        connectors.appendChild(row);
+      }}
+    }}
+
+    async function loadConnectors() {{
+      try {{
+        const response = await fetch('/api/connectors', {{ headers: {{ 'X-Eyra-Web-Token': webToken }} }});
+        if (!response.ok) return;
+        const data = await response.json();
+        renderConnectors(data.connectors || []);
+      }} catch (_) {{}}
+    }}
+
+    function renderApprovals(rows) {{
+      approvals.replaceChildren();
+      for (const approval of (rows || []).slice(0, 6)) {{
+        const row = document.createElement('div');
+        row.className = 'approval';
+        const label = document.createElement('div');
+        label.textContent = `${{approval.id}} · ${{approval.tool}} · ${{approval.title}}`;
+        row.appendChild(label);
+        for (const action of ['approve', 'reject']) {{
+          const button = document.createElement('button');
+          button.textContent = action === 'approve' ? 'Approve' : 'Reject';
+          button.onclick = async () => {{
+            await fetch(`/api/${{action}}`, {{
+              method: 'POST',
+              headers: {{ 'Content-Type': 'application/json', 'X-Eyra-Web-Token': webToken }},
+              body: JSON.stringify({{ approvalId: approval.id }}),
+            }});
+            loadApprovals();
+          }};
+          row.appendChild(button);
+        }}
+        approvals.appendChild(row);
+      }}
+    }}
+
+    async function loadApprovals() {{
+      try {{
+        const response = await fetch('/api/approvals', {{ headers: {{ 'X-Eyra-Web-Token': webToken }} }});
+        if (!response.ok) return;
+        const data = await response.json();
+        renderApprovals(data.approvals || []);
       }} catch (_) {{}}
     }}
 
@@ -1476,6 +1695,8 @@ def render_index_html(settings: Settings) -> str:
     }});
     connectTaskEvents();
     loadTasks();
+    loadConnectors();
+    loadApprovals();
   </script>
 </body>
 </html>"""
@@ -1522,6 +1743,17 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             if not self._authorized():
                 return
             self._send_json(200, self.runtime.run_sync(self.runtime.capabilities()))
+            return
+        if parsed.path == "/api/connectors":
+            if not self._authorized():
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.connectors()))
+            return
+        connector_match = re.fullmatch(r"/api/connector/([^/]+)", parsed.path)
+        if connector_match:
+            if not self._authorized():
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.connector_detail(connector_match.group(1))))
             return
         if parsed.path == "/api/route/last":
             if not self._authorized():
@@ -1578,6 +1810,9 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             "/api/trigger",
             "/api/approve",
             "/api/reject",
+            "/api/connector/test",
+            "/api/connector/run",
+            "/api/connector/cancel",
         } and not self._authorized():
             return
         if parsed.path in {
@@ -1591,6 +1826,9 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             "/api/trigger",
             "/api/approve",
             "/api/reject",
+            "/api/connector/test",
+            "/api/connector/run",
+            "/api/connector/cancel",
         } and self._reject_if_too_large(
             max_bytes=25 * 1024 * 1024 if parsed.path == "/api/local-voice-turn" else 1_000_000
         ):
@@ -1654,6 +1892,31 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "approvalId is required."})
                 return
             self._send_json(200, self.runtime.run_sync(self.runtime.reject(approval_id)))
+            return
+        if parsed.path == "/api/connector/test":
+            payload = self._read_json()
+            connector_id = str(payload.get("connectorId", "")).strip()
+            if not connector_id:
+                self._send_json(400, {"error": "connectorId is required."})
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.test_connector(connector_id), timeout=30))
+            return
+        if parsed.path == "/api/connector/run":
+            payload = self._read_json()
+            connector_id = str(payload.get("connectorId", "")).strip()
+            task_text = str(payload.get("task", "")).strip()
+            if not connector_id or not task_text:
+                self._send_json(400, {"error": "connectorId and task are required."})
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.run_connector(connector_id, task_text)))
+            return
+        if parsed.path == "/api/connector/cancel":
+            payload = self._read_json()
+            connector_id = str(payload.get("connectorId", "")).strip()
+            if not connector_id:
+                self._send_json(400, {"error": "connectorId is required."})
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.cancel_connector(connector_id)))
             return
         if parsed.path == "/api/local-voice-turn":
             payload = self._read_bytes(max_bytes=25 * 1024 * 1024)

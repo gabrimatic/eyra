@@ -8,7 +8,7 @@ Eyra is a local-first voice agent for the macOS terminal.
 
 Speak or type. Eyra routes the request to an OpenAI-compatible model, calls local tools when needed, and speaks back through Local Whisper. Long work runs as owned background tasks, so the main coordinator stays available for quick questions, status, and cancellation. The default path stays on your machine: Ollama at localhost, Silero VAD in process, screenshots in memory, local PDFs/files, no telemetry.
 
-Cloud providers, network-backed tools, full OS command tools, MCP bridges, external agent delegation, Realtime voice, and the Web UI are opt-in. Current `master` contains unreleased post-4.1.0 routing and voice hardening intended for a future 4.2.0 release candidate.
+Cloud providers, network-backed tools, full OS command tools, MCP bridges, universal connectors, external agent delegation, Realtime voice, and the Web UI are opt-in. Current `master` contains unreleased post-4.1.0 routing and voice hardening intended for a future 4.2.0 release candidate.
 
 <p align="center"><img src="screenshot.png" width="800" alt="Eyra terminal screenshot"></p>
 
@@ -136,6 +136,7 @@ Those installs should expose the same support commands as source installs. Run `
 - Optional UI actions: approved coordinate click, scroll, drag, focused text entry, and hotkey tools are available only when `OS_TOOLS_ENABLED=true`.
 - Optional app/window control: list visible apps, list app windows, activate apps, quit apps with approval, and apply approved window actions such as close, minimize, zoom, fullscreen, move, and resize when `OS_TOOLS_ENABLED=true`.
 - Optional MCP tools: list stdio MCP servers from `MCP_CONFIG_PATH` and call tools only after action-specific approval.
+- Optional connectors: attach CLI, MCP, local HTTP, browser-agent, coding-agent, or explicitly opted-in remote workers from a structured manifest. Eyra validates the manifest, tracks acceptance state, enforces sandbox and privacy policy, requires approval for risky work, runs jobs with timeout/cancellation/output caps, redacts output, and records logs/artifacts.
 - Optional agent delegation: inspect Codex/OpenClaw availability and sessions, read bounded redacted session content, use Codex/OpenClaw-compatible tool names, and hand complex work to terminal agents when `AGENT_TOOLS_ENABLED=true`. BYO agents use static argv from `EXTERNAL_AGENT_CONFIG_PATH`, sandboxed cwd, bounded timeouts, capped redacted output, and exact approval.
 - Coding jobs: when agent tools are enabled, “Start a coding job with Codex to …” creates an owned background task, waits for server-side approval, then runs the bounded terminal-agent bridge.
 - Dictation: “Start dictation”, “End dictation”, and “Cancel dictation” capture text locally without model routing. Dictation can save directly to a sandboxed file and supports simple “Literal …” spelling for filenames, codes, and exact text.
@@ -163,8 +164,9 @@ Eyra runs one live session with a typed channel, a voice channel, a coordinator,
 - Background workers: long or tool-heavy requests are accepted as tasks and run through a worker pipeline. Each task keeps metadata: id, title, original request, state, progress, result, error, tool/network/filesystem/vision flags, and cancellation state.
 - Runtime recovery: `/voice on` rechecks Local Whisper and enables whichever side is ready. ASR and TTS are tracked separately, so speech can keep working while microphone input is unavailable or still loading.
 - Typed input: keyboard input is always available and feeds the same conversation as voice.
-- Tool use: the model can call local function tools for screenshot, time, clipboard, system info, macOS context, PDF extraction, and filesystem work. OS command tools, UI actions, MCP bridges, agent session inspection, agent delegation, weather, URL fetch, and browser tools are available only after you opt in.
-- Web UI: `WEB_UI_ENABLED=true eyra` starts a browser frontend attached to the terminal-owned runtime. `eyra-web` runs the same preflight checks as a standalone Web runtime. Both use the shared intent rules and tool registry, persist jobs and triggers to the same local stores when configured paths match, and serve a small local UI with task, job-log, artifact, trigger pause/resume/cancel, approval, auth, and event-driven task APIs.
+- Tool use: the model can call local function tools for screenshot, time, clipboard, system info, macOS context, PDF extraction, and filesystem work. OS command tools, UI actions, MCP bridges, connector jobs, agent session inspection, agent delegation, weather, URL fetch, and browser tools are available only after you opt in.
+- Connectors: Eyra is not trying to rebuild every external agent or automation system. Connectors let those systems run as workers under Eyra policy. Eyra owns voice UX, route policy, approvals, privacy boundaries, jobs, logs, artifacts, operation ledger entries, cancellation, certification, and user-facing status.
+- Web UI: `WEB_UI_ENABLED=true eyra` starts a browser frontend attached to the terminal-owned runtime. `eyra-web` runs the same preflight checks as a standalone Web runtime. Both use the shared intent rules and tool registry, persist jobs and triggers to the same local stores when configured paths match, and serve a small local UI with connector status, connector acceptance tests, task, job-log, artifact, trigger pause/resume/cancel, approval, auth, and event-driven task APIs.
 - Realtime voice: browser Realtime voice is an online option. Eyra mints server-side ephemeral client secrets and never puts the standard OpenAI API key in browser code. Realtime tools are off by default and use a small allowlist when explicitly enabled.
 - Model routing: complexity routing is experimental and off by default. When enabled, `ComplexityScorer` dispatches requests to Simple, Moderate, or Complex tiers.
 - File actions: common move, copy, rename, duplicate, create, overwrite, trash, restore, zip/unzip, and direct read requests use deterministic sandboxed tool calls before involving the model. Existing files are protected until you explicitly say to overwrite, and irreversible deletion requires exact approval.
@@ -180,6 +182,7 @@ Eyra runs one live session with a typed channel, a voice channel, a coordinator,
 - Pause/resume: “Pause that” pauses the latest queued task before it starts, and “Resume that” resumes the latest paused task.
 - Triggers: say “When report.pdf appears in my Downloads, move it to Documents.”, “Remind me in 10 minutes to stretch.”, or “Every 30 minutes remind me to stretch.” Inspect triggers with `/triggers` and manage them with `/trigger pause|resume|cancel <id>`.
 - Coding jobs: say “Start a coding job with Codex to update the README.” to create an approved, cancellable terminal-agent task. Ask “What is the coding agent doing?” for status.
+- Connector jobs: run `/connectors`, `/connector openclawnew`, `/connector test openclawnew`, or `/connector run openclawnew inspect this folder`. Natural phrases such as “What connectors do I have?”, “Can you use OpenClawNew?”, “Ask OpenClawNew to inspect this folder”, and “Cancel the OpenClawNew job” are handled by the coordinator.
 - Dictation: say “Start dictation” to capture text locally, or “Start dictation to a file named note.txt in my Documents.” to save the final text when you say “End dictation.” Use “Cancel dictation” to discard it.
 - Corrections: if a direct file target was wrong and the action failed, say “No, I meant correct-file.txt” to retry that same local action with the corrected name.
 - Triggers: say “When report.pdf appears in my Downloads, move it to Documents”, “Remind me in 10 minutes to stretch”, or “Every 30 minutes remind me to stretch.” Use `/triggers` and `/trigger pause|resume|cancel <id>` to manage local triggers.
@@ -190,6 +193,7 @@ Eyra runs one live session with a typed channel, a voice channel, a coordinator,
 - Planning: common voice-to-computer requests are normalized into typed task specs with target references, required context, capabilities, actions, risk, verification, and rollback metadata before local execution when a deterministic plan applies.
 - Privacy boundary: capability snapshots include action-specific decisions for model calls, network tools, and Realtime voice, including whether data leaves the machine, what data class leaves, where it goes, and whether the path is allowed by current settings.
 - Approvals: risky OS, LaunchAgent, clipboard, command, MCP-call, agent-delegation, and model-driven overwrite actions use server-side, action-specific approvals. A model-provided `confirmed=true` value is ignored.
+- Connector approvals: connector manifests cannot self-approve. File-writing, UI-control, shell-capable, remote, and delegated-agent connector jobs create exact server-side approvals before execution.
 
 ### Preflight
 
@@ -230,6 +234,12 @@ When `USE_MOCK_CLIENT=true`, backend and model checks are skipped on purpose so 
 | `/operations` | Show recent local operation ledger entries |
 | `/triggers` | Show local trigger definitions and status |
 | `/trigger pause\|resume\|cancel <id>` | Pause, resume, or cancel a local trigger |
+| `/connectors` | Show configured connectors and acceptance state |
+| `/connector <id>` | Show one connector capability and privacy snapshot |
+| `/connector test <id>` | Run local acceptance checks for one connector |
+| `/connector enable <id>` | Enable one connector for this session |
+| `/connector disable <id>` | Disable one connector for this session |
+| `/connector run <id> <task>` | Run a connector job through Eyra policy |
 | `/cancel <id>` | Cancel a queued or running task |
 | `/cancel all` | Cancel all queued or running tasks |
 | `/pause <id>` | Pause a queued task before it starts |
@@ -366,6 +376,14 @@ EXTERNAL_AGENT_CONFIG_PATH=~/.config/eyra/agents.json
 MCP_TOOLS_ENABLED=false
 MCP_CONFIG_PATH=~/.config/eyra/mcp.json
 
+CONNECTORS_ENABLED=false
+CONNECTORS_CONFIG_PATH=~/.config/eyra/connectors.json
+CONNECTORS_ALLOWED_ROOTS=        # Empty means use FILESYSTEM_ALLOWED_PATHS.
+CONNECTORS_TIMEOUT_SECONDS=600
+CONNECTORS_OUTPUT_CAP_BYTES=32768
+CONNECTORS_ALLOW_REMOTE=false
+CONNECTORS_ALLOW_PYTHON_MODULE=false
+
 # Optional Web UI.
 WEB_UI_ENABLED=false
 WEB_UI_HOST=127.0.0.1
@@ -417,6 +435,61 @@ Configured external agents use JSON like:
 
 Use static argv only. Eyra does not accept dynamic model-selected commands.
 
+Universal connectors use JSON like:
+
+```json
+{
+  "connectors": [
+    {
+      "id": "openclawnew",
+      "displayName": "OpenClawNew",
+      "type": "cli",
+      "enabled": true,
+      "command": ["openclawnew", "run", "--json"],
+      "cwdPolicy": "filesystem_default_path",
+      "inputMode": "stdin_json",
+      "outputMode": "stdout_json",
+      "local": true,
+      "canUseNetwork": false,
+      "canReadFiles": true,
+      "canMutateFiles": true,
+      "canControlUI": false,
+      "canRunShell": false,
+      "requiresApproval": true,
+      "riskTier": "delegated_agent",
+      "timeoutSeconds": 600,
+      "outputCapBytes": 32768,
+      "allowedTools": [],
+      "deniedTools": ["delete_permanently", "run_command"],
+      "privacy": {
+        "dataSent": ["task", "selected_files", "cwd"],
+        "destination": "local_process",
+        "leavesMachine": false
+      },
+      "acceptance": {
+        "healthCommand": ["openclawnew", "--version"],
+        "testTask": "Print a short status and exit without modifying files.",
+        "expectedOutputContains": "status",
+        "requiresHumanApproval": true
+      }
+    }
+  ]
+}
+```
+
+Supported connector types are `cli`, `mcp`, `http_local`, `http_remote`, `python_module`, `browser_agent`, and `coding_agent`. `python_module` requires `CONNECTORS_ALLOW_PYTHON_MODULE=true`. Remote connectors require `CONNECTORS_ALLOW_REMOTE=true`; other network-capable connectors require either `NETWORK_TOOLS_ENABLED=true` or the explicit remote connector opt-in. CLI-like connectors must use static argv. Eyra refuses shell interpolation, model-filled command strings, cwd outside the connector sandbox, missing privacy declarations, missing risk tier, invalid timeout/output caps, and privacy/capability mismatches.
+
+Connector CLI checks:
+
+```bash
+eyra connectors validate
+eyra connectors test openclawnew
+eyra connectors list --json
+eyra-connectors validate
+```
+
+Every connector starts as configured, available, disabled, or validation-failed, then must pass local acceptance before it is usable. Acceptance checks cover manifest schema, id, static transport, executable or endpoint availability, sandboxed cwd, timeout, output cap, privacy declaration, risk tier, approval policy, health check, test task, output redaction, cancellation where supported, and forbidden capability mismatches.
+
 `API_BASE_URL` accepts any OpenAI-compatible endpoint: Ollama (default), LM Studio, vLLM, OpenRouter, Groq, or OpenAI itself. Local providers ignore `API_KEY`; cloud providers require it.
 
 `VISION_MODEL` lets you keep a tool-capable text model and a separate vision model. Example: `MODEL=qwen3:4b` for normal local tool work and `VISION_MODEL=gemma3:4b` for screen questions. If `API_BASE_URL` points to a remote provider, screenshots sent to `VISION_MODEL` leave the machine because you configured that provider.
@@ -453,6 +526,7 @@ Default behavior: no telemetry, no analytics, no remote browsing, and no remote 
 | Trigger definitions | Local SQLite trigger store |
 | OS command tools | Disabled by default; local only when enabled |
 | MCP stdio tools | Disabled by default; local server processes from `MCP_CONFIG_PATH` |
+| Connectors | Disabled by default; structured workers from `CONNECTORS_CONFIG_PATH`; remote connectors require explicit opt-in |
 | Agent session tools | Disabled by default; read bounded, redacted local Codex/OpenClaw session files when enabled |
 | Agent delegation | Disabled by default; local terminal agent commands when enabled |
 | Realtime voice | Disabled by default; contacts OpenAI only when enabled and used; standard API key stays server-side |
@@ -461,7 +535,7 @@ Default behavior: no telemetry, no analytics, no remote browsing, and no remote 
 | Browser downloads | Disabled by default with browser tools; when enabled, each download needs server-side approval and saves only under the filesystem sandbox. |
 | Browser uploads | Disabled by default with browser tools; when enabled, each upload needs server-side approval and can attach only sandboxed local files. |
 
-Data leaves your machine only when you choose a remote AI provider, enable Realtime voice, or turn on network tools. A remote `API_BASE_URL` receives prompts, tool results, PDF text summaries, and screenshots that are sent to the configured model because that provider was explicitly configured. Realtime voice sends browser audio/text to OpenAI only when explicitly enabled and used. Network tools send the requested URL, search query, or weather location to the relevant remote service. `/capabilities` includes concrete privacy-boundary decisions for common model, network, and Realtime paths.
+Data leaves your machine only when you choose a remote AI provider, enable Realtime voice, turn on network tools, or explicitly allow remote connectors. A remote `API_BASE_URL` receives prompts, tool results, PDF text summaries, and screenshots that are sent to the configured model because that provider was explicitly configured. Realtime voice sends browser audio/text to OpenAI only when explicitly enabled and used. Network tools send the requested URL, search query, or weather location to the relevant remote service. Remote connectors can send only the data classes declared in their manifest and allowed by Eyra's route policy. `/capabilities` includes concrete privacy-boundary decisions for common model, network, Realtime, and connector paths.
 
 ---
 
@@ -479,6 +553,7 @@ eyra/
 │   │   ├── capabilities.py         # Local capability snapshot construction
 │   │   ├── certification.py        # Voice-to-computer certification matrix
 │   │   ├── coding_jobs.py          # Approval-gated terminal-agent job bridge
+│   │   ├── connectors/             # Structured connector manifest, registry, runner, acceptance, CLI
 │   │   ├── context.py              # Local context snapshots
 │   │   ├── dictation.py            # Local dictation state and literal text handling
 │   │   ├── intents.py              # Shared screen, file, network, PDF, and task intent rules
@@ -568,7 +643,7 @@ Status meanings:
 - `failed`: a launch-critical or requested check did not meet the product contract.
 - `skipped`: the surface was disabled or the physical condition was not requested for this run.
 
-The matrix proves the configured local runtime path it exercises: model preflight, Local Whisper TTS, microphone diagnostics, synthetic or physical barge-in when requested, durable jobs, operation ledger, triggers, task control, Web APIs, disabled-by-default privacy behavior, and enabled browser/OS representatives when those settings are turned on.
+The matrix proves the configured local runtime path it exercises: model preflight, Local Whisper TTS, microphone diagnostics, synthetic or physical barge-in when requested, durable jobs, operation ledger, triggers, task control, Web APIs, connector manifest and acceptance checks, disabled-by-default privacy behavior, and enabled browser/OS representatives when those settings are turned on.
 
 It does not prove every physical microphone setup, every macOS app UI, or live OpenAI Realtime unless those paths are actually enabled and tested in that environment. Synthetic microphone certification proves the configured virtual input path; run `/voice-diagnose` and a challenge-phrase physical check on each target Mac before claiming human microphone certification.
 

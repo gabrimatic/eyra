@@ -18,6 +18,7 @@ Eyra's stronger wedge is the safety and coordination layer around local voice-to
 - Operation ledger: local record of computer-changing actions.
 - Undo: reversible local actions are undoable from the ledger.
 - Certification: release checks prove the actual configured surface instead of assuming it works.
+- Connectors: external services, CLIs, MCP servers, browser agents, coding agents, and local automations can run only as structured workers under Eyra's policy.
 - Delegation: specialist agents can run only as optional workers under Eyra's policy.
 
 ## What Eyra Is
@@ -39,10 +40,12 @@ It should help someone control a computer when keyboard and mouse use is inconve
 - "Approve that."
 - "Reject that."
 - "Start a coding job with a configured terminal coding agent."
+- "Ask OpenClawNew to inspect this folder."
+- "Cancel the OpenClawNew job."
 - "What would leave my machine?"
 - "What can you control?"
 
-The product promise is local coordination first. Optional network, browser, MCP, Realtime, and external-agent paths must be explicit, visible, and approval-aware.
+The product promise is local coordination first. Optional network, browser, MCP, connector, Realtime, and external-agent paths must be explicit, visible, and approval-aware.
 
 ## What Eyra Is Not
 
@@ -60,10 +63,10 @@ Eyra should not compete by adding a larger pile of generic tools. It should comp
 
 | Category | Examples | Eyra stance |
 | --- | --- | --- |
-| Big personal agent systems | OpenClaw-like systems, Hermes-like local agents, large all-in-one autonomous systems | Integrate only when useful. Do not copy the whole surface. Keep local voice, policy, approvals, jobs, undo, and certification in Eyra. |
+| Big personal agent systems | OpenClaw-like systems, Hermes-like local agents, large all-in-one autonomous systems | Integrate only when useful through connector manifests. Do not copy the whole surface. Keep local voice, policy, approvals, jobs, undo, and certification in Eyra. |
 | Coding agents | terminal coding agents, OpenHands, OpenDevin-style systems, OpenClaw coding skills | Treat them as optional workers. Eyra owns the request, sandbox, approval, timeout, output caps, logs, cancellation, and final status. |
-| Browser agents | browser-use, Playwright agents, Operator or Computer-use-style tools | Use them only behind explicit browser/network policy. Eyra owns privacy, redaction, approval, and route traces. |
-| Agent frameworks | role-based orchestration, graph runtimes, MCP ecosystems | Use configured adapters and MCP tools where they fit. Do not move Eyra's safety kernel into a framework. |
+| Browser agents | browser-use, Playwright agents, Operator or Computer-use-style tools | Use them only behind explicit browser/network or connector policy. Eyra owns privacy, redaction, approval, and route traces. |
+| Agent frameworks | role-based orchestration, graph runtimes, MCP ecosystems | Use configured connectors and MCP tools where they fit. Do not move Eyra's safety kernel into a framework. |
 
 ## Local-First
 
@@ -71,7 +74,7 @@ Default behavior: nothing leaves the machine.
 
 Local-first matters because computer control touches private text, files, windows, clipboard content, screenshots, shell commands, browser state, and account surfaces. Eyra should make the local path useful enough that cloud paths stay optional, not required.
 
-Cloud providers, network tools, browser tools, Realtime voice, MCP bridges, and external agents can be enabled. When enabled, Eyra must say what may leave the machine and which route allowed it.
+Cloud providers, network tools, browser tools, Realtime voice, MCP bridges, connectors, and external agents can be enabled. When enabled, Eyra must say what may leave the machine and which route allowed it.
 
 ## Voice-First
 
@@ -140,6 +143,37 @@ Distribution should stay compatible with the current license and release policy:
 - Uninstall must remove command shims first and leave user data alone unless the user explicitly chooses data removal.
 
 Install diagnostics should be support-ready. `eyra doctor --json` should report version, install source, local backend state, model state, Local Whisper state, microphone summary, screen capture state, sandbox roots, Web UI config, optional tool flags, and redacted paths without logging secrets.
+
+## Universal Connectors
+
+Connectors are the general integration contract. They let a user attach a tool or service without Eyra adding custom code for that exact system.
+
+The connector contract should stay narrow:
+
+- manifest-driven configuration,
+- static transport such as argv or a declared endpoint,
+- explicit local or remote boundary,
+- declared data classes,
+- declared capabilities,
+- risk tier,
+- approval policy,
+- bounded timeout,
+- capped and redacted output,
+- acceptance checks before use,
+- durable job logs and artifacts,
+- cancellation where possible.
+
+Connectors must not become a marketplace or a plugin sandbox escape. They cannot define arbitrary commands from the model, self-approve, disable Eyra policy, bypass filesystem roots, receive undeclared private data, or appear in Realtime voice by default.
+
+Useful connector examples include:
+
+- a local CLI worker such as `openclawnew`,
+- an MCP server wrapped as a declared worker,
+- a local HTTP automation endpoint,
+- a coding agent that can inspect or edit a sandboxed folder after approval,
+- a browser agent that runs only when browser/network policy allows it.
+
+Remote connectors are a privacy boundary, not a default feature. They require explicit opt-in and must make the destination and data classes visible before use.
 
 ## Release Bar
 

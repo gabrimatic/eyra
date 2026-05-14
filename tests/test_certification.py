@@ -120,6 +120,23 @@ def test_certification_matrix_contains_required_structured_rows(tmp_path):
         "external_agent_output_cap",
         "external_agent_sandbox_cwd",
         "external_agent_realtime_not_exposed",
+        "connector_config_missing",
+        "connector_manifest_valid",
+        "connector_manifest_rejects_dynamic_command",
+        "connector_local_cli_health",
+        "connector_local_cli_test_task",
+        "connector_output_cap",
+        "connector_secret_redaction",
+        "connector_sandbox_cwd",
+        "connector_file_write_requires_approval",
+        "connector_remote_disabled_default",
+        "connector_remote_requires_opt_in",
+        "connector_realtime_not_exposed",
+        "connector_cancel",
+        "connector_job_logs",
+        "connector_artifacts",
+        "connector_route_trace_redacted",
+        "connector_acceptance_state",
         "competitor_positioning_doc_exists",
         "install_source_setup_script",
         "install_release_script_parse",
@@ -146,7 +163,13 @@ def test_certification_matrix_contains_required_structured_rows(tmp_path):
     assert all(row.status in {"passed", "failed", "skipped"} for row in report.rows)
     assert all(row.reason for row in report.rows)
     status_by_name = {row.name: row.status for row in report.rows}
-    assert all(status_by_name[name] == "passed" for name in required if name.startswith(("route_", "handsfree_", "barge_in_", "external_agent_", "competitor_", "install_")))
+    assert all(
+        status_by_name[name] == "passed"
+        for name in required
+        if name.startswith(
+            ("route_", "handsfree_", "barge_in_", "external_agent_", "connector_", "competitor_", "install_")
+        )
+    )
 
 
 def test_certification_report_renders_machine_readable_summary(tmp_path):

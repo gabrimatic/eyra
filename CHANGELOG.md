@@ -32,6 +32,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `install.sh` release-archive installer scaffold for future GitHub Release assets, including private-repo authentication guidance and no-secret logging defaults.
 - Custom Homebrew tap formula scaffold under `Formula/eyra.rb`; this targets a private/custom tap and does not assume `homebrew/core`.
 - Installer certification rows for setup idempotence, `.env` preservation, command shims, doctor/certify/web commands, update detection, uninstall dry-run, release installer parsing, Homebrew formula presence, uv/pipx command compatibility, and user-data preservation.
+- Universal connectors through `CONNECTORS_ENABLED` and `CONNECTORS_CONFIG_PATH`, with structured manifests for CLI, MCP, local HTTP, remote HTTP, browser-agent, coding-agent, and guarded Python-module workers.
+- Connector registry, acceptance states, acceptance checks, sandboxed cwd enforcement, static argv enforcement, timeout/output caps, output redaction, approval-gated mutation, cancellation, job logs, artifacts, and route-trace metadata.
+- `/connectors`, `/connector <id>`, `/connector test <id>`, `/connector enable <id>`, `/connector disable <id>`, `/connector run <id> <task>`, plus `eyra connectors validate`, `eyra connectors test`, and `eyra connectors list --json`.
+- Web connector APIs and UI rows for connector status, acceptance testing, cancellation, pending approvals, logs, and artifacts behind the existing Web auth boundary.
+- Certification rows for connector config, manifest validation, dynamic-command refusal, local CLI health/test task, output cap, redaction, sandbox cwd, file-write approval, remote opt-in, Realtime exclusion, cancellation, logs, artifacts, route-trace redaction, and acceptance state.
 - `docs/PRODUCT_STRATEGY.md` defines Eyra's stance as a local-first voice coordinator and safety layer, not a clone of coding agents, browser agents, or generic agent frameworks.
 - Optional configured external-agent adapters through `EXTERNAL_AGENT_TOOLS_ENABLED` and `EXTERNAL_AGENT_CONFIG_PATH`, using static argv, sandboxed cwd, bounded timeouts, capped redacted output, and clean unavailable/unknown-agent reporting.
 - `/handsfree on|off` and `HANDS_FREE_MODE` to make no-hands operation visible in status and capability snapshots.

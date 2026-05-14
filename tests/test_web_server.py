@@ -94,6 +94,9 @@ class TestWebServerHelpers:
         assert "MediaRecorder" in html
         assert "/api/local-voice-turn" in html
         assert "/api/local-speak" in html
+        assert "/api/connectors" in html
+        assert "/api/connector/test" in html
+        assert "/api/approvals" in html
         assert "RTCPeerConnection" in html
         assert "https://api.openai.com/v1/realtime/calls" in html
         assert "EventSource" in html
@@ -488,6 +491,63 @@ class TestWebServerHelpers:
         assert listed["approvals"][0]["id"] == approval.id
         assert approved["approved"] is True
         runtime.close()
+
+    def test_web_runtime_exposes_connector_status_after_auth_boundary(self, tmp_path):
+        config_path = tmp_path / "connectors.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "connectors": [
+                        {
+                            "id": "openclawnew",
+                            "displayName": "OpenClawNew",
+                            "type": "cli",
+                            "enabled": True,
+                            "command": [sys.executable, "-c", "print('{\"status\":\"ok\"}')"],
+                            "cwdPolicy": "filesystem_default_path",
+                            "inputMode": "stdin_json",
+                            "outputMode": "stdout_json",
+                            "local": True,
+                            "canUseNetwork": False,
+                            "canReadFiles": False,
+                            "canMutateFiles": False,
+                            "canControlUI": False,
+                            "canRunShell": False,
+                            "requiresApproval": False,
+                            "riskTier": "read_only",
+                            "timeoutSeconds": 5,
+                            "outputCapBytes": 4096,
+                            "allowedTools": [],
+                            "deniedTools": [],
+                            "privacy": {"dataSent": ["task"], "destination": "local_process", "leavesMachine": False},
+                            "acceptance": {"requiresHumanApproval": False},
+                        }
+                    ]
+                }
+            )
+        )
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            CONNECTORS_ENABLED=True,
+            CONNECTORS_CONFIG_PATH=str(config_path),
+            CONNECTORS_ALLOWED_ROOTS=str(tmp_path),
+            FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+            FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+        )
+        runtime = WebAssistantRuntime(settings)
+
+        try:
+            connectors = runtime.run_sync(runtime.connectors())
+            detail = runtime.run_sync(runtime.connector_detail("openclawnew"))
+        finally:
+            runtime.close()
+
+        rendered = json.dumps(connectors)
+        assert connectors["connectors"][0]["id"] == "openclawnew"
+        assert detail["connector"]["privacy"]["destination"] == "local_process"
+        assert str(tmp_path) not in rendered
 
     def test_web_runtime_returns_persisted_job_detail_with_redaction(self, tmp_path):
         settings = Settings(

@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 from urllib.parse import urlparse
 
+from runtime.connectors.registry import ConnectorRegistry
 from runtime.external_agents import AgentAdapterRegistry
 from runtime.models import LiveRuntimeState, PreflightResult
 from runtime.privacy import evaluate_privacy_boundary, privacy_decision_dict
@@ -86,6 +87,7 @@ def build_capability_snapshot(
         allowed_roots=tuple(Path(root.strip()).expanduser() for root in settings.FILESYSTEM_ALLOWED_PATHS.split(",") if root.strip()),
         default_path=Path(settings.FILESYSTEM_DEFAULT_PATH).expanduser(),
     )
+    connector_registry = ConnectorRegistry.from_settings(settings)
 
     return {
         "localFirst": True,
@@ -130,6 +132,7 @@ def build_capability_snapshot(
             "os": {"enabled": settings.OS_TOOLS_ENABLED},
             "browser": {"enabled": settings.NETWORK_TOOLS_ENABLED},
             "mcp": {"enabled": settings.MCP_TOOLS_ENABLED, "configPath": settings.MCP_CONFIG_PATH},
+            "connectors": connector_registry.capability_snapshot(),
             "agents": {
                 "enabled": settings.AGENT_TOOLS_ENABLED or settings.EXTERNAL_AGENT_TOOLS_ENABLED,
                 "external": external_agent_registry.capability_snapshot(),
@@ -186,6 +189,7 @@ def format_capability_answer(snapshot: dict) -> str:
         f"OS tools: {'on' if tools['os']['enabled'] else 'off'}",
         f"Browser tools: {'on' if tools['browser']['enabled'] else 'off'}",
         f"MCP tools: {'on' if tools['mcp']['enabled'] else 'off'}",
+        f"Connectors: {'on' if tools['connectors']['enabled'] else 'off'}",
         f"Agent tools: {'on' if tools['agents']['enabled'] else 'off'}",
         f"Realtime: {'on' if voice['realtime']['enabled'] else 'off'}",
         f"Leaves machine by default: {'yes' if privacy['leavesMachineByDefault'] else 'no'}",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from chat.complexity_scorer import ComplexityScorer
+from runtime.connectors.registry import ConnectorRegistry
 from runtime.intents import (
     extract_pdf_path,
     needs_screen_context,
@@ -40,10 +41,12 @@ class RuntimeRouter:
         self,
         envelope: RequestEnvelope,
         tool_registry: ToolRegistry | None = None,
+        connector_registry: ConnectorRegistry | None = None,
     ) -> RoutingDecision:
         text = envelope.text or ""
         effort = await estimate_effort(self.scorer, text, envelope.messages)
-        execution_class = self._execution_class(envelope)
+        connector_id = self._connector_id(envelope.text)
+        execution_class = self._execution_class(envelope, connector_registry=connector_registry)
         required_capabilities = self._required_capabilities(envelope, execution_class)
         risk_tier = self._risk_tier(text, execution_class)
         fallback_plan = build_fallback_plan(execution_class)
@@ -63,7 +66,8 @@ class RuntimeRouter:
             settings=envelope.settings,
             tool_registry=tool_registry,
         )
-        privacy_summary = self._privacy_summary(envelope, execution_class)
+        connector_meta = connector_registry.route_trace_metadata(connector_id) if connector_id and connector_registry else None
+        privacy_summary = self._privacy_summary(envelope, execution_class, connector_meta=connector_meta)
         trace = RoutingTrace(
             source=envelope.source,
             quality_mode=envelope.quality_mode,
@@ -77,6 +81,7 @@ class RuntimeRouter:
             risk_tier=risk_tier,
             privacy_summary=privacy_summary,
             fallback_plan=fallback_plan,
+            connector=connector_meta,
         )
         if envelope.settings.ROUTING_DEBUG:
             log_route_trace(trace)
@@ -93,10 +98,26 @@ class RuntimeRouter:
             trace=trace,
         )
 
-    def _execution_class(self, envelope: RequestEnvelope) -> ExecutionClass:
+    def _execution_class(self, envelope: RequestEnvelope, connector_registry: ConnectorRegistry | None = None) -> ExecutionClass:
         text = envelope.text
         if envelope.source.value == "realtime_voice":
             return ExecutionClass.REALTIME_VOICE_TURN
+        connector_id = self._connector_id(text)
+        manifest = connector_registry.get(connector_id) if connector_id and connector_registry else None
+        if manifest is not None or self._requires_connector(text):
+            if manifest is not None:
+                if manifest.can_control_ui:
+                    return ExecutionClass.CONNECTOR_UI_CONTROL
+                if manifest.remote:
+                    return ExecutionClass.CONNECTOR_REMOTE
+                if manifest.can_mutate_files:
+                    return ExecutionClass.CONNECTOR_FILE_WRITE
+                if manifest.can_read_files:
+                    return ExecutionClass.CONNECTOR_FILE_READ
+                if manifest.can_use_network:
+                    return ExecutionClass.CONNECTOR_NETWORK
+                return ExecutionClass.CONNECTOR_LOCAL
+            return ExecutionClass.CONNECTOR_TASK
         if (
             self._requires_shell(text)
             or self._requires_os_automation(text)
@@ -134,6 +155,26 @@ class RuntimeRouter:
                 caps.update({Capability.AGENT_DELEGATION, Capability.FILE_READ, Capability.FILE_WRITE})
             else:
                 caps.add(Capability.AGENT_READ)
+        elif execution_class in {
+            ExecutionClass.CONNECTOR_TASK,
+            ExecutionClass.CONNECTOR_LOCAL,
+            ExecutionClass.CONNECTOR_REMOTE,
+            ExecutionClass.CONNECTOR_FILE_READ,
+            ExecutionClass.CONNECTOR_FILE_WRITE,
+            ExecutionClass.CONNECTOR_NETWORK,
+            ExecutionClass.CONNECTOR_UI_CONTROL,
+        }:
+            caps.update({Capability.CONNECTOR_TASK, Capability.CONNECTOR_LOCAL})
+            if execution_class == ExecutionClass.CONNECTOR_REMOTE:
+                caps.update({Capability.CONNECTOR_REMOTE, Capability.CONNECTOR_NETWORK})
+            if execution_class == ExecutionClass.CONNECTOR_FILE_READ:
+                caps.add(Capability.CONNECTOR_FILE_READ)
+            if execution_class == ExecutionClass.CONNECTOR_FILE_WRITE:
+                caps.update({Capability.CONNECTOR_FILE_READ, Capability.CONNECTOR_FILE_WRITE})
+            if execution_class == ExecutionClass.CONNECTOR_NETWORK:
+                caps.add(Capability.CONNECTOR_NETWORK)
+            if execution_class == ExecutionClass.CONNECTOR_UI_CONTROL:
+                caps.add(Capability.CONNECTOR_UI_CONTROL)
         elif execution_class in {
             ExecutionClass.TOOL_ASSISTED_CHAT,
             ExecutionClass.BACKGROUND_TASK,
@@ -217,6 +258,16 @@ class RuntimeRouter:
         lowered = text.lower()
         if execution_class == ExecutionClass.CODING_AGENT_TASK:
             return RiskTier.DELEGATED_AGENT if RuntimeRouter._requires_agent_delegation(text) else RiskTier.PRIVATE_READ
+        if execution_class in {
+            ExecutionClass.CONNECTOR_TASK,
+            ExecutionClass.CONNECTOR_LOCAL,
+            ExecutionClass.CONNECTOR_REMOTE,
+            ExecutionClass.CONNECTOR_FILE_READ,
+            ExecutionClass.CONNECTOR_FILE_WRITE,
+            ExecutionClass.CONNECTOR_NETWORK,
+            ExecutionClass.CONNECTOR_UI_CONTROL,
+        }:
+            return RiskTier.DELEGATED_AGENT
         if re.search(r"\b(delete permanently|permanent delete|erase)\b", lowered):
             return RiskTier.DESTRUCTIVE
         if execution_class == ExecutionClass.BROWSER_TASK:
@@ -236,7 +287,7 @@ class RuntimeRouter:
         return RiskTier.LOW_READ_ONLY if execution_class != ExecutionClass.TEXT_CHAT else RiskTier.NONE
 
     @staticmethod
-    def _privacy_summary(envelope: RequestEnvelope, execution_class: ExecutionClass) -> str:
+    def _privacy_summary(envelope: RequestEnvelope, execution_class: ExecutionClass, connector_meta: dict | None = None) -> str:
         data_classes: list[str] = ["prompt"]
         if execution_class == ExecutionClass.SCREEN_ANALYSIS:
             data_classes.append("screenshot")
@@ -264,4 +315,36 @@ class RuntimeRouter:
                 data_classes=["microphone_audio", "transcript"],
             )
             parts.append(realtime_boundary.explanation)
+        if connector_meta is not None:
+            privacy = connector_meta.get("privacyBoundary", {})
+            parts.append(
+                "Connector route: "
+                f"id={connector_meta.get('connectorId')}, risk={connector_meta.get('riskTier')}, "
+                f"capabilities={','.join(connector_meta.get('capabilities', [])) or 'none'}, "
+                f"destination={privacy.get('destination', '')}, leavesMachine={privacy.get('leavesMachine', False)}, "
+                f"approvalRequired={connector_meta.get('requiresApproval', True)}."
+            )
         return " ".join(parts)
+
+    @staticmethod
+    def _requires_connector(text: str) -> bool:
+        return bool(
+            re.search(
+                r"\b(connectors?|connector\s+(?:test|run|status)|connect this task to|connector job)\b",
+                text,
+                re.I,
+            )
+        )
+
+    @staticmethod
+    def _connector_id(text: str) -> str | None:
+        match = re.search(
+            r"\b(?:connector|use|ask|tell|cancel|connect(?: this task)? to)\s+(?P<id>[a-z][a-z0-9_-]{1,63})\b",
+            text,
+            re.I,
+        )
+        if match:
+            candidate = match.group("id").lower()
+            if candidate not in {"this", "that", "the", "a", "an"}:
+                return candidate
+        return None

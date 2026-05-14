@@ -18,6 +18,8 @@ from chat.session_state import InteractionStyle, QualityMode
 from clients.ai_client import THINK_END, THINK_START
 from runtime.capabilities import build_capability_snapshot, format_capability_answer
 from runtime.coding_jobs import approval_id_from_text, parse_coding_job_request
+from runtime.connectors.registry import ConnectorRegistry, format_connector_detail, format_connector_list
+from runtime.connectors.types import ConnectorJobSpec
 from runtime.context import build_context_snapshot, format_context_answer
 from runtime.dictation import DictationState, dictation_command, parse_dictation_target
 from runtime.intents import (
@@ -66,6 +68,7 @@ _COMMANDS = {
     "/goal", "/status", "/quit", "/clear", "/route", "/handsfree",
     "/mode", "/help", "/tasks", "/task", "/cancel", "/pause", "/resume",
     "/approvals", "/approve", "/reject", "/operations", "/capabilities", "/context", "/triggers", "/trigger",
+    "/connectors", "/connector",
 }
 
 _QUIT_WORDS = {"quit", "exit", "bye", "goodbye", "q"}
@@ -136,6 +139,11 @@ class LiveSession:
         self._dictation = DictationState()
         self._hands_free_mode = _settings_bool(settings, "HANDS_FREE_MODE", False)
         self.job_store = DurableJobStore(_settings_str(settings, "JOB_STORE_PATH", "~/.local/share/eyra/jobs.sqlite3"))
+        self.connector_registry = ConnectorRegistry.from_settings(
+            settings,
+            approvals=self.approvals,
+            job_store=self.job_store,
+        )
         self.trigger_store = TriggerStore(
             _settings_str(settings, "TRIGGER_STORE_PATH", "~/.local/share/eyra/triggers.sqlite3")
         )
@@ -208,6 +216,7 @@ class LiveSession:
             job_store=self.job_store,
             trigger_store=self.trigger_store,
             task_manager=self.task_manager,
+            connector_registry=self.connector_registry,
             source_frontend="terminal",
             last_route_trace=self.state.last_route_trace,
         )
@@ -485,6 +494,15 @@ class LiveSession:
             self._print_triggers()
             return True
 
+        if command == "/connectors":
+            print(self._indent(format_connector_list(self.connector_registry)))
+            return True
+
+        if command == "/connector":
+            arg = parts_original[1] if len(parts_original) > 1 else ""
+            await self._handle_connector_command(arg)
+            return True
+
         if command == "/trigger":
             arg = lower_parts[1] if len(lower_parts) > 1 else ""
             self._handle_trigger_command(arg)
@@ -641,6 +659,7 @@ class LiveSession:
                 ("Network", "on" if _settings_bool(self.settings, "NETWORK_TOOLS_ENABLED", False) else "off"),
                 ("OS tools", "on" if _settings_bool(self.settings, "OS_TOOLS_ENABLED", False) else "off"),
                 ("MCP", "on" if _settings_bool(self.settings, "MCP_TOOLS_ENABLED", False) else "off"),
+                ("Connectors", "on" if _settings_bool(self.settings, "CONNECTORS_ENABLED", False) else "off"),
                 (
                     "Agents",
                     "on"
@@ -782,6 +801,30 @@ class LiveSession:
                 summary = str(artifact)
             print(f"  - {summary}")
         print()
+
+    async def _handle_connector_command(self, arg: str) -> None:
+        parts = arg.split(maxsplit=2)
+        if not parts:
+            print("  Usage: /connector <id>|test <id>|enable <id>|disable <id>|run <id> <task>")
+            return
+        action = parts[0].lower()
+        if action == "test" and len(parts) >= 2:
+            result = await self.connector_registry.test(parts[1])
+            print(f"  {result.connector_id}: {result.state.value} - {result.reason}")
+            return
+        if action in {"enable", "disable"} and len(parts) >= 2:
+            if self.connector_registry.set_enabled(parts[1], action == "enable"):
+                print_status_change(f"Connector {parts[1]} {action}d")
+            else:
+                print(f"  Connector not found: {parts[1]}")
+            return
+        if action == "run" and len(parts) >= 3:
+            await self._start_connector_task(parts[1], parts[2], source="terminal")
+            return
+        if len(parts) == 1:
+            print(self._indent(format_connector_detail(self.connector_registry, parts[0])))
+            return
+        print("  Usage: /connector <id>|test <id>|enable <id>|disable <id>|run <id> <task>")
 
     async def _retry_job(self, job_id: str) -> None:
         job = self.job_store.get_job(job_id)
@@ -989,6 +1032,9 @@ class LiveSession:
         ):
             self._print_capabilities()
             return True
+        connector_result = await self._handle_direct_connector_intent(text)
+        if connector_result:
+            return True
         if lowered_clean in {"approve that", "approve it", "yes", "yeah", "yep"}:
             self._resolve_voice_approval(approve=True)
             return True
@@ -1105,6 +1151,115 @@ class LiveSession:
                 raise RuntimeError(result.content)
             await asyncio.sleep(0.05)
         return "Coding job cancelled."
+
+    async def _handle_direct_connector_intent(self, text: str) -> bool:
+        lowered = text.lower()
+        if re.search(r"\b(what connectors do i have|list connectors|show connectors)\b", lowered):
+            print(self._indent(format_connector_list(self.connector_registry)))
+            return True
+        connector_id = self._extract_connector_id(text)
+        if not connector_id:
+            return False
+        if re.search(r"\b(can you use|connector status|show connector|what is)\b", lowered):
+            print(self._indent(format_connector_detail(self.connector_registry, connector_id)))
+            return True
+        if re.search(r"\bcancel\b", lowered):
+            if self.connector_registry.cancel(connector_id):
+                print_status_change(f"Cancelled connector job for {connector_id}")
+            else:
+                print(f"  No running connector job found for: {connector_id}")
+            return True
+        task_match = re.search(
+            r"\b(?:connect this task to|ask|tell|use)\s+[a-z][a-z0-9_-]{1,63}\s+(?:to\s+)?(?P<task>.+)$",
+            text,
+            re.I,
+        )
+        task_text = task_match.group("task").strip() if task_match else text
+        await self._start_connector_task(connector_id, task_text, source="terminal")
+        return True
+
+    def _extract_connector_id(self, text: str) -> str | None:
+        configured = {item["id"].lower() for item in self.connector_registry.list_connectors()}
+        for connector_id in configured:
+            if re.search(rf"\b{re.escape(connector_id)}\b", text, re.I):
+                return connector_id
+        if "connector" not in text.lower():
+            return None
+        match = re.search(r"\b(?:connector|use|ask|tell|cancel|connect(?: this task)? to)\s+([a-z][a-z0-9_-]{1,63})\b", text, re.I)
+        return match.group(1).lower() if match else None
+
+    async def _start_connector_task(self, connector_id: str, task_text: str, *, source: str) -> None:
+        route_preview = await self._route_decision(
+            f"ask connector {connector_id}",
+            quality_mode=self.quality_mode,
+            interaction_style=InteractionStyle.TEXT,
+            source=RequestSource.TERMINAL,
+            is_worker=True,
+        )
+        self.state.last_route_trace = route_preview.trace
+        job = self.job_store.create_job(
+            title=f"Connector job: {connector_id}",
+            original_user_input=f"connector:{connector_id}",
+            source_frontend=source,
+            status=JobStatus.QUEUED,
+            normalized_task_spec={"task_type": "connector.job", "connector_id": connector_id},
+            risk_level=RiskLevel.MEDIUM_RISK_CHANGE,
+            required_capabilities=[cap.value for cap in route_preview.required_capabilities],
+        )
+        task = self.task_manager.create_task(
+            title=f"Connector job: {connector_id}",
+            original_request=f"connector:{connector_id}",
+            worker=lambda task: self._run_connector_task(task, connector_id=connector_id, task_text=task_text, job_id=job.id),
+            used_tools=True,
+            required_filesystem=True,
+            normalized_task_spec={"task_type": "connector.job", "connector_id": connector_id, "job_id": job.id},
+            risk_level=RiskLevel.MEDIUM_RISK_CHANGE,
+        )
+        print_status_change(f"Connector job {task.id} accepted with {connector_id}; ledger job {job.id}")
+
+    async def _run_connector_task(self, task: BackgroundTask, *, connector_id: str, task_text: str, job_id: str) -> str:
+        task.mark_progress(f"Running connector {connector_id}")
+        result = await self.connector_registry.run(
+            ConnectorJobSpec(
+                connector_id=connector_id,
+                task=task_text,
+                cwd=_settings_str(self.settings, "FILESYSTEM_DEFAULT_PATH", ""),
+                source="terminal",
+                job_id=job_id,
+            )
+        )
+        if result.status == "approval_required":
+            task.mark_progress(f"Waiting for connector approval {result.approval_id}")
+            while not task.cancellation_requested:
+                approval = self.approvals.get(result.approval_id)
+                if approval is None:
+                    raise RuntimeError("Connector approval expired.")
+                if approval.rejected:
+                    raise RuntimeError("Connector job rejected.")
+                if approval.approved:
+                    rerun = await self.connector_registry.run(
+                        ConnectorJobSpec(
+                            connector_id=connector_id,
+                            task=task_text,
+                            cwd=_settings_str(self.settings, "FILESYSTEM_DEFAULT_PATH", ""),
+                            source="terminal",
+                            job_id=job_id,
+                            approval_id=result.approval_id,
+                        )
+                    )
+                    if rerun.status == "completed":
+                        return rerun.output
+                    if rerun.status == "cancelled":
+                        return rerun.output
+                    raise RuntimeError(rerun.output)
+                await asyncio.sleep(0.05)
+            self.connector_registry.cancel(job_id)
+            return "Connector job cancelled."
+        if result.status == "completed":
+            return result.output
+        if result.status == "cancelled":
+            return result.output
+        raise RuntimeError(result.output)
 
     async def _handle_direct_trigger_intent(self, text: str) -> bool:
         stripped = " ".join(text.strip().split())
@@ -2034,7 +2189,11 @@ class LiveSession:
             settings=self.settings,
             preflight=self.preflight,
         )
-        decision = await self._router.route(envelope, tool_registry=self._tool_registry)
+        decision = await self._router.route(
+            envelope,
+            tool_registry=self._tool_registry,
+            connector_registry=self.connector_registry,
+        )
         self.state.last_route_trace = decision.trace
         return decision
 

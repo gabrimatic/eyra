@@ -61,6 +61,14 @@ class Settings:
     AGENT_TOOLS_ENABLED: bool = False
     EXTERNAL_AGENT_TOOLS_ENABLED: bool = False
     EXTERNAL_AGENT_CONFIG_PATH: str = "~/.config/eyra/agents.json"
+    # Universal connectors are structured worker manifests under Eyra policy.
+    CONNECTORS_ENABLED: bool = False
+    CONNECTORS_CONFIG_PATH: str = "~/.config/eyra/connectors.json"
+    CONNECTORS_ALLOWED_ROOTS: str = ""
+    CONNECTORS_TIMEOUT_SECONDS: int = 600
+    CONNECTORS_OUTPUT_CAP_BYTES: int = 32768
+    CONNECTORS_ALLOW_REMOTE: bool = False
+    CONNECTORS_ALLOW_PYTHON_MODULE: bool = False
     # MCP bridges are opt-in and disabled by default.
     MCP_TOOLS_ENABLED: bool = False
     MCP_CONFIG_PATH: str = "~/.config/eyra/mcp.json"
@@ -164,6 +172,13 @@ class Settings:
                 _getenv("AGENT_TOOLS_ENABLED", "false"),
             ),
             EXTERNAL_AGENT_CONFIG_PATH=_getenv("EXTERNAL_AGENT_CONFIG_PATH", "~/.config/eyra/agents.json"),
+            CONNECTORS_ENABLED=_bool("CONNECTORS_ENABLED", "false"),
+            CONNECTORS_CONFIG_PATH=_getenv("CONNECTORS_CONFIG_PATH", "~/.config/eyra/connectors.json"),
+            CONNECTORS_ALLOWED_ROOTS=_getenv("CONNECTORS_ALLOWED_ROOTS", ""),
+            CONNECTORS_TIMEOUT_SECONDS=_int("CONNECTORS_TIMEOUT_SECONDS", "600"),
+            CONNECTORS_OUTPUT_CAP_BYTES=_int("CONNECTORS_OUTPUT_CAP_BYTES", "32768"),
+            CONNECTORS_ALLOW_REMOTE=_bool("CONNECTORS_ALLOW_REMOTE", "false"),
+            CONNECTORS_ALLOW_PYTHON_MODULE=_bool("CONNECTORS_ALLOW_PYTHON_MODULE", "false"),
             MCP_TOOLS_ENABLED=_bool("MCP_TOOLS_ENABLED", "false"),
             MCP_CONFIG_PATH=_getenv("MCP_CONFIG_PATH", "~/.config/eyra/mcp.json"),
             WEB_UI_ENABLED=_bool("WEB_UI_ENABLED", "false"),

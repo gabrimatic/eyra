@@ -27,6 +27,7 @@ def trace_to_dict(trace: RoutingTrace) -> dict:
         "deniedTools": dict(trace.denied_tools),
         "riskTier": trace.risk_tier.value,
         "privacySummary": trace.privacy_summary,
+        "connector": trace.connector,
         "fallbackPlan": {
             "onModelMissing": trace.fallback_plan.on_model_missing,
             "onToolsUnsupported": trace.fallback_plan.on_tools_unsupported,
@@ -54,6 +55,7 @@ def format_route_trace(trace: RoutingTrace | None) -> str:
         "required capabilities: " + ", ".join(sorted(cap.value for cap in trace.required_capabilities)),
         f"risk tier: {trace.risk_tier.value}",
         f"privacy: {trace.privacy_summary}",
+        f"connector: {trace.connector}" if trace.connector else "connector: none",
         "allowed tools: " + (", ".join(trace.allowed_tools) if trace.allowed_tools else "none"),
         f"denied tools: {len(denied)}",
         *(denied_lines if denied_lines else []),

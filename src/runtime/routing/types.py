@@ -31,6 +31,13 @@ class ExecutionClass(str, Enum):
     FILESYSTEM_ACTION = "filesystem_action"
     BROWSER_TASK = "browser_task"
     CODING_AGENT_TASK = "coding_agent_task"
+    CONNECTOR_TASK = "connector_task"
+    CONNECTOR_LOCAL = "connector_local"
+    CONNECTOR_REMOTE = "connector_remote"
+    CONNECTOR_FILE_READ = "connector_file_read"
+    CONNECTOR_FILE_WRITE = "connector_file_write"
+    CONNECTOR_NETWORK = "connector_network"
+    CONNECTOR_UI_CONTROL = "connector_ui_control"
     REALTIME_VOICE_TURN = "realtime_voice_turn"
 
 
@@ -50,6 +57,13 @@ class Capability(str, Enum):
     MCP = "mcp"
     AGENT_READ = "agent_read"
     AGENT_DELEGATION = "agent_delegation"
+    CONNECTOR_TASK = "connector_task"
+    CONNECTOR_LOCAL = "connector_local"
+    CONNECTOR_REMOTE = "connector_remote"
+    CONNECTOR_FILE_READ = "connector_file_read"
+    CONNECTOR_FILE_WRITE = "connector_file_write"
+    CONNECTOR_NETWORK = "connector_network"
+    CONNECTOR_UI_CONTROL = "connector_ui_control"
     LONG_CONTEXT = "long_context"
     STRUCTURED_OUTPUT = "structured_output"
     VOICE_RESPONSE = "voice_response"
@@ -149,6 +163,7 @@ class RoutingTrace:
     risk_tier: RiskTier
     privacy_summary: str
     fallback_plan: FallbackPlan
+    connector: dict | None = None
 
 
 @dataclass(frozen=True)

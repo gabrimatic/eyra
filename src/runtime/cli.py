@@ -48,6 +48,11 @@ def cli(argv: list[str] | None = None) -> int:
     certify.add_argument("--human-phrase", default="", help="Challenge phrase for attended physical barge-in checks.")
     certify.add_argument("--json", action="store_true", help="Print certification rows as JSON.")
 
+    connectors = subcommands.add_parser("connectors", help="Validate, test, and list connector manifests.")
+    connectors.add_argument("connector_action", choices=("validate", "test", "list"), help="Connector action to run.")
+    connectors.add_argument("connector_id", nargs="?", help="Connector id for the test action.")
+    connectors.add_argument("--json", action="store_true", dest="json_output", help="Print machine-readable connector output.")
+
     update = subcommands.add_parser("update", help="Explain the correct update command for this install.")
     update.add_argument("--json", action="store_true", help="Print machine-readable update guidance.")
 
@@ -90,6 +95,15 @@ def cli(argv: list[str] | None = None) -> int:
         else:
             print(report.render())
         return 1 if report.failed else 0
+    if args.command == "connectors":
+        from runtime.connectors.cli import main as connectors_main
+
+        connector_args = [args.connector_action]
+        if args.connector_id:
+            connector_args.append(args.connector_id)
+        if args.json_output:
+            connector_args.append("--json")
+        return connectors_main(connector_args)
     if args.command == "update":
         return _emit(_update_guidance(), json_output=args.json)
     if args.command == "uninstall":
@@ -245,6 +259,8 @@ def _safe_settings(settings: Settings) -> dict[str, Any]:
         "liveSpeechEnabled": settings.LIVE_SPEECH_ENABLED,
         "osToolsEnabled": settings.OS_TOOLS_ENABLED,
         "mcpToolsEnabled": settings.MCP_TOOLS_ENABLED,
+        "connectorsEnabled": settings.CONNECTORS_ENABLED,
+        "connectorsAllowRemote": settings.CONNECTORS_ALLOW_REMOTE,
         "agentToolsEnabled": settings.AGENT_TOOLS_ENABLED,
         "externalAgentToolsEnabled": settings.EXTERNAL_AGENT_TOOLS_ENABLED,
         "realtimeVoiceEnabled": settings.REALTIME_VOICE_ENABLED,
@@ -274,7 +290,7 @@ def _format_doctor(data: dict[str, Any], ok: bool) -> str:
     lines.append(f"Microphones: {data['microphones']['inputDeviceCount']} input device(s)")
     lines.append(f"Screen capture: {'ready' if preflight.get('screenCaptureAvailable') else 'not ready'}")
     lines.append(f"Web UI: {'enabled' if data['settings']['webUiEnabled'] else 'disabled'}")
-    lines.append(f"Network/OS/MCP/agents: {_optional_surface_summary(data['settings'])}")
+    lines.append(f"Network/OS/MCP/connectors/agents: {_optional_surface_summary(data['settings'])}")
     if preflight.get("error"):
         lines.append(f"Error: {preflight['error']}")
     lines.append("")
@@ -289,6 +305,7 @@ def _optional_surface_summary(settings: dict[str, Any]) -> str:
             ("network", settings["networkToolsEnabled"]),
             ("OS", settings["osToolsEnabled"]),
             ("MCP", settings["mcpToolsEnabled"]),
+            ("connectors", settings["connectorsEnabled"]),
             ("agents", settings["agentToolsEnabled"] or settings["externalAgentToolsEnabled"]),
         ]
         if flag
