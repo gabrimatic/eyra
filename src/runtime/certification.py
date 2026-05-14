@@ -1049,8 +1049,8 @@ def _add_strategic_policy_rows(report: CertificationReport, settings: Settings, 
     row(
         "competitor_positioning_doc_exists",
         lambda: (
-            require(Path("docs/PRODUCT_STRATEGY.md").exists(), "Missing docs/PRODUCT_STRATEGY.md")
-            or "docs/PRODUCT_STRATEGY.md defines Eyra's non-clone positioning."
+            require(Path("internal-docs/PRODUCT_STRATEGY.md").exists(), "Missing internal-docs/PRODUCT_STRATEGY.md")
+            or "internal-docs/PRODUCT_STRATEGY.md defines Eyra's non-clone positioning."
         ),
     )
 
