@@ -135,7 +135,7 @@ Installer UX is part of the product, not a developer afterthought. The first con
 
 Distribution should stay compatible with the current license and release policy:
 
-- Source checkout remains the developer and private-beta path.
+- Source checkout remains the developer path.
 - A release installer can install GitHub release archives, but private repositories require authenticated access.
 - Homebrew should use a custom `gabrimatic/eyra` tap, not `homebrew/core`, unless the license and release policy change.
 - `uv tool` and `pipx` installs should expose the same commands as source installs: `eyra`, `eyra web`, `eyra doctor`, `eyra setup`, `eyra certify`, `eyra update`, `eyra uninstall`, `eyra version`, and `eyra paths`.

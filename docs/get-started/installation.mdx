@@ -29,7 +29,7 @@ eyra
 
 ## Installer script
 
-`install.sh` installs a release archive into a managed directory and runs non-interactive setup. For `v4.2.0rc1`, use authenticated GitHub access while the repository is private.
+`install.sh` installs a release archive into a managed directory and runs non-interactive setup. For `v4.2.0`, use authenticated GitHub access while the repository is private.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gabrimatic/eyra/master/install.sh | bash
@@ -48,29 +48,29 @@ Safety checks:
 Supported overrides:
 
 ```bash
-EYRA_VERSION=v4.2.0rc1 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
+EYRA_VERSION=v4.2.0 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
 ```
 
-Private repositories require `GITHUB_TOKEN`. The installer reads GitHub release JSON, prefers release assets with checksum files, and refuses unverified tag-archive fallback unless you explicitly set `EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE=true`. For private beta testing from a checked-out tree, use `EYRA_SOURCE_PATH=/path/to/eyra ./install.sh`; the installed app still writes user config to `~/.config/eyra/.env`, not into the app directory.
+Private repositories require `GITHUB_TOKEN`. The installer reads GitHub release JSON, prefers release assets with checksum files, and refuses unverified tag-archive fallback unless you explicitly set `EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE=true`. For testing from a checked-out tree, use `EYRA_SOURCE_PATH=/path/to/eyra ./install.sh`; the installed app still writes user config to `~/.config/eyra/.env`, not into the app directory.
 
 `eyra doctor --json` reports installer-managed app copies as `managed-install`.
 
 ## Homebrew tap
 
-Current formula status: private beta scaffold.
+Current formula status: custom-tap scaffold.
 
 ```bash
 brew install gabrimatic/eyra/eyra
 ```
 
-The checked-in formula installs from the `master` branch and reports `4.2.0rc1`. Even when release-candidate assets exist, this formula remains private-beta tap preparation until it is switched to a tagged release URL and pinned sha256. Treat it as tap preparation, not a stable public formula.
+The checked-in formula installs from the `master` branch and reports `4.2.0`. The formula remains tap preparation until it is switched to a tagged release URL and pinned sha256. Treat it as tap preparation, not a stable public formula.
 
 Formula behavior:
 
 - Runs `uv sync --frozen --no-dev` at install time.
 - Command shims use `uv run --frozen --no-sync`.
 - Provides `eyra`, `eyra-web`, `eyra-doctor`, `eyra-certify`, `eyra-setup`, and `eyra-connectors`.
-- Runs `eyra version`, `eyra paths --json`, and `eyra doctor --json` in the formula test. The formula test expects a real configured backend; it is not a stable public formula yet.
+- Runs `eyra version`, `eyra paths --json`, and `eyra doctor --json` in the formula test. The formula test expects a real configured backend.
 
 ## Local provider
 

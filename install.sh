@@ -37,7 +37,11 @@ fi
 download() {
     local url="$1"
     local output="$2"
-    curl -fsSL "${auth_header_args[@]}" "$url" -o "$output"
+    if [[ "$url" == https://api.github.com/*/releases/assets/* ]]; then
+        curl -fsSL "${auth_header_args[@]}" -H "Accept: application/octet-stream" "$url" -o "$output"
+    else
+        curl -fsSL "${auth_header_args[@]}" "$url" -o "$output"
+    fi
 }
 
 json_field() {
@@ -55,19 +59,31 @@ elif expr == "wheel":
     for asset in payload.get("assets", []):
         name = asset.get("name", "")
         if name.endswith(".whl"):
-            print(asset.get("browser_download_url", ""))
+            print(asset.get("url") or asset.get("browser_download_url", ""))
+            break
+elif expr == "wheel_name":
+    for asset in payload.get("assets", []):
+        name = asset.get("name", "")
+        if name.endswith(".whl"):
+            print(name)
             break
 elif expr == "source_asset":
     for asset in payload.get("assets", []):
         name = asset.get("name", "")
         if name.endswith((".tar.gz", ".tgz", ".zip")) and "sha256" not in name.lower():
-            print(asset.get("browser_download_url", ""))
+            print(asset.get("url") or asset.get("browser_download_url", ""))
+            break
+elif expr == "source_asset_name":
+    for asset in payload.get("assets", []):
+        name = asset.get("name", "")
+        if name.endswith((".tar.gz", ".tgz", ".zip")) and "sha256" not in name.lower():
+            print(name)
             break
 elif expr == "checksum":
     for asset in payload.get("assets", []):
         name = asset.get("name", "").lower()
         if "sha256" in name or name.endswith((".sha256", ".sha256sum", ".checksums.txt", "checksums.txt")):
-            print(asset.get("browser_download_url", ""))
+            print(asset.get("url") or asset.get("browser_download_url", ""))
             break
 PY
 }
@@ -162,12 +178,11 @@ elif [[ "$VERSION" == "latest" || "$VERSION" == v* ]]; then
         if [[ -n "$wheel_url" ]]; then
             package_kind="wheel"
             package_path="$tmp_dir/eyra.whl"
-            asset_name="$(basename "$wheel_url")"
+            asset_name="$(json_field "$release_json" wheel_name)"
             download "$wheel_url" "$package_path"
         elif [[ -n "$source_asset_url" ]]; then
             package_kind="archive"
-            package_path="$tmp_dir/eyra-source"
-            asset_name="$(basename "$source_asset_url")"
+            asset_name="$(json_field "$release_json" source_asset_name)"
             download "$source_asset_url" "$tmp_dir/$asset_name"
             package_path="$tmp_dir/$asset_name"
         else

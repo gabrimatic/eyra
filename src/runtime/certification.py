@@ -1282,7 +1282,7 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
             require('eyra = "main:run"' in (root / "pyproject.toml").read_text(), "eyra console script is missing")
             or "uv tool installs expose the primary eyra command."
         ),
-        command="uv tool install git+https://github.com/gabrimatic/eyra@v4.2.0rc1",
+        command="uv tool install git+https://github.com/gabrimatic/eyra@v4.2.0",
     )
     source_row(
         "install_pipx_compatibility",

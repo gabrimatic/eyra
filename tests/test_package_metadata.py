@@ -20,4 +20,4 @@ class TestPackageMetadata:
     def test_release_candidate_version_is_pep440(self):
         data = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
 
-        assert data["project"]["version"] == "4.2.0rc1"
+        assert data["project"]["version"] == "4.2.0"

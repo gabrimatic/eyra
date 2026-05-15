@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 No changes yet.
 
-## [4.2.0rc1] - 2026-05-15
+## [4.2.0] - 2026-05-15
 
 ### Changed
 
@@ -30,7 +30,7 @@ No changes yet.
 
 ### Added
 
-- Package version is now staged as `4.2.0rc1` for release-candidate validation.
+- Package version is now `4.2.0`.
 - `eyra` now has install/support subcommands: `web`, `doctor`, `setup`, `certify`, `update`, `uninstall`, `version`, and `paths`.
 - JSON support output for `eyra doctor --json`, `eyra paths --json`, `eyra version --json`, and certification rows through `eyra certify --json`.
 - `install.sh` release-archive installer scaffold for GitHub Release assets, including private-repo authentication guidance and no-secret logging defaults.
