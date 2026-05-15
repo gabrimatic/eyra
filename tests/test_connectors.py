@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from chat.complexity_scorer import ComplexityScorer
 from chat.session_state import InteractionStyle, QualityMode
+from runtime.connectors.cli import main as connectors_cli
 from runtime.connectors.manifest import parse_connector_config
 from runtime.connectors.registry import ConnectorRegistry
 from runtime.connectors.types import AcceptanceState, ConnectorJobSpec
@@ -82,6 +83,17 @@ def test_manifest_parses_static_cli_connector(tmp_path):
     assert manifest.id == "openclawnew"
     assert manifest.command[0] == sys.executable
     assert manifest.privacy.data_sent == ("task",)
+
+
+def test_connectors_validate_missing_config_is_successful_diagnostic(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CONNECTORS_CONFIG_PATH", str(tmp_path / "missing.json"))
+
+    exit_code = connectors_cli(["validate", "--json"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert payload["config"]["status"] == "missing"
 
 
 def test_manifest_rejects_dynamic_command_string(tmp_path):

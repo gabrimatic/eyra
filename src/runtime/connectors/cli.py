@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(redact_connector_payload(payload), indent=2, sort_keys=True))
         else:
             print(format_connector_list(registry))
-        return 0 if payload["config"]["status"] in {"loaded", "disabled"} else 1
+        return 0 if payload["config"]["status"] in {"loaded", "disabled", "missing"} else 1
     if args.action == "list":
         payload = {"connectors": registry.list_connectors()}
         if args.json_output:
