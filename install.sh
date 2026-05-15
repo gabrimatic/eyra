@@ -177,8 +177,8 @@ elif [[ "$VERSION" == "latest" || "$VERSION" == v* ]]; then
         checksum_url="$(json_field "$release_json" checksum)"
         if [[ -n "$wheel_url" ]]; then
             package_kind="wheel"
-            package_path="$tmp_dir/eyra.whl"
             asset_name="$(json_field "$release_json" wheel_name)"
+            package_path="$tmp_dir/$asset_name"
             download "$wheel_url" "$package_path"
         elif [[ -n "$source_asset_url" ]]; then
             package_kind="archive"
@@ -247,9 +247,6 @@ case "$package_kind" in
         ;;
     wheel)
         mkdir -p "$staging"
-        uv venv "$staging/.venv" >/dev/null
-        "$staging/.venv/bin/python" -m pip install --upgrade pip >/dev/null
-        uv pip install --python "$staging/.venv/bin/python" "$package_path"
         ;;
     *)
         fail "Unsupported package kind: $package_kind"
@@ -268,6 +265,17 @@ rollback_install() {
     rm -rf "$INSTALL_DIR"
     [[ -n "${backup:-}" && -d "$backup" ]] && mv "$backup" "$INSTALL_DIR"
 }
+
+if [[ "$package_kind" == "wheel" ]]; then
+    if ! uv venv "$INSTALL_DIR/.venv" >/dev/null; then
+        rollback_install
+        fail "Could not create the Eyra package environment."
+    fi
+    if ! uv pip install --python "$INSTALL_DIR/.venv/bin/python" "$package_path"; then
+        rollback_install
+        fail "Could not install the Eyra wheel."
+    fi
+fi
 
 write_shim() {
     local name="$1"
