@@ -239,6 +239,28 @@ class TestLocalWhisperMicrophoneProbe:
         with patch("runtime.preflight.sd.InputStream", FakeStream):
             assert manager._probe_microphone_ready(manager.settings) is True
 
+    def test_configured_sounddevice_input_waits_through_initial_silence(self):
+        manager = PreflightManager(Settings())
+
+        class FakeStream:
+            def __init__(self, **_kwargs):
+                self.reads = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return None
+
+            def read(self, frames):
+                self.reads += 1
+                if self.reads < 3:
+                    return np.zeros((frames, 1), dtype=np.int16), False
+                return np.ones((frames, 1), dtype=np.int16), False
+
+        with patch("runtime.preflight.sd.InputStream", FakeStream):
+            assert manager._probe_microphone_ready(manager.settings) is True
+
     def test_configured_sounddevice_input_rejects_all_zero_audio(self):
         manager = PreflightManager(Settings())
 

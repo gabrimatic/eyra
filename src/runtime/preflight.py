@@ -289,7 +289,8 @@ class PreflightManager:
         if isinstance(input_device, str) and input_device.isdigit():
             input_device = int(input_device)
         sample_rate = int(settings.VOICE_SAMPLE_RATE or 16000)
-        frames = max(512, int(sample_rate * 0.5))
+        frames = max(512, int(sample_rate * 0.25))
+        attempts = 12
         try:
             with sd.InputStream(
                 samplerate=sample_rate,
@@ -298,10 +299,13 @@ class PreflightManager:
                 dtype="int16",
                 blocksize=512,
             ) as stream:
-                data, overflowed = stream.read(frames)
-            if overflowed:
-                logger.debug("Microphone probe overflowed while checking configured input")
-            return bool(np.any(data))
+                for _ in range(attempts):
+                    data, overflowed = stream.read(frames)
+                    if overflowed:
+                        logger.debug("Microphone probe overflowed while checking configured input")
+                    if np.any(data):
+                        return True
+            return False
         except Exception as e:
             logger.debug("Microphone probe failed: %s", e)
             return False
