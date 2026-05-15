@@ -132,14 +132,14 @@ class ConnectorRegistry:
     def cancel(self, key: str) -> bool:
         return self.runner.cancel(key)
 
-    async def test(self, connector_id: str) -> ConnectorAcceptanceResult:
+    async def test(self, connector_id: str, *, approval_id: str = "") -> ConnectorAcceptanceResult:
         manifest = self.get(connector_id)
         if manifest is None:
             result = ConnectorAcceptanceResult(connector_id, AcceptanceState.NOT_CONFIGURED, "Connector is not configured.")
         elif not self.enabled:
             result = ConnectorAcceptanceResult(connector_id, AcceptanceState.NOT_CONFIGURED, "Connectors are disabled.")
         else:
-            result = await run_acceptance(manifest, runner=self.runner)
+            result = await run_acceptance(manifest, runner=self.runner, approval_id=approval_id)
         self._acceptance[connector_id] = result
         return result
 

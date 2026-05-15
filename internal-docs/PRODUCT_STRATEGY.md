@@ -74,7 +74,7 @@ Default behavior: nothing leaves the machine.
 
 Local-first matters because computer control touches private text, files, windows, clipboard content, screenshots, shell commands, browser state, and account surfaces. Eyra should make the local path useful enough that cloud paths stay optional, not required.
 
-Cloud providers, network tools, browser tools, Realtime voice, MCP bridges, connectors, and external agents can be enabled. When enabled, Eyra must say what may leave the machine and which route allowed it.
+Cloud providers, network tools, browser tools, Realtime voice, MCP bridges, and connectors can be enabled. External-agent compatibility should delegate toward connector-style policy rather than becoming a second command-running control plane. When enabled, Eyra must say what may leave the machine and which route allowed it.
 
 ## Voice-First
 
@@ -127,7 +127,7 @@ An adapter must declare:
 - output cap,
 - cancellation support where possible.
 
-Adapters run only when enabled and configured. They use static argv, sandboxed cwd, redacted capped output, and explicit approval for mutation or delegation. Realtime voice must not call external agents by default.
+Adapters run only when enabled and configured. New executable adapters should be connectors. Compatibility adapters must use the same static argv, sandboxed cwd, redacted capped output, explicit approval, logging, cancellation, and privacy rules. Realtime voice must not call external agents by default.
 
 ## Installation And Distribution
 

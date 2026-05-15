@@ -904,8 +904,8 @@ class WebAssistantRuntime:
     async def connector_detail(self, connector_id: str) -> dict[str, Any]:
         return {"connector": self.connector_registry.snapshot_for(connector_id)}
 
-    async def test_connector(self, connector_id: str) -> dict[str, Any]:
-        result = await self.connector_registry.test(connector_id)
+    async def test_connector(self, connector_id: str, approval_id: str = "") -> dict[str, Any]:
+        result = await self.connector_registry.test(connector_id, approval_id=approval_id)
         return {"connectorId": result.connector_id, "state": result.state.value, "reason": result.reason, "checks": list(result.checks)}
 
     async def run_connector(self, connector_id: str, task_text: str) -> dict[str, Any]:
@@ -1896,10 +1896,11 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/connector/test":
             payload = self._read_json()
             connector_id = str(payload.get("connectorId", "")).strip()
+            approval_id = str(payload.get("approvalId", "")).strip()
             if not connector_id:
                 self._send_json(400, {"error": "connectorId is required."})
                 return
-            self._send_json(200, self.runtime.run_sync(self.runtime.test_connector(connector_id), timeout=30))
+            self._send_json(200, self.runtime.run_sync(self.runtime.test_connector(connector_id, approval_id), timeout=30))
             return
         if parsed.path == "/api/connector/run":
             payload = self._read_json()

@@ -218,7 +218,7 @@ class Settings:
 
 def _looks_like_eyra_source_checkout(path: Path) -> bool:
     pyproject = path / "pyproject.toml"
-    if not pyproject.exists() or not (path / "src" / "main.py").exists():
+    if not (path / ".git").exists() or not pyproject.exists() or not (path / "src" / "main.py").exists():
         return False
     try:
         return 'name = "eyra"' in pyproject.read_text()

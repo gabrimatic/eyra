@@ -360,7 +360,10 @@ def _update_guidance() -> CommandResult:
 
 def _uninstall(*, dry_run: bool, assume_yes: bool, with_data: bool) -> CommandResult:
     paths = _paths()
-    candidates = [Path(paths["userBin"]) / name for name in ("eyra", "eyra-web", "eyra-doctor", "eyra-certify", "eyra-setup")]
+    candidates = [
+        Path(paths["userBin"]) / name
+        for name in ("eyra", "eyra-web", "eyra-doctor", "eyra-certify", "eyra-setup", "eyra-connectors")
+    ]
     existing = [path for path in candidates if path.exists()]
     data_paths = [Path(paths[name]).expanduser() for name in ("configDir", "dataDir", "logDir")]
     shell_rc_paths = _shell_rc_paths()
@@ -495,7 +498,7 @@ def _primary_env_path() -> Path:
 
 def _is_source_checkout(repo: Path | None = None) -> bool:
     root = repo or _repo_root()
-    return (root / "pyproject.toml").exists() and (root / "src").exists()
+    return (root / ".git").exists() and (root / "pyproject.toml").exists() and (root / "src").exists()
 
 
 def _default_env_text() -> str:

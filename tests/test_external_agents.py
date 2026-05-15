@@ -182,3 +182,31 @@ class TestExternalAgentAdapters:
 
         assert "not configured for execution" in second.content
         assert "EXTERNAL_AGENT_CONFIG_PATH" in second.content
+
+    def test_agent_task_approval_details_do_not_store_raw_task_or_home_path(self, tmp_path):
+        approvals = ApprovalManager()
+        registry = build_tool_registry(
+            Settings(
+                AGENT_TOOLS_ENABLED=True,
+                EXTERNAL_AGENT_TOOLS_ENABLED=False,
+                FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+                FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+            ),
+            approval_manager=approvals,
+        )
+
+        first = _run(
+            registry.execute(
+                "run_codex_task",
+                json.dumps({"task": "inspect token=secret-token private.txt", "cwd": str(tmp_path)}),
+            )
+        )
+        pending = approvals.list_pending()[0]
+        rendered = json.dumps(pending.details)
+
+        assert "Approval required" in first.content
+        assert "inspect token" not in rendered
+        assert "secret-token" not in rendered
+        assert str(tmp_path) not in rendered
+        assert pending.details["taskLength"] > 0
+        assert pending.details["taskFingerprint"]

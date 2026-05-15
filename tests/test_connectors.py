@@ -221,6 +221,143 @@ def test_registry_acceptance_then_local_cli_run(tmp_path):
     assert '"task": "hello"' in result.output
 
 
+def test_runner_payload_omits_undeclared_cwd_and_selected_files(tmp_path):
+    config_path = tmp_path / "connectors.json"
+    config_path.write_text(
+        json.dumps(
+            _manifest(
+                [sys.executable, "-c", "import json,sys; print(json.dumps(json.load(sys.stdin)))"],
+                privacy={"dataSent": ["task"], "destination": "local_process", "leavesMachine": False},
+                acceptance={"requiresHumanApproval": False},
+            )
+        )
+    )
+    registry = ConnectorRegistry.from_settings(_settings(tmp_path), approvals=ApprovalManager())
+    registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
+        "openclawnew",
+        AcceptanceState.ACCEPTED,
+        "accepted",
+    )
+
+    result = _run(registry.run(ConnectorJobSpec(connector_id="openclawnew", task="hello", cwd=str(tmp_path))))
+    payload = json.loads(result.output)
+
+    assert result.status == "completed"
+    assert payload["task"] == "hello"
+    assert "cwd" not in payload
+    assert "selectedFiles" not in payload
+    assert "source" not in payload
+
+
+def test_runner_payload_includes_declared_sandboxed_cwd(tmp_path):
+    capture = tmp_path / "payload.json"
+    config_path = tmp_path / "connectors.json"
+    config_path.write_text(
+        json.dumps(
+            _manifest(
+                [
+                    sys.executable,
+                    "-c",
+                    f"import json,sys,pathlib; p=json.load(sys.stdin); pathlib.Path({str(capture)!r}).write_text(json.dumps(p)); print('{{\"status\":\"ok\"}}')",
+                ],
+                canReadFiles=True,
+                privacy={"dataSent": ["task", "cwd"], "destination": "local_process", "leavesMachine": False},
+                acceptance={"requiresHumanApproval": False},
+            )
+        )
+    )
+    registry = ConnectorRegistry.from_settings(_settings(tmp_path), approvals=ApprovalManager())
+    registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
+        "openclawnew",
+        AcceptanceState.ACCEPTED,
+        "accepted",
+    )
+
+    result = _run(registry.run(ConnectorJobSpec(connector_id="openclawnew", task="hello", cwd=str(tmp_path))))
+    payload = json.loads(capture.read_text())
+
+    assert result.status == "completed"
+    assert payload["cwd"] == str(tmp_path.resolve())
+
+
+def test_runner_payload_sends_selected_files_only_when_declared_and_sandbox_valid(tmp_path):
+    selected = tmp_path / "note.txt"
+    selected.write_text("local")
+    capture = tmp_path / "payload.json"
+    config_path = tmp_path / "connectors.json"
+    config_path.write_text(
+        json.dumps(
+            _manifest(
+                [
+                    sys.executable,
+                    "-c",
+                    f"import json,sys,pathlib; p=json.load(sys.stdin); pathlib.Path({str(capture)!r}).write_text(json.dumps(p)); print('{{\"status\":\"ok\"}}')",
+                ],
+                canReadFiles=True,
+                privacy={"dataSent": ["task", "selected_files"], "destination": "local_process", "leavesMachine": False},
+                acceptance={"requiresHumanApproval": False},
+            )
+        )
+    )
+    registry = ConnectorRegistry.from_settings(_settings(tmp_path), approvals=ApprovalManager())
+    registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
+        "openclawnew",
+        AcceptanceState.ACCEPTED,
+        "accepted",
+    )
+
+    result = _run(
+        registry.run(
+            ConnectorJobSpec(
+                connector_id="openclawnew",
+                task="hello",
+                cwd=str(tmp_path),
+                selected_files=(str(selected),),
+            )
+        )
+    )
+    outside = _run(
+        registry.run(
+            ConnectorJobSpec(
+                connector_id="openclawnew",
+                task="hello",
+                cwd=str(tmp_path),
+                selected_files=("/etc/hosts",),
+            )
+        )
+    )
+
+    payload = json.loads(capture.read_text())
+    assert result.status == "completed"
+    assert payload["selectedFiles"] == [str(selected.resolve())]
+    assert outside.status == "blocked"
+    assert "outside connector sandbox" in outside.output
+
+
+def test_runner_refuses_task_when_privacy_omits_task(tmp_path):
+    config_path = tmp_path / "connectors.json"
+    config_path.write_text(
+        json.dumps(
+            _manifest(
+                [sys.executable, "-c", "import json,sys; print(json.dumps(json.load(sys.stdin)))"],
+                privacy={"dataSent": [], "destination": "local_process", "leavesMachine": False},
+                acceptance={"requiresHumanApproval": False},
+            )
+        )
+    )
+    registry = ConnectorRegistry.from_settings(_settings(tmp_path), approvals=ApprovalManager())
+    registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
+        "openclawnew",
+        AcceptanceState.ACCEPTED,
+        "accepted",
+    )
+
+    result = _run(registry.run(ConnectorJobSpec(connector_id="openclawnew", task="hello", cwd=str(tmp_path))))
+
+    assert result.status == "blocked"
+    assert "task is not declared" in result.output
+
+
 def test_registry_redacts_connector_destination(tmp_path):
     config_path = tmp_path / "connectors.json"
     config_path.write_text(
@@ -243,6 +380,79 @@ def test_registry_redacts_connector_destination(tmp_path):
     assert "[REDACTED]" in rendered
 
 
+def test_remote_connector_payload_omits_undeclared_fields(tmp_path):
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    received = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_HEAD(self):
+            self.send_response(200)
+            self.end_headers()
+
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            received["payload"] = json.loads(body.decode())
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok"}')
+
+        def log_message(self, *_):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    config_path = tmp_path / "connectors.json"
+    config_path.write_text(
+        json.dumps(
+            _manifest(
+                [],
+                type="http_remote",
+                endpoint=f"http://127.0.0.1:{server.server_port}/connector",
+                local=False,
+                canUseNetwork=True,
+                privacy={"dataSent": ["task"], "destination": "http://127.0.0.1/connector", "leavesMachine": True},
+                acceptance={"requiresHumanApproval": False},
+            )
+        )
+    )
+    try:
+        approvals = ApprovalManager()
+        registry = ConnectorRegistry.from_settings(
+            _settings(tmp_path, CONNECTORS_ALLOW_REMOTE=True, NETWORK_TOOLS_ENABLED=True),
+            approvals=approvals,
+        )
+        registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
+            "openclawnew",
+            AcceptanceState.ACCEPTED,
+            "accepted",
+        )
+
+        first = _run(registry.run(ConnectorJobSpec(connector_id="openclawnew", task="hello", cwd=str(tmp_path))))
+        assert first.status == "approval_required"
+        approvals.approve(first.approval_id)
+        result = _run(
+            registry.run(
+                ConnectorJobSpec(
+                    connector_id="openclawnew",
+                    task="hello",
+                    cwd=str(tmp_path),
+                    approval_id=first.approval_id,
+                )
+            )
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert result.status == "completed"
+    assert received["payload"]["task"] == "hello"
+    assert "cwd" not in received["payload"]
+    assert "selectedFiles" not in received["payload"]
+
+
 def test_missing_executable_is_reported(tmp_path):
     config_path = tmp_path / "connectors.json"
     config_path.write_text(json.dumps(_manifest(["definitely-missing-eyra-connector"])))
@@ -252,6 +462,64 @@ def test_missing_executable_is_reported(tmp_path):
 
     assert accepted.state == AcceptanceState.ACCEPTANCE_FAILED
     assert "transport" in accepted.reason
+
+
+def test_acceptance_approval_required_is_not_accepted_until_approved(tmp_path):
+    config_path = tmp_path / "connectors.json"
+    config_path.write_text(
+        json.dumps(
+            _manifest(
+                [
+                    sys.executable,
+                    "-c",
+                    "import json,sys; p=json.load(sys.stdin); print(json.dumps({'status':'ok','task':p['task']}))",
+                ],
+                requiresApproval=True,
+                riskTier="delegated_agent",
+                acceptance={
+                    "testTask": "status",
+                    "expectedOutputContains": "status",
+                    "requiresHumanApproval": True,
+                },
+            )
+        )
+    )
+    approvals = ApprovalManager()
+    registry = ConnectorRegistry.from_settings(_settings(tmp_path), approvals=approvals)
+
+    first = _run(registry.test("openclawnew"))
+    pending = approvals.list_pending()
+    assert first.state == AcceptanceState.AVAILABLE
+    assert first.state != AcceptanceState.ACCEPTED
+    assert "approval required" in first.reason.lower()
+    assert pending and pending[0].tool_name == "run_connector_task"
+
+    approvals.approve(pending[0].id)
+    second = _run(registry.test("openclawnew", approval_id=pending[0].id))
+
+    assert second.state == AcceptanceState.ACCEPTED
+
+
+def test_acceptance_output_is_capped_and_redacted(tmp_path):
+    config_path = tmp_path / "connectors.json"
+    config_path.write_text(
+        json.dumps(
+            _manifest(
+                [sys.executable, "-c", "print('token=secret-token ' + 'x' * 5000)"],
+                outputMode="stdout_text",
+                outputCapBytes=1024,
+                acceptance={"testTask": "status", "requiresHumanApproval": False},
+            )
+        )
+    )
+    registry = ConnectorRegistry.from_settings(_settings(tmp_path), approvals=ApprovalManager())
+
+    result = _run(registry.test("openclawnew"))
+    rendered = json.dumps({"reason": result.reason, "checks": result.checks})
+
+    assert result.state == AcceptanceState.ACCEPTED
+    assert "secret-token" not in rendered
+    assert "output clipped" in rendered
 
 
 def test_runner_enforces_timeout(tmp_path):
@@ -413,7 +681,7 @@ def test_connector_route_trace_is_redacted_and_policy_owned(tmp_path):
         tool_capable_models=settings.all_model_names,
     )
     envelope = RequestEnvelope(
-        text="ask openclawnew to inspect /Users/soroush/private token=secret",
+        text="ask openclawnew to inspect private_file.txt and say token=secret",
         source=RequestSource.TEST,
         interaction_style=InteractionStyle.TEXT,
         quality_mode=QualityMode.BALANCED,
@@ -439,5 +707,7 @@ def test_connector_route_trace_is_redacted_and_policy_owned(tmp_path):
     assert Capability.CONNECTOR_FILE_WRITE in decision.required_capabilities
     assert decision.tool_policy.allowed_tool_names == frozenset()
     assert "secret" not in rendered
-    assert "/Users/soroush" not in payload
+    assert "private_file.txt" not in rendered
+    assert "private_file.txt" not in payload
+    assert "inspect private_file" not in rendered
     assert decision.trace.connector["connectorId"] == "openclawnew"

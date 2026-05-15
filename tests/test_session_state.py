@@ -59,7 +59,7 @@ class TestSettingsRoutingDefaults:
 
         assert settings.ROUTING_DEBUG is False
 
-    def test_load_from_env_reads_user_config_before_source_checkout_env(self, monkeypatch, tmp_path):
+    def test_load_from_env_reads_user_config_then_git_source_checkout_env(self, monkeypatch, tmp_path):
         from utils.settings import Settings
 
         home = tmp_path / "home"
@@ -67,6 +67,7 @@ class TestSettingsRoutingDefaults:
         config.mkdir(parents=True)
         (config / ".env").write_text("MODEL=user-config-model\nNETWORK_TOOLS_ENABLED=true\n")
         cwd = tmp_path / "cwd"
+        (cwd / ".git").mkdir(parents=True)
         (cwd / "src").mkdir(parents=True)
         (cwd / "pyproject.toml").write_text('[project]\nname = "eyra"\n')
         (cwd / "src" / "main.py").write_text("")

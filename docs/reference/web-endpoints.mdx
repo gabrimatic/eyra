@@ -46,7 +46,7 @@ Token locations:
 | `/api/local-speak` | Speak local text through Local Whisper |
 | `/api/realtime-session` | Mint OpenAI Realtime ephemeral client secret |
 | `/api/realtime-tool-call` | Call a safe server-side Realtime tool |
-| `/api/connector/test` | Run connector acceptance checks |
+| `/api/connector/test` | Run connector acceptance checks; accepts optional `approvalId` for a previously approved acceptance run |
 | `/api/connector/run` | Start a connector background job |
 | `/api/connector/cancel` | Cancel a running connector job by connector id |
 
@@ -63,6 +63,8 @@ Web payload helpers redact:
 - OpenAI-style API keys.
 - Local home paths.
 - Connector privacy destinations and connector output.
+
+Connector Web responses expose manifest snapshots, acceptance state, capped check output, and redacted policy metadata. They do not return raw connector stdin payloads, raw task text, local filenames from route traces, or unredacted local home paths.
 
 ## Runtime scope
 

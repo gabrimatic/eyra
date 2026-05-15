@@ -7,6 +7,8 @@ INSTALL_DIR="${EYRA_INSTALL_DIR:-$HOME/.local/share/eyra/app}"
 BIN_DIR="${EYRA_BIN_DIR:-$HOME/.local/bin}"
 GITHUB_HOST="${GITHUB_HOST:-github.com}"
 API_HOST="${GITHUB_API_HOST:-api.github.com}"
+SOURCE_PATH="${EYRA_SOURCE_PATH:-}"
+ALLOW_UNVERIFIED_TAG_ARCHIVE="${EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE:-false}"
 
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
@@ -35,6 +37,38 @@ download() {
     local url="$1"
     local output="$2"
     curl -fsSL "${auth_header_args[@]}" "$url" -o "$output"
+}
+
+json_field() {
+    local file="$1"
+    local expr="$2"
+    python3 - "$file" "$expr" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1]))
+expr = sys.argv[2]
+if expr == "tag":
+    print(payload.get("tag_name", ""))
+elif expr == "wheel":
+    for asset in payload.get("assets", []):
+        name = asset.get("name", "")
+        if name.endswith(".whl"):
+            print(asset.get("browser_download_url", ""))
+            break
+elif expr == "source_asset":
+    for asset in payload.get("assets", []):
+        name = asset.get("name", "")
+        if name.endswith((".tar.gz", ".tgz", ".zip")) and "sha256" not in name.lower():
+            print(asset.get("browser_download_url", ""))
+            break
+elif expr == "checksum":
+    for asset in payload.get("assets", []):
+        name = asset.get("name", "").lower()
+        if "sha256" in name or name.endswith((".sha256", ".sha256sum", ".checksums.txt", "checksums.txt")):
+            print(asset.get("browser_download_url", ""))
+            break
+PY
 }
 
 require_safe_install_dir() {
@@ -101,42 +135,110 @@ else
 fi
 
 tmp_dir="$(mktemp -d)"
-archive="$tmp_dir/eyra.tar.gz"
+backup=""
+package_kind=""
+package_path=""
+asset_name=""
 
-log_step "Downloading Eyra"
-if [[ "$VERSION" == "latest" ]]; then
+log_step "Resolving Eyra package"
+if [[ -n "$SOURCE_PATH" ]]; then
+    [[ -d "$SOURCE_PATH" ]] || fail "EYRA_SOURCE_PATH does not exist: $SOURCE_PATH"
+    package_kind="source-dir"
+    package_path="$SOURCE_PATH"
+    tag="local-source"
+    log_ok "Using local source path"
+elif [[ "$VERSION" == "latest" || "$VERSION" == v* ]]; then
     release_json="$tmp_dir/release.json"
-    if ! download "https://${API_HOST}/repos/${REPO}/releases/latest" "$release_json"; then
-        fail "Could not read the latest GitHub release. If the repo is private, set GITHUB_TOKEN or install from a checked-out source tree."
+    release_api="https://${API_HOST}/repos/${REPO}/releases/latest"
+    if [[ "$VERSION" != "latest" ]]; then
+        release_api="https://${API_HOST}/repos/${REPO}/releases/tags/${VERSION}"
     fi
-    tag="$(python3 - "$release_json" <<'PY'
-import json, sys
-print(json.load(open(sys.argv[1]))["tag_name"])
-PY
-)"
+    if download "$release_api" "$release_json"; then
+        tag="$(json_field "$release_json" tag)"
+        wheel_url="$(json_field "$release_json" wheel)"
+        source_asset_url="$(json_field "$release_json" source_asset)"
+        checksum_url="$(json_field "$release_json" checksum)"
+        if [[ -n "$wheel_url" ]]; then
+            package_kind="wheel"
+            package_path="$tmp_dir/eyra.whl"
+            asset_name="$(basename "$wheel_url")"
+            download "$wheel_url" "$package_path"
+        elif [[ -n "$source_asset_url" ]]; then
+            package_kind="archive"
+            package_path="$tmp_dir/eyra-source"
+            asset_name="$(basename "$source_asset_url")"
+            download "$source_asset_url" "$tmp_dir/$asset_name"
+            package_path="$tmp_dir/$asset_name"
+        else
+            log_warn "Release ${tag} has no wheel or source archive asset."
+        fi
+        if [[ -n "${checksum_url:-}" && -n "$package_path" ]]; then
+            checksum_file="$tmp_dir/checksums.txt"
+            download "$checksum_url" "$checksum_file"
+            if grep -F "  $asset_name" "$checksum_file" >/dev/null 2>&1; then
+                (cd "$tmp_dir" && shasum -a 256 -c "$checksum_file" --ignore-missing)
+            else
+                expected="$(awk '{print $1; exit}' "$checksum_file")"
+                actual="$(shasum -a 256 "$package_path" | awk '{print $1}')"
+                [[ "$expected" == "$actual" ]] || fail "Checksum mismatch for release asset."
+            fi
+            log_ok "Checksum verified"
+        elif [[ -n "$package_path" ]]; then
+            fail "Release asset checksum is missing. Add a checksum release asset or set EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE=true for tag archive fallback only."
+        fi
+    else
+        [[ "$VERSION" != "latest" ]] || fail "Could not read the latest GitHub release. If the repo is private, set GITHUB_TOKEN or install from a checked-out source tree."
+        log_warn "Could not read release JSON for ${VERSION}; falling back to tag archive."
+    fi
 else
     tag="$VERSION"
 fi
 
-archive_url="https://${GITHUB_HOST}/${REPO}/archive/refs/tags/${tag}.tar.gz"
-if ! download "$archive_url" "$archive"; then
-    fail "Could not download ${archive_url}. Private repositories require GITHUB_TOKEN."
-fi
-
-checksum_url="${archive_url}.sha256"
-checksum_file="$tmp_dir/eyra.tar.gz.sha256"
-if download "$checksum_url" "$checksum_file" 2>/dev/null; then
-    (cd "$tmp_dir" && shasum -a 256 -c "$checksum_file")
-    log_ok "Checksum verified"
-else
-    log_warn "No checksum file found for ${tag}; continuing with HTTPS transport only."
+if [[ -z "$package_kind" ]]; then
+    archive_url="https://${GITHUB_HOST}/${REPO}/archive/refs/tags/${tag}.tar.gz"
+    if [[ "$ALLOW_UNVERIFIED_TAG_ARCHIVE" != "true" ]]; then
+        fail "No release asset checksum is available for ${tag}. Set EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE=true to install the GitHub tag archive with an explicit warning."
+    fi
+    log_warn "Installing GitHub tag archive without a release asset checksum because EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE=true."
+    package_kind="archive"
+    package_path="$tmp_dir/eyra.tar.gz"
+    if ! download "$archive_url" "$package_path"; then
+        fail "Could not download ${archive_url}. Private repositories require GITHUB_TOKEN."
+    fi
 fi
 
 log_step "Installing into ${INSTALL_DIR}"
 require_safe_install_dir "$INSTALL_DIR"
 staging="$tmp_dir/staging"
 mkdir -p "$staging"
-tar -xzf "$archive" -C "$staging" --strip-components 1
+case "$package_kind" in
+    source-dir)
+        cp -R "$package_path"/. "$staging"/
+        rm -rf "$staging/.git" "$staging/.venv" "$staging/.pytest_cache" "$staging/dist" "$staging/build"
+        ;;
+    archive)
+        case "$package_path" in
+            *.zip)
+                unzip -q "$package_path" -d "$tmp_dir/unpacked"
+                first_entry="$(find "$tmp_dir/unpacked" -mindepth 1 -maxdepth 1 | head -n 1)"
+                [[ -n "$first_entry" ]] || fail "Downloaded archive is empty."
+                cp -R "$first_entry"/. "$staging"/
+                ;;
+            *)
+                tar -xzf "$package_path" -C "$staging" --strip-components 1
+                ;;
+        esac
+        ;;
+    wheel)
+        mkdir -p "$staging"
+        uv venv "$staging/.venv" >/dev/null
+        "$staging/.venv/bin/python" -m pip install --upgrade pip >/dev/null
+        uv pip install --python "$staging/.venv/bin/python" "$package_path"
+        ;;
+    *)
+        fail "Unsupported package kind: $package_kind"
+        ;;
+esac
 mkdir -p "$(dirname "$INSTALL_DIR")"
 if [[ -e "$INSTALL_DIR" ]]; then
     backup="${INSTALL_DIR}.backup.$(date +%Y%m%d%H%M%S)"
@@ -145,16 +247,56 @@ if [[ -e "$INSTALL_DIR" ]]; then
 fi
 mv "$staging" "$INSTALL_DIR"
 
-log_step "Running first-run setup"
-chmod +x "$INSTALL_DIR/setup.sh"
-if ! "$INSTALL_DIR/setup.sh" --non-interactive; then
-    log_warn "Setup failed; rolling back install directory."
+rollback_install() {
+    log_warn "Install verification failed; rolling back install directory."
     rm -rf "$INSTALL_DIR"
     [[ -n "${backup:-}" && -d "$backup" ]] && mv "$backup" "$INSTALL_DIR"
+}
+
+write_shim() {
+    local name="$1"
+    shift
+    cat > "$BIN_DIR/$name" <<LAUNCHER
+#!/bin/bash
+if [[ -x "$INSTALL_DIR/.venv/bin/eyra" ]]; then
+    exec "$INSTALL_DIR/.venv/bin/eyra" "$@"
+fi
+cd "$INSTALL_DIR" && exec uv run --frozen eyra "$@"
+LAUNCHER
+    chmod +x "$BIN_DIR/$name"
+}
+
+mkdir -p "$BIN_DIR"
+write_shim eyra "\$@"
+cat > "$BIN_DIR/eyra-web" <<LAUNCHER
+#!/bin/bash
+exec "$BIN_DIR/eyra" web "\$@"
+LAUNCHER
+chmod +x "$BIN_DIR/eyra-web"
+for name in eyra-doctor eyra-certify eyra-setup eyra-connectors; do
+    subcommand="${name#eyra-}"
+    cat > "$BIN_DIR/$name" <<LAUNCHER
+#!/bin/bash
+exec "$BIN_DIR/eyra" "$subcommand" "\$@"
+LAUNCHER
+    chmod +x "$BIN_DIR/$name"
+done
+
+log_step "Running first-run setup"
+if ! "$BIN_DIR/eyra" setup --non-interactive; then
+    rollback_install
     exit 1
 fi
 
-mkdir -p "$BIN_DIR"
+log_step "Verifying installed commands"
+if ! (
+    "$BIN_DIR/eyra" version >/dev/null
+    USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false "$BIN_DIR/eyra" doctor --json >/dev/null
+    USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false "$BIN_DIR/eyra" certify --json >/dev/null
+); then
+    rollback_install
+    exit 1
+fi
 log_ok "Installed command shims in $BIN_DIR"
 
 echo ""
@@ -163,3 +305,4 @@ echo "Start: eyra"
 echo "Support report: eyra doctor --json"
 echo "Update: eyra update"
 echo "Uninstall shims: eyra uninstall"
+echo "User config and data stay in ~/.config/eyra, ~/.local/share/eyra, and ~/Library/Logs/Eyra."

@@ -51,7 +51,7 @@ Supported overrides:
 EYRA_VERSION=v4.2.0rc1 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
 ```
 
-Private repositories require `GITHUB_TOKEN`.
+Private repositories require `GITHUB_TOKEN`. The installer reads GitHub release JSON, prefers release assets with checksum files, and refuses unverified tag-archive fallback unless you explicitly set `EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE=true`. For private beta testing from a checked-out tree, use `EYRA_SOURCE_PATH=/path/to/eyra ./install.sh`; the installed app still writes user config to `~/.config/eyra/.env`, not into the app directory.
 
 ## Homebrew tap
 
@@ -67,8 +67,8 @@ Formula behavior:
 
 - Runs `uv sync --frozen --no-dev` at install time.
 - Command shims use `uv run --frozen --no-sync`.
-- Provides `eyra`, `eyra-web`, `eyra-doctor`, and `eyra-certify`.
-- Runs `eyra version` and mock `eyra doctor --json` in the formula test without requiring a live backend.
+- Provides `eyra`, `eyra-web`, `eyra-doctor`, `eyra-certify`, `eyra-setup`, and `eyra-connectors`.
+- Runs `eyra version`, `eyra paths --json`, and mock `eyra doctor --json` in the formula test without requiring a live backend.
 
 ## Local provider
 

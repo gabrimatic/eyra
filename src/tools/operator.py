@@ -1,6 +1,7 @@
 """Local operator tools for OS inspection, bounded commands, and agent bridges."""
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -66,6 +67,20 @@ def _redact(text: str) -> str:
     for pattern in patterns:
         redacted = re.sub(pattern, lambda m: m.group(1) + m.group(2) + "[redacted]" if m.lastindex else "[redacted]", redacted, flags=re.I)
     return redacted
+
+
+def _redact_path_for_approval(path: Path) -> str:
+    return path.name or "working-directory"
+
+
+def _agent_approval_details(agent: str, task: str, workdir: Path) -> dict[str, object]:
+    return {
+        "agent": agent,
+        "taskLength": len(task),
+        "taskFingerprint": hashlib.sha256(task.encode()).hexdigest(),
+        "cwdLabel": _redact_path_for_approval(workdir),
+        "cwdFingerprint": hashlib.sha256(str(workdir).encode()).hexdigest(),
+    }
 
 
 def _approval_or_result(
@@ -1622,7 +1637,7 @@ class RunAgentTaskTool(BaseTool):
             self._approvals,
             tool_name=self.name,
             title="agent delegation",
-            details={"agent": agent, "task": task, "cwd": str(workdir)},
+            details=_agent_approval_details(agent, task, workdir),
             approval_id=approval_id,
         )
         if approval is not None:

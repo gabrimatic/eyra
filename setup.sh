@@ -136,7 +136,7 @@ cd "$EYRA_DIR" && exec uv run eyra web "\$@"
 LAUNCHER
 chmod +x "$BIN_DIR/eyra-web"
 
-for name in eyra-doctor eyra-certify eyra-setup; do
+for name in eyra-doctor eyra-certify eyra-setup eyra-connectors; do
     subcommand="${name#eyra-}"
     cat > "$BIN_DIR/$name" <<LAUNCHER
 #!/bin/bash

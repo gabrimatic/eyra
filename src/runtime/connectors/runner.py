@@ -48,7 +48,10 @@ class ConnectorRunner:
     async def run(self, manifest: ConnectorManifest, spec: ConnectorJobSpec) -> ConnectorJobResult:
         if not manifest.enabled:
             return ConnectorJobResult(manifest.id, "disabled", f"Connector {manifest.id} is disabled.", job_id=spec.job_id)
-        cwd = self._resolve_cwd(manifest, spec.cwd)
+        try:
+            cwd = self._resolve_cwd(manifest, spec.cwd)
+        except (PermissionError, ValueError) as exc:
+            return ConnectorJobResult(manifest.id, "blocked", str(exc), job_id=spec.job_id)
         approval = self._approval_or_none(manifest, spec, cwd)
         if approval is not None:
             self._record_job_state(spec, JobStatus.WAITING_FOR_APPROVAL, approval.content)
@@ -69,7 +72,7 @@ class ConnectorRunner:
         }:
             result = await self._run_cli(manifest, spec, cwd)
         elif manifest.type in {ConnectorType.HTTP_LOCAL, ConnectorType.HTTP_REMOTE}:
-            result = await asyncio.to_thread(self._run_http, manifest, spec)
+            result = await asyncio.to_thread(self._run_http, manifest, spec, cwd)
         else:
             result = ConnectorJobResult(manifest.id, "blocked", f"Connector type {manifest.type.value} is not runnable locally yet.", job_id=spec.job_id)
         self._record_result(spec, result, manifest)
@@ -108,7 +111,12 @@ class ConnectorRunner:
         for key in keys:
             self._running[key] = proc
         try:
-            payload = self._input_bytes(manifest, spec, cwd)
+            try:
+                payload = self._input_bytes(manifest, spec, cwd)
+            except (PermissionError, ValueError) as exc:
+                proc.kill()
+                await proc.wait()
+                return ConnectorJobResult(manifest.id, "blocked", str(exc), job_id=spec.job_id, exit_code=proc.returncode)
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(payload), timeout=manifest.timeout_seconds)
             except asyncio.TimeoutError:
@@ -167,11 +175,14 @@ class ConnectorRunner:
             logs=({"level": "info", "message": "Connector process exited.", "exitCode": proc.returncode},),
         )
 
-    def _run_http(self, manifest: ConnectorManifest, spec: ConnectorJobSpec) -> ConnectorJobResult:
+    def _run_http(self, manifest: ConnectorManifest, spec: ConnectorJobSpec, cwd: Path) -> ConnectorJobResult:
         parsed = urlparse(manifest.endpoint)
         if manifest.type == ConnectorType.HTTP_LOCAL and (parsed.hostname or "").lower() not in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
             return ConnectorJobResult(manifest.id, "blocked", "http_local connector endpoint is not local.", job_id=spec.job_id)
-        payload = json.dumps({"task": spec.task, "connectorId": manifest.id}).encode()
+        try:
+            payload = self._input_bytes(manifest, spec, cwd) or b"{}"
+        except (PermissionError, ValueError) as exc:
+            return ConnectorJobResult(manifest.id, "blocked", str(exc), job_id=spec.job_id)
         req = Request(manifest.endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
         started = time.time()
         try:
@@ -200,19 +211,43 @@ class ConnectorRunner:
     def _input_bytes(self, manifest: ConnectorManifest, spec: ConnectorJobSpec, cwd: Path) -> bytes | None:
         if manifest.input_mode == ConnectorInputMode.NONE:
             return None
+        payload = self._input_payload(manifest, spec, cwd)
         if manifest.input_mode == ConnectorInputMode.STDIN_TEXT:
-            return spec.task.encode()
-        return json.dumps(
-            {
-                "connectorId": manifest.id,
-                "jobId": spec.job_id,
-                "task": spec.task,
-                "cwd": str(cwd),
-                "selectedFiles": list(spec.selected_files),
-                "source": spec.source,
-            },
-            separators=(",", ":"),
-        ).encode()
+            if "task" not in payload:
+                raise ValueError("Connector privacy.dataSent must include 'task' for text input.")
+            return str(payload["task"]).encode()
+        return json.dumps(payload, separators=(",", ":")).encode()
+
+    def _input_payload(self, manifest: ConnectorManifest, spec: ConnectorJobSpec, cwd: Path) -> dict[str, object]:
+        declared = set(manifest.privacy.data_sent if manifest.privacy else ())
+        payload: dict[str, object] = {
+            "connectorId": manifest.id,
+            "jobId": spec.job_id,
+        }
+        if spec.task:
+            if "task" not in declared:
+                raise ValueError("Connector task is not declared in privacy.dataSent.")
+            payload["task"] = spec.task
+        if "cwd" in declared:
+            payload["cwd"] = str(cwd)
+        if spec.selected_files:
+            if "selected_files" not in declared:
+                raise ValueError("Connector selected files are not declared in privacy.dataSent.")
+            payload["selectedFiles"] = [str(self._resolve_selected_file(manifest, item)) for item in spec.selected_files]
+        if "file_contents" in declared:
+            raise ValueError("Connector file_contents payloads are not supported by this runner yet.")
+        forbidden = declared.intersection({"screenshot", "clipboard", "pdf", "pdf_text"})
+        if forbidden:
+            raise ValueError(f"Connector runner cannot send declared data class: {sorted(forbidden)[0]}.")
+        return payload
+
+    def _resolve_selected_file(self, manifest: ConnectorManifest, selected: str) -> Path:
+        candidate = Path(selected).expanduser().resolve()
+        if not candidate.is_file():
+            raise PermissionError(f"Access denied: selected file {redact_output(str(candidate))} is not a file.")
+        if not any(candidate == root or root in candidate.parents for root in manifest.allowed_roots):
+            raise PermissionError(f"Access denied: selected file {redact_output(str(candidate))} is outside connector sandbox.")
+        return candidate
 
     def _resolve_cwd(self, manifest: ConnectorManifest, requested: str) -> Path:
         base = manifest.default_path
@@ -302,7 +337,9 @@ def redact_output(text: str) -> str:
     redacted = text
     for pattern in _SECRET_PATTERNS:
         redacted = pattern.sub(lambda match: _redact_match(match), redacted)
-    return re.sub(r"/Users/[^/\s]+", "~/[user]", redacted)
+    redacted = re.sub(r"/Users/[^/\s]+", "~/[user]", redacted)
+    redacted = re.sub(r"(?:/private)?/var/folders/[^\s,}\"']+", "~/[temp]", redacted)
+    return re.sub(r"/tmp/[^\s,}\"']+", "~/[temp]", redacted)
 
 
 def _redact_match(match: re.Match) -> str:

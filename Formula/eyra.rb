@@ -32,6 +32,14 @@ class Eyra < Formula
       #!/bin/bash
       cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run --frozen --no-sync eyra certify "$@"
     SH
+    (bin/"eyra-setup").write <<~SH
+      #!/bin/bash
+      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run --frozen --no-sync eyra setup "$@"
+    SH
+    (bin/"eyra-connectors").write <<~SH
+      #!/bin/bash
+      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run --frozen --no-sync eyra connectors "$@"
+    SH
   end
 
   def caveats
@@ -58,6 +66,7 @@ class Eyra < Formula
 
   test do
     system bin/"eyra", "version"
+    system bin/"eyra", "paths", "--json"
     system({ "USE_MOCK_CLIENT" => "true", "LIVE_LISTENING_ENABLED" => "false", "LIVE_SPEECH_ENABLED" => "false" },
            bin/"eyra", "doctor", "--json")
   end

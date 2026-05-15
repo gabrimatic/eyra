@@ -10,8 +10,6 @@ Speak or type. Eyra routes the request to an OpenAI-compatible model, calls loca
 
 Cloud providers, network-backed tools, full OS command tools, MCP bridges, universal connectors, external agent delegation, Realtime voice, and the Web UI are opt-in. Current `master` contains unreleased post-4.1.0 routing and voice hardening intended for a future 4.2.0 release candidate.
 
-<p align="center"><img src="screenshot.png" width="800" alt="Eyra terminal screenshot"></p>
-
 ---
 
 ## Quick start
@@ -414,7 +412,9 @@ FILESYSTEM_ALLOWED_PATHS=~/Documents,~/Desktop,~/Downloads,/tmp
 FILESYSTEM_DEFAULT_PATH=~/Documents
 ```
 
-Configured external agents use JSON like:
+Universal connectors are the preferred adapter system for coding agents, browser agents, MCP runners, local CLIs, and remote workers. The older external-agent surface is compatibility/detection-only guidance for existing setups; new executable workers should be modeled as connectors so they share one privacy, approval, timeout, logging, cancellation, and acceptance path.
+
+Legacy external-agent config still uses static JSON when enabled:
 
 ```json
 {
@@ -433,7 +433,7 @@ Configured external agents use JSON like:
 }
 ```
 
-Use static argv only. Eyra does not accept dynamic model-selected commands.
+Use static argv only. Eyra does not accept dynamic model-selected commands, and Realtime voice does not receive external-agent execution tools by default.
 
 Universal connectors use JSON like:
 
@@ -488,7 +488,7 @@ eyra connectors list --json
 eyra-connectors validate
 ```
 
-Every connector starts as configured, available, disabled, or validation-failed, then must pass local acceptance before it is usable. Acceptance checks cover manifest schema, id, static transport, executable or endpoint availability, sandboxed cwd, timeout, output cap, privacy declaration, risk tier, approval policy, health check, test task, output redaction, cancellation where supported, and forbidden capability mismatches.
+Every connector starts as configured, available, disabled, or validation-failed, then must pass local acceptance before it is usable. `approval_required` is not accepted: approval-gated acceptance remains available until a human approves it and the test task actually runs. Acceptance checks cover manifest schema, id, static transport, executable or endpoint availability, sandboxed cwd, timeout, output cap, privacy declaration, risk tier, approval policy, health check, test task, output redaction, cancellation where supported, and forbidden capability mismatches.
 
 `API_BASE_URL` accepts any OpenAI-compatible endpoint: Ollama (default), LM Studio, vLLM, OpenRouter, Groq, or OpenAI itself. Local providers ignore `API_KEY`; cloud providers require it.
 

@@ -73,14 +73,14 @@ class TestWebServerHelpers:
     def test_authenticated_capabilities_payload_redacts_local_paths(self):
         settings = Settings(
             WEB_UI_ENABLED=True,
-            FILESYSTEM_ALLOWED_PATHS="/Users/soroush/Documents,/tmp",
-            JOB_STORE_PATH="/Users/soroush/.local/share/eyra/jobs.sqlite3",
+            FILESYSTEM_ALLOWED_PATHS="/Users/example/Documents,/tmp",
+            JOB_STORE_PATH="/Users/example/.local/share/eyra/jobs.sqlite3",
         )
 
         payload = build_capabilities_payload(settings)
         rendered = json.dumps(payload)
 
-        assert "/Users/soroush" not in rendered
+        assert "/Users/example" not in rendered
         assert "~/[user]" in rendered
 
     def test_index_html_has_phone_ready_controls(self):
@@ -150,16 +150,16 @@ class TestWebServerHelpers:
 
         with patch("web.server.urllib.request.urlopen", fake_urlopen):
             status, payload = create_realtime_session_payload(
-                Settings(REALTIME_VOICE_ENABLED=True, OPENAI_API_KEY="sk-real-secret")
+                Settings(REALTIME_VOICE_ENABLED=True, OPENAI_API_KEY="test-api-key")
             )
 
         body = captured["body"]
         assert status == 200
         assert payload["value"] == "ephemeral"
         assert captured["url"] == "https://api.openai.com/v1/realtime/client_secrets"
-        assert "Bearer sk-real-secret" in captured["headers"]["Authorization"]
+        assert "Bearer test-api-key" in captured["headers"]["Authorization"]
         assert '"model": "gpt-realtime"' in body
-        assert "sk-real-secret" not in body
+        assert "test-api-key" not in body
 
     def test_realtime_tool_token_requires_realtime_enabled_and_secret(self):
         disabled = Settings(REALTIME_VOICE_ENABLED=False)
@@ -547,6 +547,71 @@ class TestWebServerHelpers:
         rendered = json.dumps(connectors)
         assert connectors["connectors"][0]["id"] == "openclawnew"
         assert detail["connector"]["privacy"]["destination"] == "local_process"
+        assert str(tmp_path) not in rendered
+
+    def test_web_connector_test_reports_approval_required_without_accepting(self, tmp_path):
+        config_path = tmp_path / "connectors.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "connectors": [
+                        {
+                            "id": "openclawnew",
+                            "displayName": "OpenClawNew",
+                            "type": "cli",
+                            "enabled": True,
+                            "command": [
+                                sys.executable,
+                                "-c",
+                                "import json,sys; p=json.load(sys.stdin); print(json.dumps({'status':'ok','task':p['task']}))",
+                            ],
+                            "cwdPolicy": "filesystem_default_path",
+                            "inputMode": "stdin_json",
+                            "outputMode": "stdout_json",
+                            "local": True,
+                            "canUseNetwork": False,
+                            "canReadFiles": False,
+                            "canMutateFiles": False,
+                            "canControlUI": False,
+                            "canRunShell": False,
+                            "requiresApproval": True,
+                            "riskTier": "delegated_agent",
+                            "timeoutSeconds": 5,
+                            "outputCapBytes": 4096,
+                            "allowedTools": [],
+                            "deniedTools": [],
+                            "privacy": {"dataSent": ["task"], "destination": "local_process", "leavesMachine": False},
+                            "acceptance": {
+                                "testTask": "status",
+                                "expectedOutputContains": "status",
+                                "requiresHumanApproval": True,
+                            },
+                        }
+                    ]
+                }
+            )
+        )
+        settings = Settings(
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            CONNECTORS_ENABLED=True,
+            CONNECTORS_CONFIG_PATH=str(config_path),
+            CONNECTORS_ALLOWED_ROOTS=str(tmp_path),
+            FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+            FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+        )
+        runtime = WebAssistantRuntime(settings)
+
+        try:
+            result = runtime.run_sync(runtime.test_connector("openclawnew"))
+            rendered = json.dumps(result)
+        finally:
+            runtime.close()
+
+        assert result["state"] == "available"
+        assert "approval" in result["reason"].lower()
+        assert "secret" not in rendered
         assert str(tmp_path) not in rendered
 
     def test_web_runtime_returns_persisted_job_detail_with_redaction(self, tmp_path):

@@ -23,6 +23,7 @@ async def run_acceptance(
     manifest: ConnectorManifest,
     *,
     runner: ConnectorRunner,
+    approval_id: str = "",
 ) -> ConnectorAcceptanceResult:
     """Run local acceptance for one connector."""
     checks: list[dict] = []
@@ -45,13 +46,31 @@ async def run_acceptance(
                 task=manifest.acceptance.test_task,
                 cwd=str(manifest.default_path),
                 source="acceptance",
-                approval_id="",
+                approval_id=approval_id,
                 job_id=f"accept-{manifest.id}",
             ),
         )
         expected = manifest.acceptance.expected_output_contains
-        passed = result.status in {"completed", "approval_required"} and (not expected or expected in result.output)
-        checks.append({"name": "test_task", "passed": passed, "reason": redact_output(result.output[:240])})
+        if result.status == "approval_required":
+            checks.append(
+                {
+                    "name": "test_task",
+                    "passed": False,
+                    "reason": "approval required before acceptance can run",
+                    "approvalId": result.approval_id,
+                }
+            )
+            return ConnectorAcceptanceResult(
+                manifest.id,
+                AcceptanceState.AVAILABLE,
+                "Connector is available, but approval required before acceptance can run.",
+                tuple(checks),
+            )
+        passed = result.status == "completed" and (not expected or expected in result.output)
+        reason = redact_output(result.output[:240])
+        if "[output clipped]" in result.output and "[output clipped]" not in reason:
+            reason = f"{reason}\n[output clipped]"
+        checks.append({"name": "test_task", "passed": passed, "reason": reason})
         if not passed:
             return ConnectorAcceptanceResult(manifest.id, AcceptanceState.ACCEPTANCE_FAILED, "Acceptance test task failed.", tuple(checks))
     redacted = redact_output("token=secret-token sk-1234567890abcdefghijkl /Users/example/private")

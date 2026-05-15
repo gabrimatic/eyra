@@ -65,7 +65,7 @@ The matrix also covers install and command-surface behavior:
 - `eyra setup` avoids duplicate shell PATH lines and removes old Eyra shell aliases ending in `# eyra`.
 - `eyra doctor --json` exposes support fields without secret values.
 - `eyra uninstall` removes command shims and cleans Eyra shell rc lines while preserving config/data unless data removal is explicitly requested.
-- The Homebrew formula has no placeholder checksum, runs `eyra version`, and runs mock `eyra doctor --json` without needing a live backend.
+- The Homebrew formula has no placeholder checksum, runs `eyra version`, `eyra paths --json`, and mock `eyra doctor --json` without needing a live backend.
 - The installer rejects unsafe install targets and keeps user data separate from app files.
 
 ## Connector rows
@@ -75,6 +75,9 @@ The matrix includes connector-specific rows for the universal connector contract
 - Missing connector config is reported before any connector can run.
 - Valid manifests load.
 - Dynamic commands, shell interpolation, and model-filled command placeholders are rejected.
+- Runtime payloads include only manifest-declared privacy data classes.
+- Missing `task` privacy declaration blocks task-bearing connector jobs.
+- Approval-required acceptance is not accepted until approval is granted and the test task runs.
 - Local CLI connector health and test tasks pass before use.
 - Output is capped.
 - Token-like values and local home paths are redacted.

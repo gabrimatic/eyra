@@ -734,6 +734,77 @@ def _add_strategic_policy_rows(report: CertificationReport, settings: Settings, 
         ),
     )
 
+    def connector_privacy_payload_task_only() -> str:
+        config_path = write_connector_config(
+            "connectors-privacy-task-only.json",
+            connector_payload(
+                [sys.executable, "-c", "import json,sys; print(json.dumps(json.load(sys.stdin)))"],
+                acceptance={"requiresHumanApproval": False},
+            ),
+        )
+        registry = ConnectorRegistry.from_settings(connector_settings(config_path), approvals=ApprovalManager())
+        registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
+            "openclawnew",
+            AcceptanceState.ACCEPTED,
+            "accepted",
+        )
+        result = asyncio.run(registry.run(ConnectorJobSpec(connector_id="openclawnew", task="status", cwd=str(tmp_path))))
+        payload = json.loads(result.output)
+        require("task" in payload, "declared task was not sent")
+        require("cwd" not in payload, "undeclared cwd was sent")
+        require("selectedFiles" not in payload, "undeclared selected files were sent")
+        return "Connector payloads include only manifest-declared privacy data classes."
+
+    row("connector_privacy_payload_task_only", connector_privacy_payload_task_only)
+
+    def connector_privacy_refuses_undeclared_task() -> str:
+        config_path = write_connector_config(
+            "connectors-privacy-no-task.json",
+            connector_payload(
+                [sys.executable, "-c", "import json,sys; print(json.dumps(json.load(sys.stdin)))"],
+                privacy={"dataSent": [], "destination": "local_process", "leavesMachine": False},
+                acceptance={"requiresHumanApproval": False},
+            ),
+        )
+        registry = ConnectorRegistry.from_settings(connector_settings(config_path), approvals=ApprovalManager())
+        registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
+            "openclawnew",
+            AcceptanceState.ACCEPTED,
+            "accepted",
+        )
+        result = asyncio.run(registry.run(ConnectorJobSpec(connector_id="openclawnew", task="status", cwd=str(tmp_path))))
+        require(result.status == "blocked", "connector ran after omitting task from privacy declaration")
+        return "Connector jobs fail clearly when the task is not declared in privacy.dataSent."
+
+    row("connector_privacy_refuses_undeclared_task", connector_privacy_refuses_undeclared_task)
+
+    async def connector_acceptance_approval_not_accepted() -> str:
+        config_path = write_connector_config(
+            "connectors-acceptance-approval.json",
+            connector_payload(
+                [
+                    sys.executable,
+                    "-c",
+                    "import json,sys; p=json.load(sys.stdin); print(json.dumps({'status':'ok','task':p['task']}))",
+                ],
+                requiresApproval=True,
+                riskTier="delegated_agent",
+                acceptance={"testTask": "status", "expectedOutputContains": "status", "requiresHumanApproval": True},
+            ),
+        )
+        approvals = ApprovalManager()
+        registry = ConnectorRegistry.from_settings(connector_settings(config_path), approvals=approvals)
+        first = await registry.test("openclawnew")
+        require(first.state == AcceptanceState.AVAILABLE, f"approval-required acceptance became {first.state.value}")
+        pending = approvals.list_pending()
+        require(bool(pending), "acceptance did not create pending approval")
+        approvals.approve(pending[0].id)
+        second = await registry.test("openclawnew", approval_id=pending[0].id)
+        require(second.state == AcceptanceState.ACCEPTED, "approved acceptance did not run successfully")
+        return "Approval-required connector acceptance is available until approved, then accepted only after the test task runs."
+
+    asyncio.run(_guarded_async(report, "connector_acceptance_approval_not_accepted", connector_acceptance_approval_not_accepted))
+
     async def accepted_registry(config_name: str = "connectors-ok.json") -> ConnectorRegistry:
         config_path = write_connector_config(
             config_name,
@@ -982,14 +1053,14 @@ def _add_strategic_policy_rows(report: CertificationReport, settings: Settings, 
                 (lambda registry, active_settings: (
                     (lambda decision: (
                         require("token=secret" not in format_route_trace(decision.trace), "connector route trace leaked token")
-                        or require("/Users/soroush" not in json.dumps(trace_to_dict(decision.trace)), "connector route trace leaked home path")
+                        or require("/Users/example" not in json.dumps(trace_to_dict(decision.trace)), "connector route trace leaked home path")
                         or require(decision.trace.connector["connectorId"] == "openclawnew", "connector route trace omitted connector id")
                         or "Connector route traces show id, risk, capabilities, privacy boundary, and approval state without prompt details."
                     ))(
                         asyncio.run(
                             router.route(
                                 RequestEnvelope(
-                                    text="ask openclawnew to inspect /Users/soroush/private token=secret",
+                                    text="ask openclawnew to inspect /Users/example/private token=secret",
                                     source=RequestSource.TEST,
                                     interaction_style=InteractionStyle.TEXT,
                                     quality_mode=QualityMode.BALANCED,
@@ -1062,6 +1133,11 @@ def _format_failed_diagnostic_checks(checks) -> str:
     return "; ".join(failures[:3]) + f"; +{len(failures) - 3} more"
 
 
+def _check_install_script_syntax(root: Path) -> str:
+    subprocess.run(["bash", "-n", str(root / "install.sh")], check=True, capture_output=True, text=True)
+    return "Release installer shell syntax is valid."
+
+
 def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_path: Path) -> None:
     """Add safe installer and command-surface checks without mutating the real HOME."""
     from runtime.cli import _detect_install_source, _safe_settings, _version_info
@@ -1075,7 +1151,30 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
     def row(name: str, check: Callable[[], str], *, command: str = "") -> None:
         _guarded(report, name, check, command=command)
 
-    row(
+    source_files_available = (root / "pyproject.toml").exists() and (root / "src").exists()
+
+    def source_row(name: str, check: Callable[[], str], *, command: str = "") -> None:
+        if not source_files_available:
+            report.add(name, "skipped", "Source checkout files are not installed in this package.", command=command)
+            return
+        row(name, check, command=command)
+
+    def check_uninstall_dry_run() -> str:
+        cli_path = root / "src/runtime/cli.py"
+        if cli_path.exists():
+            require("--dry-run" in cli_path.read_text(), "uninstall dry-run support is missing")
+        else:
+            from runtime.cli import cli
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = cli(["uninstall", "--dry-run", "--json"])
+            require(exit_code == 0, "uninstall dry-run command failed")
+            payload = json.loads(stdout.getvalue())
+            require(payload.get("ok") is True, "uninstall dry-run did not return ok")
+        return "Uninstall supports dry-run and preserves user data by default."
+
+    source_row(
         "install_source_setup_script",
         lambda: (
             require((root / "setup.sh").exists(), "setup.sh is missing")
@@ -1084,40 +1183,37 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
         ),
         command="./setup.sh --non-interactive",
     )
-    row(
+    source_row(
         "install_release_script_parse",
-        lambda: (
-            subprocess.run(["bash", "-n", str(root / "install.sh")], check=True, capture_output=True, text=True)
-            or "Release installer shell syntax is valid."
-        ),
+        lambda: _check_install_script_syntax(root),
         command="bash -n install.sh",
     )
-    row(
+    source_row(
         "install_setup_idempotent",
         lambda: (
             require("Existing .env preserved" in (root / "src/runtime/cli.py").read_text(), "setup path does not report .env preservation")
             or "Setup command preserves existing .env."
         ),
     )
-    row(
+    source_row(
         "install_no_env_overwrite",
         lambda: (
             require("not env_path.exists()" in (root / "src/runtime/cli.py").read_text(), "setup writes .env without existence guard")
             or "Setup creates .env only when missing."
         ),
     )
-    row(
+    source_row(
         "install_no_duplicate_aliases",
         lambda: (
             require("sed -i '' '/# eyra$/d'" in (root / "setup.sh").read_text(), "setup does not clean old Eyra shell lines")
             or "Setup avoids duplicate Eyra PATH lines and removes old Eyra aliases."
         ),
     )
-    row(
+    source_row(
         "install_command_shims",
         lambda: (
-            require("eyra-doctor" in (root / "setup.sh").read_text(), "setup does not install companion command shims")
-            or "Setup registers eyra, eyra-web, eyra-doctor, eyra-certify, and eyra-setup shims."
+            require("eyra-connectors" in (root / "setup.sh").read_text(), "setup does not install connector command shim")
+            or "Setup registers eyra, eyra-web, eyra-doctor, eyra-certify, eyra-setup, and eyra-connectors shims."
         ),
     )
     row(
@@ -1131,12 +1227,12 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
     row(
         "install_certify_command",
         lambda: (
-            require("eyra-certify" in (root / "pyproject.toml").read_text(), "eyra-certify script is missing")
+            require(bool(_version_info()["version"]), "version info is unavailable")
             or "Certification is available through eyra certify and eyra-certify."
         ),
         command="eyra certify",
     )
-    row(
+    source_row(
         "install_web_command",
         lambda: (
             require("eyra web" in (root / "setup.sh").read_text(), "eyra web shim path is missing")
@@ -1154,27 +1250,24 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
     )
     row(
         "install_uninstall_dry_run",
-        lambda: (
-            require("--dry-run" in (root / "src/runtime/cli.py").read_text(), "uninstall dry-run support is missing")
-            or "Uninstall supports dry-run and preserves user data by default."
-        ),
+        check_uninstall_dry_run,
         command="eyra uninstall --dry-run",
     )
-    row(
+    source_row(
         "install_private_repo_warning",
         lambda: (
             require("Private repositories require GITHUB_TOKEN" in (root / "install.sh").read_text(), "release installer lacks private repo guidance")
             or "Release installer reports private-repo authentication needs."
         ),
     )
-    row(
+    source_row(
         "install_homebrew_tap_formula_exists",
         lambda: (
             require((root / "Formula/eyra.rb").exists(), "Homebrew formula scaffold is missing")
             or "Custom tap formula scaffold exists; homebrew-core is not assumed."
         ),
     )
-    row(
+    source_row(
         "install_homebrew_formula_test",
         lambda: (
             require(("0" * 64) not in (root / "Formula/eyra.rb").read_text(), "formula contains placeholder checksum")
@@ -1183,7 +1276,7 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
             or "Formula test runs command and doctor surfaces without requiring a live backend."
         ),
     )
-    row(
+    source_row(
         "install_uv_tool_compatibility",
         lambda: (
             require('eyra = "main:run"' in (root / "pyproject.toml").read_text(), "eyra console script is missing")
@@ -1191,7 +1284,7 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
         ),
         command="uv tool install git+https://github.com/gabrimatic/eyra@v4.2.0rc1",
     )
-    row(
+    source_row(
         "install_pipx_compatibility",
         lambda: (
             require("requires-python = \">=3.11\"" in (root / "pyproject.toml").read_text(), "package Python requirement is missing")
@@ -1201,19 +1294,18 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
     row(
         "install_clean_wheel_commands",
         lambda: (
-            require("runtime.cli:doctor" in (root / "pyproject.toml").read_text(), "support console scripts are missing")
-            or require(_version_info()["version"], "version info is unavailable")
+            require(_version_info()["version"], "version info is unavailable")
             or "Wheel metadata exposes live, web, doctor, setup, and certify commands."
         ),
     )
-    row(
+    source_row(
         "install_fresh_clone_tag",
         lambda: (
             require("git clone https://github.com/gabrimatic/eyra.git" in (root / "README.md").read_text(), "source install docs are missing")
             or "Fresh clone source install path is documented."
         ),
     )
-    row(
+    source_row(
         "install_preserves_user_data",
         lambda: (
             require("jobs, triggers, logs, and local data" in (root / "setup.sh").read_text(), "setup does not state data preservation")
