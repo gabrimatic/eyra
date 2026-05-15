@@ -1,12 +1,12 @@
 class Eyra < Formula
   desc "Local-first voice coordinator for macOS terminals"
   homepage "https://github.com/gabrimatic/eyra"
-  license "PolyForm-Noncommercial-1.0.0"
 
   # Private beta formula: tracks the unreleased release-candidate branch until a
   # signed/tagged release asset exists.
   url "https://github.com/gabrimatic/eyra.git", branch: "master"
   version "4.2.0rc1"
+  license "PolyForm-Noncommercial-1.0.0"
   head "https://github.com/gabrimatic/eyra.git", branch: "master"
 
   depends_on "python@3.11"
@@ -15,30 +15,37 @@ class Eyra < Formula
 
   def install
     libexec.install Dir["*"]
-    system Formula["uv"].opt_bin/"uv", "sync", "--frozen", "--no-dev", chdir: libexec
+    venv = var/"eyra/venv"
+    rm_r venv if venv.exist?
+    venv.dirname.mkpath
+    system Formula["uv"].opt_bin/"uv", "venv", venv, "--python", Formula["python@3.11"].opt_bin/"python3.11"
+    ENV["UV_PROJECT_ENVIRONMENT"] = venv
+    cd libexec do
+      system Formula["uv"].opt_bin/"uv", "sync", "--frozen", "--no-dev"
+    end
     (bin/"eyra").write <<~SH
       #!/bin/bash
-      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run --frozen --no-sync eyra "$@"
+      exec "#{venv}/bin/eyra" "$@"
     SH
     (bin/"eyra-web").write <<~SH
       #!/bin/bash
-      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run --frozen --no-sync eyra web "$@"
+      exec "#{venv}/bin/eyra-web" "$@"
     SH
     (bin/"eyra-doctor").write <<~SH
       #!/bin/bash
-      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run --frozen --no-sync eyra doctor "$@"
+      exec "#{venv}/bin/eyra-doctor" "$@"
     SH
     (bin/"eyra-certify").write <<~SH
       #!/bin/bash
-      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run --frozen --no-sync eyra certify "$@"
+      exec "#{venv}/bin/eyra-certify" "$@"
     SH
     (bin/"eyra-setup").write <<~SH
       #!/bin/bash
-      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run --frozen --no-sync eyra setup "$@"
+      exec "#{venv}/bin/eyra-setup" "$@"
     SH
     (bin/"eyra-connectors").write <<~SH
       #!/bin/bash
-      cd "#{libexec}" && exec "#{Formula["uv"].opt_bin}/uv" run --frozen --no-sync eyra connectors "$@"
+      exec "#{venv}/bin/eyra-connectors" "$@"
     SH
   end
 
@@ -67,7 +74,9 @@ class Eyra < Formula
   test do
     system bin/"eyra", "version"
     system bin/"eyra", "paths", "--json"
-    system({ "USE_MOCK_CLIENT" => "true", "LIVE_LISTENING_ENABLED" => "false", "LIVE_SPEECH_ENABLED" => "false" },
-           bin/"eyra", "doctor", "--json")
+    test_env = { "USE_MOCK_CLIENT" => "true", "LIVE_LISTENING_ENABLED" => "false", "LIVE_SPEECH_ENABLED" => "false" }
+    with_env(test_env) do
+      system bin/"eyra", "doctor", "--json"
+    end
   end
 end
