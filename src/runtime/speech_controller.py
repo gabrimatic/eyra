@@ -22,6 +22,7 @@ class SpeechController:
         vad_threshold: float = 0.6,
         input_device: str | int | None = None,
         sample_rate: int = 16000,
+        max_duration_seconds: int = 300,
     ):
         self.state = state
         self.cooldown_s = cooldown_ms / 1000.0
@@ -29,6 +30,7 @@ class SpeechController:
         self._vad_threshold = vad_threshold
         self._input_device = input_device
         self._sample_rate = sample_rate
+        self._max_duration_seconds = max_duration_seconds
         self._speaking_proc: asyncio.subprocess.Process | None = None
         self._voice_input = None
 
@@ -45,6 +47,7 @@ class SpeechController:
                 wh_bin=self.state.wh_bin,
                 input_device=self._input_device,
                 sample_rate=self._sample_rate,
+                max_duration_s=self._max_duration_seconds,
             )
         except Exception as e:
             logger.debug("Voice input initialization failed: %s", e)

@@ -34,6 +34,8 @@ class Settings:
     VOICE_SILENCE_MS: int = 1500
     # Voice input: Silero VAD threshold (0.0-1.0). Higher = stricter.
     VOICE_VAD_THRESHOLD: float = 0.15
+    # Voice input: absolute recording cap in seconds for one utterance.
+    VOICE_MAX_DURATION_SECONDS: int = 300
     # Filesystem tool: comma-separated list of allowed root paths (~ expanded)
     FILESYSTEM_ALLOWED_PATHS: str = "~/Documents,~/Desktop,~/Downloads,/tmp"
     # Filesystem tool: default working directory for the model (~ expanded)
@@ -149,6 +151,7 @@ class Settings:
             VOICE_DIAGNOSTIC_SAVE_AUDIO=_bool("VOICE_DIAGNOSTIC_SAVE_AUDIO", "false"),
             VOICE_SILENCE_MS=_int("VOICE_SILENCE_MS", "1500"),
             VOICE_VAD_THRESHOLD=_float_range("VOICE_VAD_THRESHOLD", "0.15", 0.0, 1.0),
+            VOICE_MAX_DURATION_SECONDS=_int("VOICE_MAX_DURATION_SECONDS", "300"),
             FILESYSTEM_ALLOWED_PATHS=_getenv("FILESYSTEM_ALLOWED_PATHS", "~/Documents,~/Desktop,~/Downloads,/tmp"),
             FILESYSTEM_DEFAULT_PATH=_getenv("FILESYSTEM_DEFAULT_PATH", "~/Documents"),
             NETWORK_TOOLS_ENABLED=_bool("NETWORK_TOOLS_ENABLED", "false"),

@@ -8,6 +8,7 @@ import contextlib
 import importlib.metadata
 import io
 import json
+import os
 import platform
 import re
 import shutil
@@ -342,6 +343,7 @@ def _update_guidance() -> CommandResult:
     source = _detect_install_source()
     commands = {
         "source": "cd <eyra checkout> && git pull --ff-only && uv sync",
+        "managed-install": "Run the latest install.sh for the release you want, after verifying the source.",
         "homebrew": "brew update && brew upgrade gabrimatic/eyra/eyra",
         "uv-tool": "uv tool upgrade eyra",
         "pipx": "pipx upgrade eyra",
@@ -531,24 +533,83 @@ def _git_commit() -> str:
     repo = _repo_root()
     if not (repo / ".git").exists():
         return ""
+    candidates = [Path("/usr/bin/git"), Path("/opt/homebrew/bin/git")]
     try:
-        return subprocess.check_output(["git", "rev-parse", "--short=12", "HEAD"], cwd=repo, text=True).strip()
+        resolved = shutil.which("git")
+        if resolved:
+            candidates.append(Path(resolved))
+    except Exception:
+        pass
+    seen: set[str] = set()
+    for candidate in candidates:
+        git = str(candidate)
+        if git in seen or not candidate.exists():
+            continue
+        seen.add(git)
+        try:
+            result = subprocess.run(
+                [git, "rev-parse", "--short=12", "HEAD"],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+        except Exception:
+            continue
+        if result.returncode == 0:
+            return result.stdout.strip()
+    try:
+        return subprocess.check_output(["git", "rev-parse", "--short=12", "HEAD"], cwd=repo, text=True, stderr=subprocess.DEVNULL).strip()
     except Exception:
         return ""
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except Exception:
+        return False
 
 
 def _detect_install_source() -> dict[str, str]:
     repo = _repo_root()
     executable = Path(sys.argv[0]).expanduser()
-    prefix = Path(sys.prefix).expanduser()
-    text = f"{executable} {prefix}"
-    if (repo / ".git").exists():
+    candidates = [executable, Path(sys.executable).expanduser(), Path(sys.prefix).expanduser(), Path(sys.base_prefix).expanduser()]
+    resolved: list[Path] = []
+    for candidate in candidates:
+        resolved.append(candidate)
+        try:
+            resolved.append(candidate.resolve())
+        except Exception:
+            pass
+    pipx_roots = [os.environ.get("PIPX_HOME"), os.environ.get("PIPX_BIN_DIR")]
+    is_pipx_env = any(
+        root and any(_is_relative_to(path, Path(root).expanduser()) for path in resolved)
+        for root in pipx_roots
+    )
+    text = " ".join(str(path) for path in resolved)
+    if _is_source_checkout(repo):
         return {"kind": "source", "label": f"source checkout at {repo}"}
-    if "Cellar/eyra" in text or "Homebrew" in text:
+    if any(
+        marker in text
+        for marker in (
+            "Cellar/eyra",
+            "/opt/homebrew/opt/eyra",
+            "/opt/homebrew/var/eyra",
+            "/usr/local/opt/eyra",
+            "/usr/local/var/eyra",
+            "/var/eyra/venv",
+            "Homebrew",
+        )
+    ):
         return {"kind": "homebrew", "label": "Homebrew tap"}
+    if "/.local/share/eyra/app/.venv" in text or "/share/eyra/app/.venv" in text:
+        return {"kind": "managed-install", "label": "install.sh managed app"}
     if ".local/share/uv/tools" in text or "/uv/tools/" in text:
         return {"kind": "uv-tool", "label": "uv tool"}
-    if "pipx/venvs" in text or "/pipx/" in text:
+    if is_pipx_env or "pipx/venvs" in text or "/pipx/" in text:
         return {"kind": "pipx", "label": "pipx"}
     try:
         importlib.metadata.distribution("eyra")

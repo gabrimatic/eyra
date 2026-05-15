@@ -5,6 +5,14 @@ import subprocess
 
 from tools.base import BaseTool, ToolResult
 
+_SYSTEM_INFO_PREFIXES = {
+    "macos": "macOS:",
+    "disk": "Disk:",
+    "memory": "Memory:",
+    "uptime": "Uptime:",
+    "battery": "Battery:",
+}
+
 
 def _run_cmd(cmd: list[str]) -> str:
     try:
@@ -14,11 +22,39 @@ def _run_cmd(cmd: list[str]) -> str:
         return ""
 
 
+def format_system_info_for_query(content: str, query: str) -> str:
+    """Return the narrow system-info line a direct local intent asked for."""
+
+    lowered = query.lower()
+    wanted: list[str] = []
+    if "macos" in lowered or "mac os" in lowered:
+        wanted.append(_SYSTEM_INFO_PREFIXES["macos"])
+    if "disk" in lowered or "storage" in lowered:
+        wanted.append(_SYSTEM_INFO_PREFIXES["disk"])
+    if "memory" in lowered or "ram" in lowered:
+        wanted.append(_SYSTEM_INFO_PREFIXES["memory"])
+    if "uptime" in lowered or "running" in lowered:
+        wanted.append(_SYSTEM_INFO_PREFIXES["uptime"])
+    if "battery" in lowered:
+        wanted.append(_SYSTEM_INFO_PREFIXES["battery"])
+
+    if not wanted:
+        return content
+
+    lines = [line for line in content.splitlines() if any(line.startswith(prefix) for prefix in wanted)]
+    if lines:
+        return "\n".join(lines)
+    if wanted == [_SYSTEM_INFO_PREFIXES["battery"]]:
+        return "Battery information is unavailable on this Mac."
+    return content
+
+
 class SystemInfoTool(BaseTool):
     name = "get_system_info"
     description = (
-        "Returns system status: battery level, disk space, memory usage, and uptime. "
-        "Call this when the user asks about their computer's battery, storage, RAM, or how long it's been running. "
+        "Returns system status: macOS version, battery level, disk space, memory usage, and uptime. "
+        "Call this when the user asks about their computer's macOS version, battery, storage, RAM, "
+        "or how long it's been running. "
         "Takes no parameters."
     )
     parameters = {"type": "object", "properties": {}, "required": []}
@@ -26,6 +62,13 @@ class SystemInfoTool(BaseTool):
     async def execute(self, **kwargs) -> ToolResult:
         def _collect() -> str:
             parts = []
+
+            # OS version
+            macos = _run_cmd(["sw_vers", "-productVersion"])
+            build = _run_cmd(["sw_vers", "-buildVersion"])
+            if macos:
+                suffix = f" ({build})" if build else ""
+                parts.append(f"macOS: {macos}{suffix}")
 
             # Battery
             battery = _run_cmd(["pmset", "-g", "batt"])

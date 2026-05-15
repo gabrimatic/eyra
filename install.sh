@@ -9,6 +9,7 @@ GITHUB_HOST="${GITHUB_HOST:-github.com}"
 API_HOST="${GITHUB_API_HOST:-api.github.com}"
 SOURCE_PATH="${EYRA_SOURCE_PATH:-}"
 ALLOW_UNVERIFIED_TAG_ARCHIVE="${EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE:-false}"
+VERIFY_WITH_MOCK="${EYRA_INSTALL_VERIFY_MOCK:-false}"
 
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
@@ -289,10 +290,15 @@ if ! "$BIN_DIR/eyra" setup --non-interactive; then
 fi
 
 log_step "Verifying installed commands"
+verify_env=(USE_MOCK_CLIENT=false LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false)
+if [[ "$VERIFY_WITH_MOCK" == "true" ]]; then
+    log_warn "Installer verification is using the mock client because EYRA_INSTALL_VERIFY_MOCK=true."
+    verify_env=(USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false)
+fi
 if ! (
     "$BIN_DIR/eyra" version >/dev/null
-    USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false "$BIN_DIR/eyra" doctor --json >/dev/null
-    USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false "$BIN_DIR/eyra" certify --json >/dev/null
+    env "${verify_env[@]}" "$BIN_DIR/eyra" doctor --json >/dev/null
+    env "${verify_env[@]}" "$BIN_DIR/eyra" certify --json >/dev/null
 ); then
     rollback_install
     exit 1

@@ -338,13 +338,15 @@ class RuntimeRouter:
 
     @staticmethod
     def _connector_id(text: str) -> str | None:
-        match = re.search(
-            r"\b(?:connector|use|ask|tell|cancel|connect(?: this task)? to)\s+(?P<id>[a-z][a-z0-9_-]{1,63})\b",
-            text,
-            re.I,
+        patterns = (
+            r"\bconnector\s+(?:test|run|status|job\s+)?(?P<id>[a-z][a-z0-9_-]{1,63})\b",
+            r"\b(?:use|ask|tell|cancel)\s+(?:connector\s+)?(?P<id>[a-z][a-z0-9_-]{1,63})\b",
+            r"\bconnect(?: this task)? to\s+(?:connector\s+)?(?P<id>[a-z][a-z0-9_-]{1,63})\b",
         )
-        if match:
-            candidate = match.group("id").lower()
-            if candidate not in {"this", "that", "the", "a", "an"}:
-                return candidate
+        for pattern in patterns:
+            match = re.search(pattern, text, re.I)
+            if match:
+                candidate = match.group("id").lower()
+                if candidate not in {"this", "that", "the", "a", "an", "connector", "connectors"}:
+                    return candidate
         return None

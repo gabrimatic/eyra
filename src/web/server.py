@@ -54,6 +54,7 @@ from runtime.triggers import TriggerStatus, TriggerStore
 from runtime.vision import analyze_screen, vision_model_name
 from tools.approval import ApprovalManager
 from tools.browser import BrowserSession
+from tools.system_info import format_system_info_for_query
 from utils.settings import Settings
 
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -232,6 +233,7 @@ class WebAssistantRuntime:
         self.runtime_scope = "shared" if shared is not None else "standalone"
         self.shared = shared
         self._owns_components = shared is None
+        self.input_lock = asyncio.Lock()
         self.dictation = DictationState()
         if shared is not None:
             self.scorer = shared.scorer
@@ -292,6 +294,10 @@ class WebAssistantRuntime:
         return future.result(timeout=timeout)
 
     async def handle_message(self, text: str, voice_mode: str = "text") -> dict[str, Any]:
+        async with self.input_lock:
+            return await self._handle_message_locked(text, voice_mode)
+
+    async def _handle_message_locked(self, text: str, voice_mode: str = "text") -> dict[str, Any]:
         text = " ".join(text.strip().split())
         if not text:
             return {"reply": "Message is empty."}
@@ -320,13 +326,22 @@ class WebAssistantRuntime:
         ):
             snapshot = build_capability_snapshot(self.settings, preflight=self.preflight)
             return {"reply": format_capability_answer(snapshot)}
+        if re.search(
+            r"\b(system information|system info|macos version|mac os version|disk space|storage|memory|ram|uptime|battery)\b",
+            text,
+            re.I,
+        ):
+            result = await self.registry.execute("get_system_info", "{}")
+            return {"reply": format_system_info_for_query(result.content, text)}
         connector_result = await self._handle_connector_input(text)
         if connector_result is not None:
             return connector_result
         dictation_result = await self._handle_dictation_input(text)
         if dictation_result is not None:
             return dictation_result
-        self.conversation.append({"role": "user", "content": text})
+        user_message = {"role": "user", "content": text}
+        self.conversation.append(user_message)
+        conversation_snapshot = list(self.conversation)
         coding_result = await self._handle_direct_coding_job_intent(text)
         if coding_result is not None:
             return coding_result
@@ -356,7 +371,7 @@ class WebAssistantRuntime:
                 required_vision=needs_screen_context(text),
             )
             return {"reply": f"Task {task.id} accepted: {task.title}", "taskId": task.id}
-        reply = await self._chat(text, voice_mode)
+        reply = await self._chat(text, voice_mode, messages=conversation_snapshot, user_message=user_message)
         return {"reply": reply}
 
     async def _handle_dictation_input(self, text: str) -> dict[str, Any] | None:
@@ -420,7 +435,13 @@ class WebAssistantRuntime:
         capable = set(self.preflight.vision_capable_models)
         return model not in checked or model in capable
 
-    async def _chat(self, text: str, voice_mode: str = "text") -> str:
+    async def _chat(
+        self,
+        text: str,
+        voice_mode: str = "text",
+        messages: list[dict] | None = None,
+        user_message: dict | None = None,
+    ) -> str:
         interaction = InteractionStyle.VOICE if voice_mode in ("local", "realtime") else InteractionStyle.TEXT
         routing_decision = await self._route_decision(
             text,
@@ -434,7 +455,7 @@ class WebAssistantRuntime:
                 text_content=text,
                 complexity_scorer=self.scorer,
                 settings=self.settings,
-                messages=self.conversation,
+                messages=list(messages) if messages is not None else list(self.conversation),
                 quality_mode=QualityMode.BALANCED,
                 interaction_style=interaction,
                 tool_registry=self.registry,
@@ -442,8 +463,21 @@ class WebAssistantRuntime:
             ):
                 chunks.append(chunk)
         reply = "".join(chunks).strip() or "No response."
-        self.conversation.append({"role": "assistant", "content": reply})
+        assistant_message = {"role": "assistant", "content": reply}
+        insert_at = self._conversation_insert_index_after(user_message)
+        if insert_at is None:
+            self.conversation.append(assistant_message)
+        else:
+            self.conversation.insert(insert_at, assistant_message)
         return reply
+
+    def _conversation_insert_index_after(self, message: dict | None) -> int | None:
+        if message is None:
+            return None
+        for index, item in enumerate(self.conversation):
+            if item is message:
+                return index + 1
+        return None
 
     async def _run_worker_task(
         self,
@@ -956,7 +990,7 @@ class WebAssistantRuntime:
                         if rerun.status == "completed":
                             return rerun.output
                         if rerun.status == "cancelled":
-                            return rerun.output
+                            raise asyncio.CancelledError
                         raise RuntimeError(rerun.output)
                     await asyncio.sleep(0.05)
                 self.connector_registry.cancel(job.id)
@@ -964,7 +998,7 @@ class WebAssistantRuntime:
             if result.status == "completed":
                 return result.output
             if result.status == "cancelled":
-                return result.output
+                raise asyncio.CancelledError
             raise RuntimeError(result.output)
 
         task = self.task_manager.create_task(

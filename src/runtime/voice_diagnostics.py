@@ -392,8 +392,6 @@ class VoiceDiagnostics:
         def interrupt_on_speech() -> None:
             nonlocal interrupted, speech_detected
             speech_detected = True
-            if challenge:
-                return
             interrupted = True
             if proc is not None and proc.returncode is None:
                 proc.terminate()

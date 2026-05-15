@@ -149,6 +149,7 @@ def render_status_card(
 
 def render_help_card():
     """Print the /help command card."""
+    width = 58
     cmds = [
         ("/voice     ", "on|off"),
         ("/voice-diagnose", "Mic diagnostics"),
@@ -170,11 +171,14 @@ def render_help_card():
         ("/quit      ", "Exit Eyra"),
     ]
     print()
-    print(_box_top("Commands"))
+    label = "Commands"
+    inner = f"─ {label} "
+    print(f"╭{inner}{'─' * (width - len(inner))}╮")
     for cmd, desc in cmds:
-        row = f"{CYAN}{cmd}{NC}{desc}"
-        pad = _BOX_WIDTH - len(cmd) - len(desc) - 2
+        cmd_column = f"{cmd:<16}"
+        row = f"{CYAN}{cmd_column}{NC} {desc}"
+        pad = width - len(cmd_column) - len(desc) - 3
         print(f"│  {row}{' ' * max(pad, 0)}│")
-    print(f"╰{'─' * _BOX_WIDTH}╯")
+    print(f"╰{'─' * width}╯")
     print(f"  {DIM}Web UI: run eyra-web when WEB_UI_ENABLED=true.{NC}")
     print()

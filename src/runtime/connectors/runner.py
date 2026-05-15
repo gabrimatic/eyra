@@ -147,11 +147,12 @@ class ConnectorRunner:
             )
         raw = stdout + stderr
         clipped = raw[: manifest.output_cap_bytes]
-        suffix = "\n[output clipped]" if len(raw) > len(clipped) else ""
+        was_clipped = len(raw) > len(clipped)
+        suffix = "\n[output clipped]" if was_clipped else ""
         output = redact_output(clipped.decode(errors="replace")) + suffix
-        if manifest.output_mode == ConnectorOutputMode.STDOUT_JSON and stdout:
+        if manifest.output_mode == ConnectorOutputMode.STDOUT_JSON and stdout and not was_clipped:
             try:
-                parsed = json.loads(stdout[: manifest.output_cap_bytes].decode(errors="replace"))
+                parsed = json.loads(stdout.decode(errors="replace"))
             except json.JSONDecodeError:
                 if proc.returncode == 0:
                     return ConnectorJobResult(manifest.id, "failed", "Connector returned invalid JSON.", job_id=spec.job_id, exit_code=proc.returncode)

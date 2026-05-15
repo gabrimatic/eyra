@@ -90,7 +90,7 @@ jobs:
           node-version: "24"
 
       - name: Install Mintlify CLI
-        run: npm i -g mint@latest
+        run: npm i -g mint@4.2.565
 
       - name: Validate docs
         env:

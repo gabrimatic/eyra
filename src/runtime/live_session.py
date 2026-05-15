@@ -56,6 +56,7 @@ from runtime.voice_diagnostics import VoiceDiagnostics
 from tools.approval import ApprovalManager
 from tools.browser import BrowserSession
 from tools.registry import ToolRegistry
+from tools.system_info import format_system_info_for_query
 from utils.settings import Settings
 from utils.sound_player import play_sound
 from utils.theme import CYAN, DIM, DIM_ITALIC, NC, YELLOW
@@ -97,6 +98,16 @@ def _settings_str(settings: Settings, name: str, default: str = "") -> str:
     return value if isinstance(value, str) else default
 
 
+def _asr_phrase_variants(text: str) -> set[str]:
+    """Return short command phrases embedded in one noisy ASR transcript."""
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    variants: set[str] = set()
+    for size in range(1, min(5, len(words)) + 1):
+        for index in range(0, len(words) - size + 1):
+            variants.add(" ".join(words[index : index + size]))
+    return variants
+
+
 class LiveSession:
     def __init__(
         self,
@@ -116,6 +127,7 @@ class LiveSession:
             vad_threshold=settings.VOICE_VAD_THRESHOLD,
             input_device=_settings_str(settings, "VOICE_INPUT_DEVICE", "") or None,
             sample_rate=_settings_int(settings, "VOICE_SAMPLE_RATE", 16000),
+            max_duration_seconds=_settings_int(settings, "VOICE_MAX_DURATION_SECONDS", 300),
         )
         self.quality_mode = QualityMode.BALANCED
         self._prompt = PromptSession()
@@ -132,6 +144,7 @@ class LiveSession:
         self._voice_task: asyncio.Task | None = None
         self._input_tasks: set[asyncio.Task] = set()
         self._render_lock = asyncio.Lock()
+        self._input_lock = asyncio.Lock()
         self._model_semaphore = asyncio.Semaphore(max(1, _settings_int(settings, "MODEL_CONCURRENCY", 1)))
         self._pending_overwrite: dict[str, str] | None = None
         self._pending_correction: dict[str, str] | None = None
@@ -845,9 +858,15 @@ class LiveSession:
     # ── User input handling ───────────────────────────────────────────────
 
     async def _handle_user_input(self, text: str, interaction_style: InteractionStyle = InteractionStyle.TEXT):
+        async with self._input_lock:
+            await self._handle_user_input_locked(text, interaction_style)
+
+    async def _handle_user_input_locked(self, text: str, interaction_style: InteractionStyle = InteractionStyle.TEXT):
         if await self._handle_dictation_input(text):
             return
-        self.state.conversation_messages.append({"role": "user", "content": text})
+        user_message = {"role": "user", "content": text}
+        self.state.conversation_messages.append(user_message)
+        conversation_snapshot = list(self.state.conversation_messages)
         if await self._handle_local_intent(text):
             return
 
@@ -913,6 +932,8 @@ class LiveSession:
             quality_mode=quality,
             interaction_style=interaction_style,
             routing_decision=routing_decision,
+            messages=conversation_snapshot,
+            user_message=user_message,
         )
 
     async def _handle_dictation_input(self, text: str) -> bool:
@@ -965,11 +986,16 @@ class LiveSession:
     async def _handle_local_intent(self, text: str) -> bool:
         lowered = text.strip().lower()
         lowered_clean = lowered.rstrip(".!?")
-        if lowered_clean in {"stop", "stop speaking", "stop talking"}:
+        lowered_phrases = _asr_phrase_variants(lowered_clean)
+        if lowered_clean in {"stop", "stop speaking", "stop talking"} or lowered_phrases.intersection(
+            {"stop", "stop speaking", "stop talking"}
+        ):
             await self.speech.interrupt()
             print_status_change("Stopped speech")
             return True
-        if lowered_clean in {"show status", "status", "read status"}:
+        if lowered_clean in {"show status", "status", "read status"} or lowered_phrases.intersection(
+            {"show status", "status", "read status"}
+        ):
             self._print_status()
             return True
         if lowered_clean in {"overwrite it", "overwrite that", "overwrite that file", "replace it", "replace that file"}:
@@ -995,7 +1021,9 @@ class LiveSession:
             if await self._handle_direct_correction(correction_match.group("name")):
                 return True
 
-        if lowered_clean in {"read the options", "read options", "repeat the options", "repeat options"}:
+        if lowered_clean in {"read the options", "read options", "repeat the options", "repeat options"} or lowered_phrases.intersection(
+            {"read the options", "read options", "repeat the options", "repeat options"}
+        ):
             self._print_pending_options()
             return True
 
@@ -1008,7 +1036,9 @@ class LiveSession:
             await self._handle_pending_option_choice(option_match.group("option"))
             return True
 
-        if lowered in {"what are you doing?", "what are you doing", "what's going on?", "what's going on"}:
+        if lowered in {"what are you doing?", "what are you doing", "what's going on?", "what's going on"} or lowered_phrases.intersection(
+            {"what are you doing", "what's going on"}
+        ):
             self._print_tasks()
             return True
         if lowered in {"show tasks", "show my tasks", "list tasks", "what happened with that task?"}:
@@ -1023,7 +1053,9 @@ class LiveSession:
         if lowered in {"what is happening?", "what is happening", "what's happening?", "what's happening"}:
             self._print_context()
             return True
-        if lowered_clean in {"undo that", "undo it", "undo last action", "undo the last action"}:
+        if lowered_clean in {"undo that", "undo it", "undo last action", "undo the last action"} or lowered_phrases.intersection(
+            {"undo that", "undo it", "undo last action", "undo the last action"}
+        ):
             await self._undo_last_reversible_operation()
             return True
         if re.search(
@@ -1035,10 +1067,14 @@ class LiveSession:
         connector_result = await self._handle_direct_connector_intent(text)
         if connector_result:
             return True
-        if lowered_clean in {"approve that", "approve it", "yes", "yeah", "yep"}:
+        if lowered_clean in {"approve that", "approve it", "yes", "yeah", "yep"} or lowered_phrases.intersection(
+            {"approve that", "approve it", "yes", "yeah", "yep"}
+        ):
             self._resolve_voice_approval(approve=True)
             return True
-        if lowered_clean in {"reject that", "reject it", "deny that", "deny it", "no", "nope"}:
+        if lowered_clean in {"reject that", "reject it", "deny that", "deny it", "no", "nope"} or lowered_phrases.intersection(
+            {"reject that", "reject it", "deny that", "deny it", "no", "nope"}
+        ):
             self._resolve_voice_approval(approve=False)
             return True
         if re.search(r"\bcancel (that|it|the task)\b", lowered):
@@ -1073,6 +1109,13 @@ class LiveSession:
         if re.search(r"\bwhat('?s| is) the time\b|\bwhat time is it\b|\bcurrent time\b", lowered):
             now = datetime.now().strftime("%A, %B %-d, %Y at %-I:%M %p")
             print(f"  {CYAN}Eyra{NC} {now}")
+            return True
+        if re.search(
+            r"\b(system information|system info|macos version|mac os version|disk space|storage|memory|ram|uptime|battery)\b",
+            lowered,
+        ):
+            result = await self._tool_registry.execute("get_system_info", "{}")
+            print(f"  {CYAN}Eyra{NC} {format_system_info_for_query(result.content, text)}")
             return True
         if self._requires_network(text) and not _settings_bool(self.settings, "NETWORK_TOOLS_ENABLED", False):
             print(
@@ -1250,7 +1293,7 @@ class LiveSession:
                     if rerun.status == "completed":
                         return rerun.output
                     if rerun.status == "cancelled":
-                        return rerun.output
+                        raise asyncio.CancelledError
                     raise RuntimeError(rerun.output)
                 await asyncio.sleep(0.05)
             self.connector_registry.cancel(job_id)
@@ -1258,7 +1301,7 @@ class LiveSession:
         if result.status == "completed":
             return result.output
         if result.status == "cancelled":
-            return result.output
+            raise asyncio.CancelledError
         raise RuntimeError(result.output)
 
     async def _handle_direct_trigger_intent(self, text: str) -> bool:
@@ -2336,6 +2379,8 @@ class LiveSession:
         quality_mode: QualityMode = QualityMode.BALANCED,
         interaction_style: InteractionStyle = InteractionStyle.TEXT,
         routing_decision: RoutingDecision | None = None,
+        messages: list[dict] | None = None,
+        user_message: dict | None = None,
     ):
         self._busy.set()
         self.speech.cancel_listen()
@@ -2366,7 +2411,7 @@ class LiveSession:
                             text_content=text_content,
                             complexity_scorer=self.scorer,
                             settings=self.settings,
-                            messages=self.state.conversation_messages,
+                            messages=list(messages) if messages is not None else list(self.state.conversation_messages),
                             quality_mode=quality_mode,
                             interaction_style=interaction_style,
                             tool_registry=self._tool_registry,
@@ -2410,7 +2455,12 @@ class LiveSession:
                         print("\n")
 
             if full_response.strip():
-                self.state.conversation_messages.append({"role": "assistant", "content": full_response})
+                assistant_message = {"role": "assistant", "content": full_response}
+                insert_at = self._conversation_insert_index_after(user_message)
+                if insert_at is None:
+                    self.state.conversation_messages.append(assistant_message)
+                else:
+                    self.state.conversation_messages.insert(insert_at, assistant_message)
                 self.state.current_status = RuntimeStatus.SPEAKING
                 spoken_text = full_response.strip()[:200]
                 await self.speech.speak(spoken_text)
@@ -2424,6 +2474,14 @@ class LiveSession:
             await play_sound("listen")
             print(f"\r\033[2K  {YELLOW}(voice){NC} {barge_in_text}")
             self._schedule_input(barge_in_text, InteractionStyle.VOICE)
+
+    def _conversation_insert_index_after(self, message: dict | None) -> int | None:
+        if message is None:
+            return None
+        for index, item in enumerate(self.state.conversation_messages):
+            if item is message:
+                return index + 1
+        return None
 
     def _on_task_event(self, task: BackgroundTask, event: str) -> None:
         if not _settings_bool(self.settings, "TASK_STATUS_UPDATES", True):

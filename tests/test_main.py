@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from main import get_log_file_path
 from runtime.cli import (
+    _detect_install_source,
     _is_source_checkout,
     _paths,
     _primary_env_path,
@@ -56,7 +57,7 @@ class TestCliSupportCommands:
         info = _version_info()
 
         assert info["version"]
-        assert info["installSource"] in {"source", "homebrew", "uv-tool", "pipx", "wheel", "unknown"}
+        assert info["installSource"] in {"source", "managed-install", "homebrew", "uv-tool", "pipx", "wheel", "unknown"}
 
     def test_uninstall_removes_shims_and_shell_lines_without_data(self, monkeypatch, tmp_path):
         home = tmp_path / "home"
@@ -103,6 +104,46 @@ class TestCliSupportCommands:
 
         assert _is_source_checkout(app) is False
         assert _primary_env_path() == home / ".config" / "eyra" / ".env"
+
+    def test_homebrew_install_source_is_detected_from_venv_path(self, monkeypatch, tmp_path):
+        app = tmp_path / "app"
+        (app / "src").mkdir(parents=True)
+        (app / "src" / "main.py").write_text("")
+        (app / "pyproject.toml").write_text('[project]\nname = "eyra"\n')
+        monkeypatch.setattr("runtime.cli._repo_root", lambda: app)
+        monkeypatch.setattr(sys, "argv", ["/opt/homebrew/opt/eyra/bin/eyra"])
+        monkeypatch.setattr(sys, "prefix", "/opt/homebrew/var/eyra/venv")
+        monkeypatch.setattr(sys, "base_prefix", "/opt/homebrew/opt/python@3.11")
+
+        assert _detect_install_source()["kind"] == "homebrew"
+
+    def test_managed_install_source_is_detected_from_install_sh_app_venv(self, monkeypatch, tmp_path):
+        app = tmp_path / "app"
+        managed_home = tmp_path / "home"
+        (app / "src").mkdir(parents=True)
+        (app / "src" / "main.py").write_text("")
+        (app / "pyproject.toml").write_text('[project]\nname = "eyra"\n')
+        monkeypatch.setattr("runtime.cli._repo_root", lambda: app)
+        monkeypatch.setattr(sys, "argv", [str(managed_home / ".local" / "share" / "eyra" / "app" / ".venv" / "bin" / "eyra")])
+        monkeypatch.setattr(sys, "executable", str(managed_home / ".local" / "share" / "eyra" / "app" / ".venv" / "bin" / "python"))
+        monkeypatch.setattr(sys, "prefix", str(managed_home / ".local" / "share" / "eyra" / "app" / ".venv"))
+        monkeypatch.setattr(sys, "base_prefix", "/opt/homebrew/opt/python@3.11")
+
+        assert _detect_install_source()["kind"] == "managed-install"
+
+    def test_pipx_install_source_is_detected_before_wheel_fallback(self, monkeypatch, tmp_path):
+        app = tmp_path / "app"
+        pipx_home = tmp_path / "custom-pipx-home"
+        (app / "src").mkdir(parents=True)
+        (app / "src" / "main.py").write_text("")
+        (app / "pyproject.toml").write_text('[project]\nname = "eyra"\n')
+        monkeypatch.setattr("runtime.cli._repo_root", lambda: app)
+        monkeypatch.setattr(sys, "argv", [str(tmp_path / "bin" / "eyra")])
+        monkeypatch.setattr(sys, "prefix", str(pipx_home / "venvs" / "eyra"))
+        monkeypatch.setattr(sys, "base_prefix", "/Library/Frameworks/Python.framework/Versions/3.11")
+        monkeypatch.setenv("PIPX_HOME", str(pipx_home))
+
+        assert _detect_install_source()["kind"] == "pipx"
 
     def test_settings_loads_cwd_env_only_for_git_source_checkout(self, monkeypatch, tmp_path):
         home = tmp_path / "home"

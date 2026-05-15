@@ -8,12 +8,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from runtime.live_session import _asr_phrase_variants
 from runtime.models import LiveRuntimeState, PreflightResult, RuntimeStatus
 from runtime.speech_controller import SpeechController
 
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+class TestHandsFreeTranscriptMatching:
+    def test_asr_phrase_variants_find_embedded_repeated_command(self):
+        variants = _asr_phrase_variants("Show status, show status, show status.")
+
+        assert "show status" in variants
+        assert "status show" in variants
+        assert "show status show status" in variants
 
 
 # ---------------------------------------------------------------------------

@@ -1243,7 +1243,7 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
     row(
         "install_update_source_detection",
         lambda: (
-            require(_detect_install_source()["kind"] in {"source", "homebrew", "uv-tool", "pipx", "wheel", "unknown"}, "unexpected install source")
+            require(_detect_install_source()["kind"] in {"source", "managed-install", "homebrew", "uv-tool", "pipx", "wheel", "unknown"}, "unexpected install source")
             or "Update guidance detects the install source without mutating files."
         ),
         command="eyra update",
@@ -1271,9 +1271,9 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
         "install_homebrew_formula_test",
         lambda: (
             require(("0" * 64) not in (root / "Formula/eyra.rb").read_text(), "formula contains placeholder checksum")
-            or require("USE_MOCK_CLIENT" in (root / "Formula/eyra.rb").read_text(), "formula test does not use a non-interactive mock smoke")
+            or require('"USE_MOCK_CLIENT" => "false"' in (root / "Formula/eyra.rb").read_text(), "formula test must not use the mock client")
             or require('bin/"eyra", "doctor", "--json"' in (root / "Formula/eyra.rb").read_text(), "formula test does not run doctor JSON")
-            or "Formula test runs command and doctor surfaces without requiring a live backend."
+            or "Formula test runs command and doctor surfaces against a real configured backend."
         ),
     )
     source_row(
