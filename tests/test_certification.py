@@ -2,8 +2,20 @@
 
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+
+def _load_certify_script():
+    import importlib.util
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "certify_voice_to_computer.py"
+    spec = importlib.util.spec_from_file_location("certify_voice_to_computer_script", script)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_certification_matrix_contains_required_structured_rows(tmp_path):
@@ -317,6 +329,62 @@ def test_certification_passes_synthetic_mic_flag_to_barge_in_diagnostics(tmp_pat
     row = next(row for row in result.rows if row.name == "physical_barge_in")
     assert row.status == "passed"
     assert seen_kwargs["synthetic_mic"] is True
+
+
+def test_certify_script_starts_and_stops_fake_mic_for_synthetic_runs(monkeypatch):
+    script = _load_certify_script()
+
+    calls = []
+
+    class FakeReport:
+        failed = False
+
+        def render(self):
+            return "report"
+
+    class FakeSettings:
+        LIVE_LISTENING_ENABLED = True
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return None
+
+    monkeypatch.setattr(script.shutil, "which", lambda name: "/tmp/fake-mic" if name == "fake-mic" else None)
+    monkeypatch.setattr(script.subprocess, "run", fake_run)
+    monkeypatch.setattr(script.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(script.Settings, "load_from_env", lambda: FakeSettings())
+    monkeypatch.setattr(script, "run_certification", lambda *_args, **_kwargs: FakeReport())
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "certify_voice_to_computer.py",
+            "--include-physical",
+            "--synthetic-mic",
+            "--synthetic-mic-text",
+            "show status",
+        ],
+    )
+
+    assert script.main() == 0
+    assert calls[0][0] == ["/tmp/fake-mic", "stop"]
+    assert calls[1][0] == ["/tmp/fake-mic", "start", "show status"]
+    assert calls[-1][0] == ["/tmp/fake-mic", "stop"]
+
+
+def test_certify_script_reports_missing_fake_mic_for_synthetic_runs(monkeypatch, capsys):
+    script = _load_certify_script()
+
+    class FakeSettings:
+        LIVE_LISTENING_ENABLED = True
+
+    monkeypatch.setattr(script.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(script.Settings, "load_from_env", lambda: FakeSettings())
+    monkeypatch.setattr(sys, "argv", ["certify_voice_to_computer.py", "--synthetic-mic"])
+
+    assert script.main() == 1
+    captured = capsys.readouterr()
+    assert "fake-mic is required" in captured.err
 
 
 def test_certification_exercises_real_file_operations_and_approval_paths(tmp_path):

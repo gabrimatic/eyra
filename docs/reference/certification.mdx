@@ -33,7 +33,7 @@ The TTS prompt does not say the challenge phrase, so speaker echo cannot satisfy
 uv run python scripts/certify_voice_to_computer.py --include-physical --synthetic-mic
 ```
 
-Use this with a configured loopback input such as BlackHole.
+Use this with a configured loopback input such as BlackHole. The flag starts `fake-mic`, feeds generated speech into the loopback input, and stops it after the run.
 
 ## Status meanings
 

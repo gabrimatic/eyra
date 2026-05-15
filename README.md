@@ -8,7 +8,7 @@ Eyra is a local-first voice agent for the macOS terminal.
 
 Speak or type. Eyra routes the request to an OpenAI-compatible model, calls local tools when needed, and speaks back through Local Whisper. Long work runs as owned background tasks, so the main coordinator stays available for quick questions, status, and cancellation. The default path stays on your machine: Ollama at localhost, Silero VAD in process, screenshots in memory, local PDFs/files, no telemetry.
 
-Cloud providers, network-backed tools, full OS command tools, MCP bridges, universal connectors, external agent delegation, Realtime voice, and the Web UI are opt-in. Current `master` is staged as the `4.2.0` release line on top of the published `v4.1.0` release.
+Cloud providers, network-backed tools, full OS command tools, MCP bridges, universal connectors, external agent delegation, Realtime voice, and the Web UI are opt-in. Current `master` is staged as the `4.2.1` release line on top of the published `v4.2.0` release.
 
 ---
 
@@ -85,7 +85,7 @@ That shared Web frontend uses the terminal-owned approvals, jobs, task events, t
 
 ### Release install paths
 
-The source setup path above remains the supported developer path. The `v4.2.0` release can also be installed from the GitHub release path when you have access to the private repository.
+The source setup path above remains the supported developer path. The `v4.2.1` release can also be installed from the GitHub release path when you have access to the private repository.
 
 GitHub Release installer:
 
@@ -113,8 +113,8 @@ Eyra uses the PolyForm Noncommercial license, so the intended Homebrew path is a
 Git tag Python tool paths:
 
 ```bash
-uv tool install git+https://github.com/gabrimatic/eyra@v4.2.0
-pipx install git+https://github.com/gabrimatic/eyra@v4.2.0
+uv tool install git+https://github.com/gabrimatic/eyra@v4.2.1
+pipx install git+https://github.com/gabrimatic/eyra@v4.2.1
 ```
 
 Those installs should expose the same support commands as source installs. Run `eyra doctor --json` after installing to confirm local backend, models, Local Whisper, microphone, screen capture, sandbox paths, Web UI config, and optional tool flags.
@@ -639,6 +639,8 @@ Run deterministic virtual microphone checks, for example with BlackHole or anoth
 uv run python scripts/certify_voice_to_computer.py --include-physical --synthetic-mic
 ```
 
+`--synthetic-mic` starts `fake-mic`, feeds generated speech into the configured loopback input, and stops it after the certification run.
+
 Status meanings:
 
 - `passed`: the scenario completed and verified the expected behavior.
@@ -745,13 +747,13 @@ Eyra speaks a long diagnostic sentence. Start talking into the microphone while 
 
 Eyra uses local VAD for barge-in. It does not perform full acoustic echo cancellation; if your speakers feed back into the microphone, lower the volume or use headphones for the physical test. During normal responses, Eyra pauses listening while it is thinking, then runs a TTS barge-in listener while speaking. An echo guard drops transcripts that look like Eyra's own spoken output.
 
-For deterministic local certification on macOS, feed generated speech through a virtual microphone such as BlackHole 2ch, then run:
+For deterministic local certification on macOS, use a virtual microphone such as BlackHole 2ch:
 
 ```bash
-fake-mic start "hello eyra this is deterministic fake microphone input for certification"
 VOICE_INPUT_DEVICE='BlackHole 2ch' uv run python scripts/certify_voice_to_computer.py --include-physical --synthetic-mic
-fake-mic stop
 ```
+
+The `--synthetic-mic` flag starts `fake-mic`, feeds generated speech into the loopback input, and stops it when the run finishes.
 
 This deterministic path is useful for release checks, but it is not the same as a person speaking into every physical microphone. If physical voice input fails or returns all-zero audio, run `/voice-diagnose`, verify macOS microphone permission for the terminal app, and set `VOICE_INPUT_DEVICE` to the correct sounddevice index or name.
 

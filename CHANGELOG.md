@@ -10,6 +10,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 No changes yet.
 
+## [4.2.1] - 2026-05-15
+
+### Fixed
+
+- `scripts/certify_voice_to_computer.py --synthetic-mic` now starts and stops `fake-mic` itself, so virtual microphone certification actually feeds loopback audio before voice diagnostics and synthetic barge-in checks.
+
 ## [4.2.0] - 2026-05-15
 
 ### Changed
