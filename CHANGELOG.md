@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+No changes yet.
+
+## [4.2.0rc1] - 2026-05-15
+
 ### Changed
 
 - Local policy routing is now always on. Complexity routing only selects model tiers; every request still goes through policy planning for execution class, required capabilities, model capability, tool allowlists, risk, fallback, and route traces.
@@ -26,10 +30,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Package version is now staged as `4.2.0rc1` for release-candidate validation. This has not been published.
+- Package version is now staged as `4.2.0rc1` for release-candidate validation.
 - `eyra` now has install/support subcommands: `web`, `doctor`, `setup`, `certify`, `update`, `uninstall`, `version`, and `paths`.
 - JSON support output for `eyra doctor --json`, `eyra paths --json`, `eyra version --json`, and certification rows through `eyra certify --json`.
-- `install.sh` release-archive installer scaffold for future GitHub Release assets, including private-repo authentication guidance and no-secret logging defaults.
+- `install.sh` release-archive installer scaffold for GitHub Release assets, including private-repo authentication guidance and no-secret logging defaults.
 - Custom Homebrew tap formula scaffold under `Formula/eyra.rb`; this targets a private/custom tap and does not assume `homebrew/core`.
 - Installer certification rows for setup idempotence, `.env` preservation, command shims, doctor/certify/web commands, update detection, uninstall dry-run, release installer parsing, Homebrew formula presence, uv/pipx command compatibility, and user-data preservation.
 - Universal connectors through `CONNECTORS_ENABLED` and `CONNECTORS_CONFIG_PATH`, with structured manifests for CLI, MCP, local HTTP, remote HTTP, browser-agent, coding-agent, and guarded Python-module workers.

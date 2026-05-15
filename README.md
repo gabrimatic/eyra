@@ -8,7 +8,7 @@ Eyra is a local-first voice agent for the macOS terminal.
 
 Speak or type. Eyra routes the request to an OpenAI-compatible model, calls local tools when needed, and speaks back through Local Whisper. Long work runs as owned background tasks, so the main coordinator stays available for quick questions, status, and cancellation. The default path stays on your machine: Ollama at localhost, Silero VAD in process, screenshots in memory, local PDFs/files, no telemetry.
 
-Cloud providers, network-backed tools, full OS command tools, MCP bridges, universal connectors, external agent delegation, Realtime voice, and the Web UI are opt-in. Current `master` contains unreleased post-4.1.0 routing and voice hardening intended for a future 4.2.0 release candidate.
+Cloud providers, network-backed tools, full OS command tools, MCP bridges, universal connectors, external agent delegation, Realtime voice, and the Web UI are opt-in. Current `master` is staged as the `4.2.0rc1` release-candidate line on top of the published `v4.1.0` release.
 
 ---
 
@@ -83,11 +83,11 @@ WEB_UI_ENABLED=true eyra
 
 That shared Web frontend uses the terminal-owned approvals, jobs, task events, trigger state, tools, browser session, and operation history. Running `eyra-web` or `uv run python -m web.server` directly still starts a standalone Web runtime and reports that mode in `/api/health`.
 
-### Future install paths
+### Release-candidate install paths
 
-The source setup path above is the supported private-beta/developer path today.
+The source setup path above remains the supported developer path. The `v4.2.0rc1` release candidate can also be installed from the GitHub release path when you have access to the private repository.
 
-Future GitHub Release installer:
+GitHub Release installer:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gabrimatic/eyra/master/install.sh | bash
@@ -95,7 +95,7 @@ curl -fsSL https://raw.githubusercontent.com/gabrimatic/eyra/master/install.sh |
 
 If this repository is private, that command needs authenticated GitHub access, for example `GITHUB_TOKEN` in the environment. It is not a public install path until the repository or release asset is public.
 
-Future custom Homebrew tap path:
+Private-beta custom Homebrew tap path:
 
 ```bash
 brew tap gabrimatic/eyra
@@ -108,9 +108,9 @@ or:
 brew install gabrimatic/eyra/eyra
 ```
 
-Eyra uses the PolyForm Noncommercial license, so the intended Homebrew path is a custom tap, not `homebrew/core`, unless the license and release policy change. The checked-in formula is a private-beta scaffold that installs from `master` until a signed/tagged release asset and checksum exist. Treat it as tap preparation, not a public stable formula.
+Eyra uses the PolyForm Noncommercial license, so the intended Homebrew path is a custom tap, not `homebrew/core`, unless the license and release policy change. The checked-in formula is still a private-beta scaffold that installs from `master`; a stable custom tap formula should switch to a tagged release URL and pinned sha256. Treat it as tap preparation, not a public stable formula.
 
-Future Python tool paths, once package distribution is enabled:
+Git tag Python tool paths:
 
 ```bash
 uv tool install git+https://github.com/gabrimatic/eyra@v4.2.0rc1

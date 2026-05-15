@@ -2,8 +2,8 @@ class Eyra < Formula
   desc "Local-first voice coordinator for macOS terminals"
   homepage "https://github.com/gabrimatic/eyra"
 
-  # Private beta formula: tracks the unreleased release-candidate branch until a
-  # signed/tagged release asset exists.
+  # Private beta formula: tracks master until the custom tap is switched to a
+  # tagged release asset and pinned sha256.
   url "https://github.com/gabrimatic/eyra.git", branch: "master"
   version "4.2.0rc1"
   license "PolyForm-Noncommercial-1.0.0"

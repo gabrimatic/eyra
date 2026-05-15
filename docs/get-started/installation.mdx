@@ -29,7 +29,7 @@ eyra
 
 ## Installer script
 
-`install.sh` installs a release archive into a managed directory and runs non-interactive setup.
+`install.sh` installs a release archive into a managed directory and runs non-interactive setup. For `v4.2.0rc1`, use authenticated GitHub access while the repository is private.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gabrimatic/eyra/master/install.sh | bash
@@ -63,7 +63,7 @@ Current formula status: private beta scaffold.
 brew install gabrimatic/eyra/eyra
 ```
 
-The checked-in formula installs from the `master` branch and reports `4.2.0rc1` until a signed/tagged release asset and checksum exist. Treat it as tap preparation, not a stable public formula.
+The checked-in formula installs from the `master` branch and reports `4.2.0rc1`. Even when release-candidate assets exist, this formula remains private-beta tap preparation until it is switched to a tagged release URL and pinned sha256. Treat it as tap preparation, not a stable public formula.
 
 Formula behavior:
 
