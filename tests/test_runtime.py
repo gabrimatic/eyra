@@ -551,8 +551,66 @@ class TestLiveSessionCommands:
     def test_clear_command_resets_history(self):
         session = self._make_session()
         session.state.conversation_messages.append({"role": "user", "content": "hello"})
+        session.state.semantic_history.append_from_protocol(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "call_1", "function": {"name": "read_file", "arguments": "{}"}}],
+            }
+        )
         _run(session._handle_command("/clear"))
         assert session.state.conversation_messages == []
+        assert session.state.semantic_history.to_list() == []
+        assert session.state.semantic_history.tool_name_by_id == {}
+
+    def test_worker_task_adapts_semantic_context_before_model_call(self):
+        from chat.session_state import InteractionStyle, QualityMode
+        from runtime.tasks import BackgroundTask
+
+        session = self._make_session()
+        session.settings.WORKER_MODEL = ""
+        seen = {}
+
+        async def fake_process_task_stream(**kwargs):
+            seen["messages"] = kwargs["messages"]
+            yield "done"
+
+        task = BackgroundTask(
+            title="Worker",
+            original_request="continue",
+            related_context=[
+                {
+                    "role": "user",
+                    "content": "Read /Users/example/private.txt with token=secret-token",
+                    "privacy": {"localOnly": True, "leavesMachine": False, "dataClasses": ["text"]},
+                    "toolCalls": [{"name": "read_file", "arguments": {"path": "/Users/example/private.txt"}}],
+                    "metadata": {"toolCallId": "call_1"},
+                }
+            ],
+        )
+
+        with patch("runtime.live_session.process_task_stream", fake_process_task_stream):
+            result = _run(
+                session._run_worker_task(
+                    task,
+                    text_content="continue",
+                    quality_mode=QualityMode.BALANCED,
+                    interaction_style=InteractionStyle.TEXT,
+                    routing_decision=MagicMock(),
+                )
+            )
+
+        rendered = str(seen["messages"])
+        assert result == "done"
+        assert seen["messages"] == [
+            {"role": "user", "content": "Read ~/[user]/private.txt with token=[REDACTED]\n[tools: read_file]"}
+        ]
+        assert "privacy" not in rendered
+        assert "toolCalls" not in rendered
+        assert "metadata" not in rendered
+        assert "arguments" not in rendered
+        assert "/Users/example" not in rendered
+        assert "secret-token" not in rendered
 
     def test_unknown_command_returns_true(self):
         session = self._make_session()

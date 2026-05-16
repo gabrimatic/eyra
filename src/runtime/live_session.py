@@ -23,6 +23,7 @@ from runtime.connectors.types import ConnectorJobSpec
 from runtime.context import build_context_snapshot, format_context_answer
 from runtime.dictation import DictationState, dictation_command, parse_dictation_target
 from runtime.examples import render_examples
+from runtime.history import semantic_history_to_protocol_context
 from runtime.intents import (
     extract_pdf_path,
     needs_screen_context,
@@ -2277,7 +2278,8 @@ class LiveSession:
                 text_content=text_content,
                 complexity_scorer=self.scorer,
                 settings=worker_settings,
-                messages=list(task.related_context) or [{"role": "user", "content": text_content}],
+                messages=semantic_history_to_protocol_context(task.related_context)
+                or [{"role": "user", "content": text_content}],
                 quality_mode=quality_mode,
                 interaction_style=interaction_style,
                 tool_registry=self._tool_registry,
@@ -2297,7 +2299,8 @@ class LiveSession:
         result = await analyze_screen(
             settings=self.settings,
             prompt=text_content,
-            conversation_messages=list(task.related_context) or list(self.state.conversation_messages[-6:]),
+            conversation_messages=semantic_history_to_protocol_context(task.related_context)
+            or list(self.state.conversation_messages[-6:]),
             current_goal=self.state.current_goal,
             model_semaphore=self._model_semaphore,
             preflight=self.preflight,

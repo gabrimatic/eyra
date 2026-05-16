@@ -369,6 +369,7 @@ class TestWebServerHelpers:
         async def fake_process_task_stream(**kwargs):
             seen["settings"] = kwargs["settings"]
             seen["require_tools"] = kwargs["require_tools"]
+            seen["messages"] = kwargs["messages"]
             yield "done"
 
         monkeypatch.setattr("web.server.process_task_stream", fake_process_task_stream)
@@ -391,6 +392,25 @@ class TestWebServerHelpers:
             tool_capable_models=["worker"],
         )
         runtime = WebAssistantRuntime(settings, preflight=preflight)
+        runtime.semantic_history.append_from_protocol(
+            {"role": "user", "content": "Read /Users/example/private.txt with token=secret-token"}
+        )
+        runtime.semantic_history.append_from_protocol(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": '{"path": "/Users/example/private.txt", "token": "secret-token"}',
+                        },
+                    }
+                ],
+            }
+        )
 
         try:
             accepted = runtime.run_sync(runtime.handle_message("Organize my Documents folder."))
@@ -403,6 +423,19 @@ class TestWebServerHelpers:
         assert seen["settings"].SIMPLE_MODEL == "worker"
         assert seen["settings"].MODERATE_MODEL == "worker"
         assert seen["require_tools"] is True
+        rendered = str(seen["messages"])
+        assert all(set(message) == {"role", "content"} for message in seen["messages"])
+        assert all(message["role"] in {"user", "assistant"} for message in seen["messages"])
+        assert "read_file" in rendered
+        assert "privacy" not in rendered
+        assert "toolCalls" not in rendered
+        assert "metadata" not in rendered
+        assert "route" not in rendered
+        assert "jobs" not in rendered
+        assert "connectors" not in rendered
+        assert "arguments" not in rendered
+        assert "/Users/example" not in rendered
+        assert "secret-token" not in rendered
 
     def test_web_route_last_returns_policy_trace(self):
         settings = Settings(

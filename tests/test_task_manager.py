@@ -226,3 +226,45 @@ class TestBackgroundTaskManager:
         assert "secret-token" not in rendered
         assert "~/[user]" in rendered
         assert "[REDACTED]" in rendered
+
+    def test_persisted_related_context_keeps_semantic_entries_sanitized(self, tmp_path):
+        async def run():
+            store = DurableJobStore(tmp_path / "jobs.sqlite3")
+            manager = BackgroundTaskManager(job_store=store)
+
+            async def worker(task):
+                return "ok"
+
+            task = manager.create_task(
+                "Already semantic",
+                "continue the safe task",
+                worker,
+                related_context=[
+                    {
+                        "role": "assistant",
+                        "content": "Used read_file on /Users/example/private.txt with token=secret-token",
+                        "privacy": {"localOnly": True, "leavesMachine": False, "dataClasses": ["text"]},
+                        "toolCalls": [{"name": "read_file", "arguments": {"path": "/Users/example/private.txt"}}],
+                        "metadata": {"toolCallId": "call_1"},
+                    }
+                ],
+            )
+            await manager.wait_for_task(task.id)
+            persisted = store.get_job(task.id)
+            store.close()
+            return persisted
+
+        persisted = _run(run())
+        assert persisted is not None
+        entries = persisted.normalized_task_spec["related_context"]
+        rendered = str(entries)
+
+        assert entries[0]["role"] == "assistant"
+        assert "privacy" in entries[0]
+        assert entries[0]["toolCalls"] == [{"name": "read_file"}]
+        assert "metadata" not in entries[0]
+        assert "arguments" not in rendered
+        assert "/Users/example" not in rendered
+        assert "secret-token" not in rendered
+        assert "~/[user]" in rendered
+        assert "[REDACTED]" in rendered

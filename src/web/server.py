@@ -33,7 +33,7 @@ from runtime.connectors.registry import ConnectorRegistry
 from runtime.connectors.types import ConnectorJobSpec
 from runtime.context import build_context_snapshot
 from runtime.dictation import DictationState, dictation_command, parse_dictation_target
-from runtime.history import ProtocolHistory, SemanticHistory
+from runtime.history import ProtocolHistory, SemanticHistory, semantic_history_to_protocol_context
 from runtime.intents import (
     extract_pdf_path,
     needs_screen_context,
@@ -516,7 +516,7 @@ class WebAssistantRuntime:
             return await analyze_screen(
                 settings=self.settings,
                 prompt=text,
-                conversation_messages=list(task.related_context),
+                conversation_messages=semantic_history_to_protocol_context(task.related_context),
                 current_goal=None,
                 model_semaphore=self.model_semaphore,
                 preflight=self.preflight,
@@ -531,7 +531,7 @@ class WebAssistantRuntime:
                 text_content=text,
                 complexity_scorer=self.scorer,
                 settings=worker_settings,
-                messages=list(task.related_context) or [{"role": "user", "content": text}],
+                messages=semantic_history_to_protocol_context(task.related_context) or [{"role": "user", "content": text}],
                 quality_mode=QualityMode.BALANCED,
                 interaction_style=interaction,
                 tool_registry=self.registry,
