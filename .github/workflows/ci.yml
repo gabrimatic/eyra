@@ -3,8 +3,16 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "doc/**"
+      - "README.md"
+      - ".github/workflows/docs-pages.yml"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "doc/**"
+      - "README.md"
+      - ".github/workflows/docs-pages.yml"
 
 permissions:
   contents: read
@@ -67,5 +75,5 @@ jobs:
       - name: Validate Mintlify docs
         env:
           MINTLIFY_TELEMETRY_DISABLED: "1"
-        working-directory: docs
+        working-directory: doc
         run: npx -y mint@4.2.565 validate --disable-openapi

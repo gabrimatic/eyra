@@ -6,6 +6,7 @@ build/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+scripts/
 
 # Exclude local/runtime files if they exist in a checkout.
 .env

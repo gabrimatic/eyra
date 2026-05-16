@@ -7,10 +7,10 @@ Mintlify-hosted docs are AI-native by default: pages are available as Markdown, 
 
 ## Local docs structure
 
-This repo keeps the public docs site in `docs/`, with source pages in MDX, explicit frontmatter, and navigation in `docs/docs.json`.
+This repo keeps the public docs site in `doc/`, with source pages in MDX, explicit frontmatter, and navigation in `doc/docs.json`.
 
 ```text
-docs/
+doc/
   docs.json
   index.mdx
   get-started/
@@ -60,7 +60,7 @@ npm i -g mint
 Validate locally:
 
 ```bash
-cd docs
+cd doc
 mint validate --disable-openapi
 mint broken-links --check-anchors
 mint a11y
@@ -69,7 +69,7 @@ mint a11y
 Preview locally:
 
 ```bash
-cd docs
+cd doc
 mint dev --no-open --disable-openapi
 ```
 
@@ -85,4 +85,4 @@ mint score https://docs.example.com
 
 ## Current repo boundary
 
-This repo contains the Mintlify source site only. Hosted AI-native artifacts such as live `llms.txt`, `llms-full.txt`, `skill.md`, and the documentation MCP server are available only after a separate hosted docs deployment is configured.
+This repo contains the Mintlify source site and a static GitHub Pages deployment. Hosted AI-native artifacts such as live `llms.txt`, `llms-full.txt`, `skill.md`, and the documentation MCP server are available only after a separate hosted docs deployment is configured.

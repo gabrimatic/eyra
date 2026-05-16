@@ -10,6 +10,8 @@ Speak or type. Eyra routes the request to an OpenAI-compatible model, calls loca
 
 Cloud providers, network-backed tools, full OS command tools, MCP bridges, universal connectors, external agent delegation, Realtime voice, and the Web UI are opt-in. Current `main` is staged as the `4.2.1` release line on top of the published `v4.2.0` release.
 
+[Read the docs](https://gabrimatic.github.io/eyra/) for installation, configuration, commands, architecture, and release checks.
+
 ---
 
 ## Quick start
@@ -17,7 +19,7 @@ Cloud providers, network-backed tools, full OS command tools, MCP bridges, unive
 Runtime: macOS on Apple Silicon. The easiest path is the guided installer. It installs Eyra, checks the local AI and voice pieces, and tells you exactly what still needs attention.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gabrimatic/eyra/main/install.sh | bash
+curl -fsSL https://gabrimatic.github.io/eyra/install.sh | bash
 ```
 
 Then start Eyra:
@@ -103,7 +105,7 @@ The guided installer is the easiest path for normal use. The source setup path i
 GitHub Release installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gabrimatic/eyra/main/install.sh | bash
+curl -fsSL https://gabrimatic.github.io/eyra/install.sh | bash
 ```
 
 If this repository is private, that command needs authenticated GitHub access, for example `GITHUB_TOKEN` in the environment. It is not a public install path until the repository or release asset is public.
@@ -560,7 +562,7 @@ Data leaves your machine only when you choose a remote AI provider, enable Realt
 eyra/
 ├── pyproject.toml
 ├── setup.sh
-├── docs/                         # Mintlify documentation site
+├── doc/                          # Mintlify documentation site
 ├── internal-docs/                # Source notes that are not part of the public docs site
 ├── src/
 │   ├── main.py                     # Entry point, preflight, live session launch

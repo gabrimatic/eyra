@@ -1,0 +1,91 @@
+name: Docs Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "doc/**"
+      - "install.sh"
+      - "README.md"
+      - ".github/workflows/docs-pages.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "doc/**"
+      - "install.sh"
+      - "README.md"
+      - ".github/workflows/docs-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: docs-pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Validate docs
+        env:
+          MINTLIFY_TELEMETRY_DISABLED: "1"
+        working-directory: doc
+        run: npx -y mint@4.2.565 validate --disable-openapi
+
+      - name: Check links
+        env:
+          MINTLIFY_TELEMETRY_DISABLED: "1"
+        working-directory: doc
+        run: npx -y mint@4.2.565 broken-links
+
+      - name: Export static docs
+        env:
+          MINTLIFY_TELEMETRY_DISABLED: "1"
+        working-directory: doc
+        run: npx -y mint@4.2.565 export --disable-openapi --output ../docs-export.zip
+
+      - name: Prepare GitHub Pages artifact
+        run: |
+          rm -rf _site
+          mkdir -p _site
+          unzip -q docs-export.zip -d _site
+          cp install.sh _site/install.sh
+          node doc/scripts/prepare-github-pages.mjs _site /eyra
+
+      - name: Upload Pages artifact
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy docs
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
