@@ -2522,7 +2522,7 @@ def _check_web_job_logs_artifacts_api(root: Path) -> str:
         artifacts = _web_get_json(base + f"/api/job/{job.id}/artifacts", token=handle.web_session_token)
         if logs["logs"][0]["message"] != "Web job started.":
             raise RuntimeError("Web logs API did not return persisted logs.")
-        if artifacts["artifacts"][0]["path"] != "/tmp/web.txt":
+        if artifacts["artifacts"][0]["path"] != "~/[temp]":
             raise RuntimeError("Web artifacts API did not return persisted artifacts.")
         return "Web job logs and artifacts APIs returned persisted job data."
     finally:

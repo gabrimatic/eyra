@@ -36,20 +36,20 @@ def test_context_snapshot_includes_goal_cwd_recent_jobs_and_operations(tmp_path)
     snapshot = build_context_snapshot(Settings(), state=state, job_store=store, cwd=str(tmp_path))
 
     assert snapshot["currentGoal"] == "Finish the local operator"
-    assert snapshot["cwd"] == str(tmp_path)
+    assert snapshot["cwd"] == "~/[temp]"
     assert snapshot["recentJobs"][0]["title"] == "Move selected PDF"
     assert snapshot["recentOperations"][0]["action"] == "file.move"
-    assert snapshot["recentOperations"][0]["target"].endswith("a.pdf")
+    assert snapshot["recentOperations"][0]["target"] == "~/[temp]"
     store.close()
 
 
 def test_context_snapshot_redacts_recent_messages(tmp_path):
     store = DurableJobStore(tmp_path / "jobs.sqlite3")
     state = LiveRuntimeState(current_goal="Safe context")
-    state.conversation_messages.append(
+    state.append_protocol_message(
         {"role": "user", "content": "Read /Users/example/private.txt with token=secret-token"}
     )
-    state.conversation_messages.append(
+    state.append_protocol_message(
         {
             "role": "assistant",
             "content": None,
@@ -85,6 +85,6 @@ def test_context_answer_is_compact_and_local(tmp_path):
 
     assert "Current context" in answer
     assert "Goal: Test context" in answer
-    assert f"Working directory: {tmp_path}" in answer
+    assert "Working directory: ~/[temp]" in answer
     assert "Recent jobs: none" in answer
     store.close()

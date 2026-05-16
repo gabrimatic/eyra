@@ -6,6 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from runtime.jobs import DurableJobStore
 from runtime.tasks import BackgroundTaskManager, TaskStatus
 
 
@@ -181,3 +182,47 @@ class TestBackgroundTaskManager:
         assert "completed" in primary_events
         assert (task.id, "accepted") in listener_events
         assert (task.id, "completed") in listener_events
+
+    def test_persisted_related_context_uses_semantic_history(self, tmp_path):
+        async def run():
+            store = DurableJobStore(tmp_path / "jobs.sqlite3")
+            manager = BackgroundTaskManager(job_store=store)
+
+            async def worker(task):
+                return "ok"
+
+            task = manager.create_task(
+                "Safe summary",
+                "summarize this",
+                worker,
+                related_context=[
+                    {"role": "user", "content": "Read /Users/example/private.txt with token=secret-token"},
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "type": "function",
+                                "function": {
+                                    "name": "read_file",
+                                    "arguments": '{"path": "/Users/example/private.txt", "token": "secret-token"}',
+                                },
+                            }
+                        ],
+                    },
+                ],
+            )
+            await manager.wait_for_task(task.id)
+            persisted = store.get_job(task.id)
+            store.close()
+            return persisted
+
+        persisted = _run(run())
+        assert persisted is not None
+        rendered = str(persisted.normalized_task_spec["related_context"])
+        assert "read_file" in rendered
+        assert "arguments" not in rendered
+        assert "/Users/example" not in rendered
+        assert "secret-token" not in rendered
+        assert "~/[user]" in rendered
+        assert "[REDACTED]" in rendered

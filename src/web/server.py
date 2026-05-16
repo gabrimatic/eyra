@@ -31,7 +31,9 @@ from runtime.capabilities import build_capability_snapshot, format_capability_an
 from runtime.coding_jobs import approval_id_from_text, parse_coding_job_request
 from runtime.connectors.registry import ConnectorRegistry
 from runtime.connectors.types import ConnectorJobSpec
+from runtime.context import build_context_snapshot
 from runtime.dictation import DictationState, dictation_command, parse_dictation_target
+from runtime.history import ProtocolHistory, SemanticHistory
 from runtime.intents import (
     extract_pdf_path,
     needs_screen_context,
@@ -63,6 +65,7 @@ _WEB_TOKEN_QUERY_RE = re.compile(r"(?i)(token=)[^&\s]+")
 _WEB_SECRET_RE = re.compile(r"(?i)(api[_-]?key|secret|password|token)([=:]\s*)([^\s,}]+)")
 _WEB_OPENAI_KEY_RE = re.compile(r"sk-[A-Za-z0-9_-]{16,}")
 _WEB_HOME_RE = re.compile(r"/Users/[^/\s]+")
+_WEB_TEMP_RE = re.compile(r"(?:/private)?/var/folders/[^\s,}\"']+|/tmp/[^\s,}\"']+")
 
 
 class EyraThreadingHTTPServer(ThreadingHTTPServer):
@@ -183,6 +186,7 @@ def _redact_api_value(value):
         redacted = _WEB_SECRET_RE.sub(r"\1\2[REDACTED]", redacted)
         redacted = _WEB_OPENAI_KEY_RE.sub("[REDACTED_KEY]", redacted)
         redacted = _WEB_HOME_RE.sub("~/[user]", redacted)
+        redacted = _WEB_TEMP_RE.sub("~/[temp]", redacted)
         return redacted
     return value
 
@@ -237,7 +241,9 @@ class WebAssistantRuntime:
         self.dictation = DictationState()
         if shared is not None:
             self.scorer = shared.scorer
-            self.conversation = shared.conversation
+            self.protocol_history = shared.protocol_history
+            self.semantic_history = shared.semantic_history
+            self.conversation = self.protocol_history.messages
             self.browser_session = shared.browser_session
             self.approvals = shared.approvals
             self.registry = shared.registry
@@ -247,7 +253,9 @@ class WebAssistantRuntime:
             self.connector_registry = shared.connector_registry
         else:
             self.scorer = ComplexityScorer()
-            self.conversation: list[dict[str, str]] = []
+            self.protocol_history = ProtocolHistory()
+            self.semantic_history = SemanticHistory()
+            self.conversation = self.protocol_history.messages
             self.browser_session = BrowserSession()
             self.approvals = ApprovalManager()
             self.registry = build_tool_registry(
@@ -340,7 +348,7 @@ class WebAssistantRuntime:
         if dictation_result is not None:
             return dictation_result
         user_message = {"role": "user", "content": text}
-        self.conversation.append(user_message)
+        self._append_protocol_message(user_message)
         conversation_snapshot = list(self.conversation)
         coding_result = await self._handle_direct_coding_job_intent(text)
         if coding_result is not None:
@@ -364,7 +372,7 @@ class WebAssistantRuntime:
                 title=task_title(text),
                 original_request=text,
                 worker=lambda task: self._run_worker_task(task, text, voice_mode, routing_decision=route_preview),
-                related_context=list(self.conversation[-6:]),
+                related_context=self.semantic_history.recent(6),
                 used_tools=True,
                 required_network=requires_network(text),
                 required_filesystem=requires_filesystem(text),
@@ -466,10 +474,18 @@ class WebAssistantRuntime:
         assistant_message = {"role": "assistant", "content": reply}
         insert_at = self._conversation_insert_index_after(user_message)
         if insert_at is None:
-            self.conversation.append(assistant_message)
+            self._append_protocol_message(assistant_message)
         else:
-            self.conversation.insert(insert_at, assistant_message)
+            self._insert_protocol_message(insert_at, assistant_message)
         return reply
+
+    def _append_protocol_message(self, message: dict[str, Any]) -> None:
+        self.protocol_history.append(message)
+        self.semantic_history.append_from_protocol(message)
+
+    def _insert_protocol_message(self, index: int, message: dict[str, Any]) -> None:
+        self.protocol_history.insert(index, message)
+        self.semantic_history.rebuild_from_protocol(self.protocol_history.messages)
 
     def _conversation_insert_index_after(self, message: dict | None) -> int | None:
         if message is None:
@@ -932,6 +948,10 @@ class WebAssistantRuntime:
             preflight=self.preflight,
         )
 
+    async def context_snapshot(self) -> dict[str, Any]:
+        state = self._context_state()
+        return {"context": _redact_api_value(build_context_snapshot(self.settings, state=state, job_store=self.job_store))}
+
     async def connectors(self) -> dict[str, Any]:
         return self.connector_registry.capability_snapshot()
 
@@ -1122,6 +1142,14 @@ class WebAssistantRuntime:
 
     async def reject(self, approval_id: str) -> dict[str, Any]:
         return {"rejected": self.approvals.reject(approval_id)}
+
+    def _context_state(self):
+        from runtime.models import LiveRuntimeState
+
+        state = LiveRuntimeState()
+        state.protocol_history = self.protocol_history
+        state.semantic_history = self.semantic_history
+        return state
 
     def subscribe_task_events(self) -> queue.Queue[dict[str, Any]]:
         subscriber: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=50)
@@ -1777,6 +1805,11 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             if not self._authorized():
                 return
             self._send_json(200, self.runtime.run_sync(self.runtime.capabilities()))
+            return
+        if parsed.path == "/api/context":
+            if not self._authorized():
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.context_snapshot()))
             return
         if parsed.path == "/api/connectors":
             if not self._authorized():

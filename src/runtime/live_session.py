@@ -222,7 +222,6 @@ class LiveSession:
         shared = RuntimeSharedState.from_components(
             settings=self.settings,
             preflight=self.preflight,
-            conversation=self.state.conversation_messages,
             scorer=self.scorer,
             browser_session=self._browser_session,
             approvals=self.approvals,
@@ -231,6 +230,8 @@ class LiveSession:
             trigger_store=self.trigger_store,
             task_manager=self.task_manager,
             connector_registry=self.connector_registry,
+            protocol_history=self.state.protocol_history,
+            semantic_history=self.state.semantic_history,
             source_frontend="terminal",
             last_route_trace=self.state.last_route_trace,
         )
@@ -597,7 +598,7 @@ class LiveSession:
             return True
 
         if command == "/clear":
-            self.state.conversation_messages.clear()
+            self.state.clear_history()
             print_status_change("Session cleared")
             return True
 
@@ -870,7 +871,7 @@ class LiveSession:
         if await self._handle_dictation_input(text):
             return
         user_message = {"role": "user", "content": text}
-        self.state.conversation_messages.append(user_message)
+        self.state.append_protocol_message(user_message)
         conversation_snapshot = list(self.state.conversation_messages)
         if await self._handle_local_intent(text):
             return
@@ -916,7 +917,7 @@ class LiveSession:
                     interaction_style=interaction_style,
                     routing_decision=route_preview,
                 ),
-                related_context=list(self.state.conversation_messages[-6:]),
+                related_context=self.state.semantic_history.recent(6),
                 used_tools=True,
                 required_network=self._requires_network(text),
                 required_filesystem=self._requires_filesystem(text),
@@ -2463,9 +2464,9 @@ class LiveSession:
                 assistant_message = {"role": "assistant", "content": full_response}
                 insert_at = self._conversation_insert_index_after(user_message)
                 if insert_at is None:
-                    self.state.conversation_messages.append(assistant_message)
+                    self.state.append_protocol_message(assistant_message)
                 else:
-                    self.state.conversation_messages.insert(insert_at, assistant_message)
+                    self.state.insert_protocol_message(insert_at, assistant_message)
                 self.state.current_status = RuntimeStatus.SPEAKING
                 spoken_text = full_response.strip()[:200]
                 await self.speech.speak(spoken_text)

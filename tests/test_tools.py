@@ -372,6 +372,51 @@ class TestSemanticHistory:
 
         assert entry["content"] == "Look at this\n[image omitted]"
 
+    def test_semantic_history_omits_sensitive_tool_payload_classes(self):
+        messages = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_clipboard",
+                        "type": "function",
+                        "function": {"name": "read_clipboard", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call_pdf",
+                        "type": "function",
+                        "function": {"name": "extract_pdf_text", "arguments": '{"path": "/Users/example/a.pdf"}'},
+                    },
+                    {
+                        "id": "call_connector",
+                        "type": "function",
+                        "function": {
+                            "name": "run_connector_task",
+                            "arguments": '{"task": "send token=secret-token"}',
+                        },
+                    },
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_clipboard", "content": "clipboard token=secret-token"},
+            {"role": "tool", "tool_call_id": "call_pdf", "content": "PDF text: payroll /Users/example/a.pdf"},
+            {"role": "tool", "tool_call_id": "call_connector", "content": '{"payload":"token=secret-token"}'},
+        ]
+
+        history = build_semantic_history(messages)
+        rendered = json.dumps(history)
+
+        assert "read_clipboard" in rendered
+        assert "extract_pdf_text" in rendered
+        assert "run_connector_task" in rendered
+        assert "clipboard token" not in rendered
+        assert "payroll" not in rendered
+        assert '"payload"' not in rendered
+        assert "secret-token" not in rendered
+        assert "omitted_clipboard" in rendered
+        assert "omitted_pdf_text" in rendered
+        assert "omitted_connector_payload" in rendered
+
 
 async def _collect(stream):
     return [chunk async for chunk in stream]

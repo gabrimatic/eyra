@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from chat.complexity_scorer import ComplexityScorer
 from runtime.connectors.registry import ConnectorRegistry
+from runtime.history import ProtocolHistory, SemanticHistory
 from runtime.jobs import DurableJobStore
 from runtime.models import PreflightResult
 from runtime.tasks import BackgroundTaskManager, TaskEventCallback
@@ -23,7 +24,8 @@ class RuntimeSharedState:
 
     settings: Settings
     preflight: PreflightResult
-    conversation: list[dict[str, str]]
+    protocol_history: ProtocolHistory
+    semantic_history: SemanticHistory
     scorer: ComplexityScorer
     browser_session: BrowserSession
     approvals: ApprovalManager
@@ -34,6 +36,11 @@ class RuntimeSharedState:
     connector_registry: ConnectorRegistry
     source_frontend: str = "terminal"
     last_route_trace: object | None = None
+
+    @property
+    def conversation(self) -> list[dict]:
+        """Deprecated raw protocol alias for model execution only."""
+        return self.protocol_history.messages
 
     @classmethod
     def create(
@@ -61,7 +68,8 @@ class RuntimeSharedState:
         return cls(
             settings=settings,
             preflight=preflight,
-            conversation=[],
+            protocol_history=ProtocolHistory(),
+            semantic_history=SemanticHistory(),
             scorer=ComplexityScorer(),
             browser_session=browser_session,
             approvals=approvals,
@@ -79,7 +87,6 @@ class RuntimeSharedState:
         *,
         settings: Settings,
         preflight: PreflightResult,
-        conversation: list[dict[str, str]],
         scorer: ComplexityScorer,
         browser_session: BrowserSession,
         approvals: ApprovalManager,
@@ -88,6 +95,9 @@ class RuntimeSharedState:
         trigger_store: TriggerStore,
         task_manager: BackgroundTaskManager,
         connector_registry: ConnectorRegistry,
+        protocol_history: ProtocolHistory | None = None,
+        semantic_history: SemanticHistory | None = None,
+        conversation: list[dict[str, str]] | None = None,
         source_frontend: str = "terminal",
         last_route_trace: object | None = None,
     ) -> "RuntimeSharedState":
@@ -95,7 +105,8 @@ class RuntimeSharedState:
         return cls(
             settings=settings,
             preflight=preflight,
-            conversation=conversation,
+            protocol_history=protocol_history if protocol_history is not None else ProtocolHistory(list(conversation or [])),
+            semantic_history=semantic_history if semantic_history is not None else SemanticHistory(),
             scorer=scorer,
             browser_session=browser_session,
             approvals=approvals,

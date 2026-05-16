@@ -6,6 +6,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 
+from runtime.history import ProtocolHistory, SemanticHistory
+
 
 class RuntimeStatus(str, Enum):
     STARTING = "starting"
@@ -48,9 +50,27 @@ class LiveRuntimeState:
     current_status: RuntimeStatus = RuntimeStatus.STARTING
     last_user_input_at: float | None = None
     last_spoken_output_at: float | None = None
-    conversation_messages: list[dict] = field(default_factory=list)
+    protocol_history: ProtocolHistory = field(default_factory=ProtocolHistory)
+    semantic_history: SemanticHistory = field(default_factory=SemanticHistory)
     recent_events: deque = field(default_factory=lambda: deque(maxlen=50))
     last_route_trace: object | None = None
+
+    @property
+    def conversation_messages(self) -> list[dict]:
+        """Deprecated raw protocol alias retained for model execution paths."""
+        return self.protocol_history.messages
+
+    def append_protocol_message(self, message: dict) -> None:
+        self.protocol_history.append(message)
+        self.semantic_history.append_from_protocol(message)
+
+    def insert_protocol_message(self, index: int, message: dict) -> None:
+        self.protocol_history.insert(index, message)
+        self.semantic_history.rebuild_from_protocol(self.protocol_history.messages)
+
+    def clear_history(self) -> None:
+        self.protocol_history.clear()
+        self.semantic_history.clear()
 
     @classmethod
     def from_preflight(cls, result: PreflightResult, settings=None) -> "LiveRuntimeState":

@@ -6,7 +6,7 @@ import os
 
 from runtime.jobs import DurableJobStore
 from runtime.models import LiveRuntimeState
-from utils.semantic_history import build_semantic_history
+from utils.semantic_history import build_semantic_history, redact_semantic_text
 from utils.settings import Settings
 
 
@@ -22,13 +22,14 @@ def build_context_snapshot(
     operations = job_store.list_operations(limit=5)
     return {
         "currentGoal": state.current_goal,
-        "cwd": cwd or os.getcwd(),
-        "filesystemDefaultPath": settings.FILESYSTEM_DEFAULT_PATH,
-        "recentMessages": build_semantic_history(state.conversation_messages, max_messages=6),
+        "cwd": redact_semantic_text(cwd or os.getcwd()),
+        "filesystemDefaultPath": redact_semantic_text(settings.FILESYSTEM_DEFAULT_PATH),
+        "recentMessages": state.semantic_history.recent(6)
+        or build_semantic_history(state.conversation_messages, max_messages=6),
         "recentJobs": [
             {
                 "id": job.id,
-                "title": job.title,
+                "title": redact_semantic_text(job.title),
                 "status": job.status.value,
                 "source": job.source_frontend,
                 "updatedAt": job.updated_at,
@@ -40,9 +41,9 @@ def build_context_snapshot(
                 "id": operation.id,
                 "jobId": operation.job_id,
                 "action": operation.normalized_action.get("type", "operation"),
-                "target": operation.target,
+                "target": redact_semantic_text(operation.target),
                 "success": operation.success,
-                "undo": operation.undo,
+                "undo": _redact_mapping(operation.undo),
             }
             for operation in operations
         ],
@@ -78,3 +79,7 @@ def format_context_answer(snapshot: dict) -> str:
         lines.append("Recent changes: none")
 
     return "\n".join(lines)
+
+
+def _redact_mapping(value: dict) -> dict:
+    return {str(key): redact_semantic_text(str(item)) for key, item in value.items()}

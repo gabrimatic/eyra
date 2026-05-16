@@ -441,6 +441,64 @@ class TestWebServerHelpers:
         assert "hasApiKey" in payload["settings"]
         assert "API_KEY" not in json.dumps(payload)
 
+    def test_web_context_api_uses_semantic_history(self):
+        settings = Settings(
+            WEB_UI_HOST="127.0.0.1",
+            WEB_UI_REQUIRE_TOKEN="true",
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+        )
+        runtime = WebAssistantRuntime(settings)
+        runtime._append_protocol_message(
+            {"role": "user", "content": "Read /Users/example/private.txt with token=secret-token"}
+        )
+        runtime._append_protocol_message(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": '{"path": "/Users/example/private.txt", "token": "secret-token"}',
+                        },
+                    }
+                ],
+            }
+        )
+        handler = type(
+            "TestEyraWebHandler",
+            (_EyraWebHandler,),
+            {
+                "settings": settings,
+                "runtime": runtime,
+                "web_session_token": "secret-token",
+                "realtime_tool_token": "rt-secret",
+            },
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            request = urllib.request.Request(base + "/api/context", headers={"X-Eyra-Web-Token": "secret-token"})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                payload = response.read().decode()
+        finally:
+            server.shutdown()
+            server.server_close()
+            runtime.close()
+
+        assert "read_file" in payload
+        assert "arguments" not in payload
+        assert "/Users/example" not in payload
+        assert "secret-token" not in payload
+        assert "~/[user]" in payload
+        assert "[REDACTED]" in payload
+
     def test_web_runtime_capability_question_is_local_not_model_chat(self):
         settings = Settings(USE_MOCK_CLIENT=True, LIVE_LISTENING_ENABLED=False, LIVE_SPEECH_ENABLED=False)
         runtime = WebAssistantRuntime(settings)
@@ -1053,7 +1111,7 @@ class TestWebServerHelpers:
             runtime.close()
 
         assert logs_payload["logs"][0]["message"] == "Web job started."
-        assert artifacts_payload["artifacts"][0]["path"] == "/tmp/web-result.txt"
+        assert artifacts_payload["artifacts"][0]["path"] == "~/[temp]"
         assert clear_payload["cleared"] == 1
 
     def test_web_api_rejects_unauthorized_requests_when_token_required(self):

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from runtime.jobs import DurableJobStore, JobStatus, RiskLevel
+from utils.semantic_history import build_semantic_history
 
 
 class TaskStatus(str, Enum):
@@ -340,7 +341,7 @@ class BackgroundTaskManager:
             normalized_task_spec=task.normalized_task_spec
             or {
                 "compatibility_task": True,
-                "related_context": task.related_context,
+                "related_context": build_semantic_history(task.related_context),
             },
             risk_level=task.risk_level,
             required_capabilities=capabilities,
