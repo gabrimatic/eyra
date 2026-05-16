@@ -466,11 +466,12 @@ class TestMacOperatorTools:
     def test_run_shortcut_requires_approval_and_invokes_shortcuts_cli(self):
         manager = ApprovalManager(ttl_seconds=60)
         tool = RunShortcutTool(approval_manager=manager)
-        pending = _run(tool.execute(name="Resize Image", input_text="hello"))
-        approval_id = pending.content.split("/approve ", 1)[1].split()[0]
-        assert manager.approve(approval_id) is True
 
         with patch("tools.operator.shutil.which", return_value="/usr/bin/shortcuts"):
+            pending = _run(tool.execute(name="Resize Image", input_text="hello"))
+            approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+            assert manager.approve(approval_id) is True
+
             with patch("tools.operator.subprocess.run") as run:
                 run.return_value.returncode = 0
                 run.return_value.stdout = "ok"
