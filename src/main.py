@@ -84,13 +84,13 @@ async def main() -> None:
     preflight = await PreflightManager(settings).run()
 
     if not preflight.backend_reachable:
-        print(f"\n  {RED}Backend is not reachable.{NC} Start your backend and try again.\n")
+        print(f"\n  {RED}AI provider is not ready.{NC} Start Ollama, or run `eyra setup` to choose a provider.\n")
         return
 
     if preflight.models_missing:
         missing = ", ".join(preflight.models_missing)
-        print(f"\n  {YELLOW}Missing models:{NC} {missing}")
-        print("  Run setup.sh or pull them manually.\n")
+        print(f"\n  {YELLOW}Model needs setup:{NC} {missing}")
+        print("  Run `eyra setup` to download a recommended local model or choose another provider.\n")
         return
 
     # Build runtime state from preflight results

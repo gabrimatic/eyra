@@ -2280,9 +2280,9 @@ def speak_local_text(text: str) -> str:
 
 def _web_preflight_problem(preflight: PreflightResult) -> str | None:
     if not preflight.backend_reachable:
-        return "Backend is not reachable. Start your backend and try again."
+        return "AI provider is not ready. Start Ollama, or run `eyra setup` to choose a provider."
     if preflight.models_missing:
-        return "Missing models: " + ", ".join(preflight.models_missing)
+        return "Model needs setup: " + ", ".join(preflight.models_missing) + ". Run `eyra setup` for guided repair."
     return None
 
 

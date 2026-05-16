@@ -283,7 +283,7 @@ def _format_doctor(data: dict[str, Any], ok: bool) -> str:
     lines.append(f"Status: {'ready' if ok else 'needs attention'}")
     lines.append(f"Version: {data['version']['version']} ({data['version']['installSource']})")
     lines.append(f"Python: {data['platform']['python']}")
-    lines.append(f"Backend: {'ready' if preflight.get('backendReachable') else 'not reachable'}")
+    lines.append(f"AI provider: {'ready' if preflight.get('backendReachable') else 'not ready'}")
     missing = preflight.get("modelsMissing") or []
     lines.append(f"Models: {'ready' if not missing else 'missing ' + ', '.join(missing)}")
     wh = preflight.get("localWhisper", {})
@@ -299,6 +299,10 @@ def _format_doctor(data: dict[str, Any], ok: bool) -> str:
     if preflight.get("error"):
         lines.append(f"Error: {preflight['error']}")
     lines.append("")
+    if not preflight.get("backendReachable") or missing:
+        lines.append("Next: run `eyra setup` for guided provider and model setup.")
+    elif voice_enabled and not wh.get("available"):
+        lines.append("Next: install or start Local Whisper, then rerun `eyra doctor`.")
     lines.append("Run `eyra certify` for the release matrix.")
     return "\n".join(lines)
 

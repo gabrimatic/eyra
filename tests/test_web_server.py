@@ -1186,7 +1186,7 @@ class TestWebServerHelpers:
             run_web_server(settings, preflight=preflight)
 
         server.assert_not_called()
-        assert "Backend is not reachable" in capsys.readouterr().out
+        assert "AI provider is not ready" in capsys.readouterr().out
 
     def test_run_web_server_reports_bind_failure_without_traceback(self, capsys):
         from runtime.models import PreflightResult
