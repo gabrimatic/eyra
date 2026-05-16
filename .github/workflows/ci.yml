@@ -5,14 +5,18 @@ on:
     branches: [main]
     paths-ignore:
       - "doc/**"
+      - "internal-docs/**"
       - "README.md"
       - ".github/workflows/docs-pages.yml"
+      - "tests/test_docs_site.py"
   pull_request:
     branches: [main]
     paths-ignore:
       - "doc/**"
+      - "internal-docs/**"
       - "README.md"
       - ".github/workflows/docs-pages.yml"
+      - "tests/test_docs_site.py"
 
 permissions:
   contents: read
@@ -66,14 +70,3 @@ jobs:
 
       - name: Check shell scripts
         run: bash -n setup.sh install.sh
-
-      - name: Set up Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-
-      - name: Validate Mintlify docs
-        env:
-          MINTLIFY_TELEMETRY_DISABLED: "1"
-        working-directory: doc
-        run: npx -y mint@4.2.565 validate --disable-openapi

@@ -35,7 +35,9 @@ def test_docs_pages_workflow_is_scoped_and_static_exported():
     workflow = ROOT.joinpath(".github/workflows/docs-pages.yml").read_text()
     assert "ubuntu-latest" in workflow
     assert '"doc/**"' in workflow
+    assert '"tests/test_docs_site.py"' in workflow
     assert "pull_request:" in workflow
+    assert "python -m pytest -q tests/test_docs_site.py" in workflow
     assert "mint@4.2.565 validate" in workflow
     assert "mint@4.2.565 broken-links" in workflow
     assert "mint@4.2.565 export" in workflow
@@ -51,7 +53,9 @@ def test_docs_pages_workflow_is_scoped_and_static_exported():
 
 def test_full_ci_ignores_docs_only_changes():
     workflow = ROOT.joinpath(".github/workflows/ci.yml").read_text()
-    assert 'working-directory: doc' in workflow
     assert '"doc/**"' in workflow
+    assert '"internal-docs/**"' in workflow
     assert '"README.md"' in workflow
+    assert '"tests/test_docs_site.py"' in workflow
     assert '"docs/**"' not in workflow
+    assert "mint@4.2.565" not in workflow

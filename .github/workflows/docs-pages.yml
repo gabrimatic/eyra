@@ -8,6 +8,7 @@ on:
       - "install.sh"
       - "README.md"
       - ".github/workflows/docs-pages.yml"
+      - "tests/test_docs_site.py"
   pull_request:
     branches: [main]
     paths:
@@ -15,6 +16,7 @@ on:
       - "install.sh"
       - "README.md"
       - ".github/workflows/docs-pages.yml"
+      - "tests/test_docs_site.py"
   workflow_dispatch:
 
 permissions:
@@ -39,6 +41,11 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "24"
+
+      - name: Run docs contract tests
+        run: |
+          python -m pip install --disable-pip-version-check --quiet pytest
+          python -m pytest -q tests/test_docs_site.py
 
       - name: Validate docs
         env:
