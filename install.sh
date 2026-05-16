@@ -413,6 +413,7 @@ fi
 echo ""
 echo -e "${GREEN}${BOLD}Eyra installed${NC}"
 echo "Start: eyra"
+echo "Useful first prompts: eyra examples"
 echo "Setup or repair: eyra setup"
 echo "Support report: eyra doctor"
 echo "Update: eyra update"

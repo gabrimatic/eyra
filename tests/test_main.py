@@ -18,6 +18,7 @@ from runtime.cli import (
     _uninstall,
     _update_guidance,
     _version_info,
+    cli,
 )
 from utils.settings import Settings
 
@@ -192,3 +193,13 @@ class TestCliSupportCommands:
         assert existing.read_text() == "MODEL=keep-me\n"
         assert result.data["preservedEnv"] is True
         assert _paths()["env"] == str(existing)
+
+    def test_examples_command_shows_setup_and_use_cases(self, capsys):
+        exit_code = cli(["examples"])
+
+        output = capsys.readouterr().out
+        assert exit_code == 0
+        assert "Eyra examples" in output
+        assert "eyra setup" in output
+        assert "What would leave my machine?" in output
+        assert "Plain requests are fine" in output

@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Guided setup now speaks in plain, respectful language, offers safe local dependency help for Ollama and Local Whisper, starts local services when possible, and downloads the recommended Ollama model when a user does not already have one.
 - The release installer now verifies app commands first, keeps Eyra installed when optional runtime checks need attention, and points users to `eyra setup` and `eyra doctor` for repair instead of rolling back a usable install.
 - Install and setup docs now lead with the guided path, separate normal use from source development, and document the new installer prompt and strict-verification controls.
+- `eyra examples` and `/examples` now show useful first prompts, local workflows, voice controls, and optional surfaces without requiring users to know the command map first.
 
 ### Fixed
 

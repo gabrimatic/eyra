@@ -160,6 +160,7 @@ def render_help_card():
         ("/mode MODE ", "fast|balanced|best"),
         ("/status    ", "Show session info"),
         ("/route last", "Show last routing trace"),
+        ("/examples ", "Show useful first prompts"),
         ("/tasks     ", "Show active and recent tasks"),
         ("/task ID   ", "Show task details"),
         ("/cancel ID ", "Cancel a task or all"),

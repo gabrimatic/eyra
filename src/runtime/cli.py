@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from runtime.examples import render_examples
 from runtime.preflight import PreflightManager
 from utils.settings import Settings
 
@@ -35,6 +36,7 @@ def cli(argv: list[str] | None = None) -> int:
     subcommands = parser.add_subparsers(dest="command")
 
     subcommands.add_parser("web", help="Start the local Web UI.")
+    subcommands.add_parser("examples", help="Show useful first prompts and local workflows.")
 
     doctor = subcommands.add_parser("doctor", help="Check install, local runtime, and optional surfaces.")
     doctor.add_argument("--json", action="store_true", help="Print machine-readable support diagnostics.")
@@ -77,6 +79,8 @@ def cli(argv: list[str] | None = None) -> int:
 
         run()
         return 0
+    if args.command == "examples":
+        return _emit(CommandResult(True, render_examples(), {}), json_output=False)
     if args.command == "doctor":
         return _emit(_run_async(_doctor()), json_output=args.json)
     if args.command == "setup":

@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from runtime.live_session import _asr_phrase_variants
+from runtime.examples import render_examples
+from runtime.live_session import _COMMANDS, _asr_phrase_variants
 from runtime.models import LiveRuntimeState, PreflightResult, RuntimeStatus
 from runtime.speech_controller import SpeechController
 
@@ -24,6 +25,19 @@ class TestHandsFreeTranscriptMatching:
         assert "show status" in variants
         assert "status show" in variants
         assert "show status show status" in variants
+
+
+class TestExamplesSurface:
+    def test_examples_command_is_available_in_live_session(self):
+        assert "/examples" in _COMMANDS
+
+    def test_examples_text_uses_plain_local_workflows(self):
+        text = render_examples()
+
+        assert "Eyra examples" in text
+        assert "Help me check if setup is ready." in text
+        assert "Move the latest downloaded file to Documents." in text
+        assert "Plain requests are fine" in text
 
 
 # ---------------------------------------------------------------------------

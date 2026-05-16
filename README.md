@@ -53,6 +53,7 @@ Useful install and support commands:
 ```bash
 eyra setup
 eyra doctor
+eyra examples
 eyra doctor --json
 eyra certify
 eyra web

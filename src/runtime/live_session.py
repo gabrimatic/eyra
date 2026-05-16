@@ -22,6 +22,7 @@ from runtime.connectors.registry import ConnectorRegistry, format_connector_deta
 from runtime.connectors.types import ConnectorJobSpec
 from runtime.context import build_context_snapshot, format_context_answer
 from runtime.dictation import DictationState, dictation_command, parse_dictation_target
+from runtime.examples import render_examples
 from runtime.intents import (
     extract_pdf_path,
     needs_screen_context,
@@ -67,7 +68,7 @@ logger = logging.getLogger(__name__)
 _COMMANDS = {
     "/voice", "/voice-diagnose", "/voice-test", "/mute", "/unmute",
     "/goal", "/status", "/quit", "/clear", "/route", "/handsfree",
-    "/mode", "/help", "/tasks", "/task", "/cancel", "/pause", "/resume",
+    "/mode", "/help", "/examples", "/tasks", "/task", "/cancel", "/pause", "/resume",
     "/approvals", "/approve", "/reject", "/operations", "/capabilities", "/context", "/triggers", "/trigger",
     "/connectors", "/connector",
 }
@@ -616,6 +617,10 @@ class LiveSession:
 
         if command == "/help":
             render_help_card()
+            return True
+
+        if command == "/examples":
+            print(self._indent(render_examples()))
             return True
 
         print(f"  Unknown command: {command}")
