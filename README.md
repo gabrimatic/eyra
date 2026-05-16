@@ -494,7 +494,7 @@ Universal connectors use JSON like:
 }
 ```
 
-Supported connector types are `cli`, `mcp`, `http_local`, `http_remote`, `python_module`, `browser_agent`, and `coding_agent`. `python_module` requires `CONNECTORS_ALLOW_PYTHON_MODULE=true`. Remote connectors require `CONNECTORS_ALLOW_REMOTE=true`; other network-capable connectors require either `NETWORK_TOOLS_ENABLED=true` or the explicit remote connector opt-in. CLI-like connectors must use static argv. Eyra refuses shell interpolation, model-filled command strings, cwd outside the connector sandbox, missing privacy declarations, missing risk tier, invalid timeout/output caps, and privacy/capability mismatches.
+Supported connector types are `cli`, `mcp`, `http_local`, `http_remote`, `python_module`, `browser_agent`, and `coding_agent`. `python_module` requires `CONNECTORS_ALLOW_PYTHON_MODULE=true`. Remote connectors require `CONNECTORS_ALLOW_REMOTE=true`; other network-capable connectors require either `NETWORK_TOOLS_ENABLED=true` or the explicit remote connector opt-in. CLI-like connectors must use static argv. Eyra refuses shell interpolation, model-filled command strings, cwd outside the connector sandbox, missing privacy declarations, missing risk tier, invalid timeout/output caps, and privacy/capability mismatches. `file_contents`, `pdf`, `pdf_text`, `screenshot`, and `clipboard` are reserved connector data classes and fail manifest validation until explicit safe payload support exists.
 
 Connector CLI checks:
 

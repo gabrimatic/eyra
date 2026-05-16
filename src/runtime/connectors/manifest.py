@@ -220,6 +220,12 @@ def _validate_privacy_data_classes(
     can_control_ui: bool,
 ) -> None:
     sent = set(privacy.data_sent)
+    unsupported = sorted(sent.intersection(_FORBIDDEN_DATA_CLASSES))
+    if unsupported:
+        raise ValueError(
+            f"privacy.dataSent declares unsupported data class '{unsupported[0]}'; "
+            "the current connector runner does not support sending it yet"
+        )
     file_data = {"selected_files", "file_contents", "pdf", "pdf_text"}
     if sent.intersection(file_data) and not can_read_files:
         raise ValueError("privacy declares file data but canReadFiles=false")

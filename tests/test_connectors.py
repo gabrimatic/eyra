@@ -378,7 +378,7 @@ def test_runner_refuses_task_when_privacy_omits_task(tmp_path):
     assert "task is not declared" in result.output
 
 
-def test_runner_refuses_unsupported_declared_privacy_payloads(tmp_path):
+def test_manifest_rejects_unsupported_declared_privacy_payloads(tmp_path):
     data_classes = [
         ("file_contents", {"canReadFiles": True}),
         ("pdf", {"canReadFiles": True}),
@@ -403,30 +403,12 @@ def test_runner_refuses_unsupported_declared_privacy_payloads(tmp_path):
                 )
             )
         )
-        approvals = ApprovalManager()
-        registry = ConnectorRegistry.from_settings(_settings(tmp_path), approvals=approvals)
-        registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
-            "openclawnew",
-            AcceptanceState.ACCEPTED,
-            "accepted",
-        )
 
-        result = _run(registry.run(ConnectorJobSpec(connector_id="openclawnew", task="hello", cwd=str(tmp_path))))
-        if result.status == "approval_required":
-            approvals.approve(result.approval_id)
-            result = _run(
-                registry.run(
-                    ConnectorJobSpec(
-                        connector_id="openclawnew",
-                        task="hello",
-                        cwd=str(tmp_path),
-                        approval_id=result.approval_id,
-                    )
-                )
-            )
+        result = parse_connector_config(json.loads(config_path.read_text()), settings=_settings(tmp_path))
 
-        assert result.status == "blocked"
-        assert data_class in result.output
+        assert result.status == "invalid"
+        assert data_class in result.reason
+        assert "current connector runner does not support" in result.reason
 
 
 def test_registry_redacts_connector_destination(tmp_path):

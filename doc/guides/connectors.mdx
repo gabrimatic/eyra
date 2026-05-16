@@ -92,7 +92,9 @@ Connector ids must match `^[a-z][a-z0-9_-]{1,63}$`. Commands and acceptance heal
 
 Approval is required when the manifest requests it, when the connector can mutate files, control UI, run shell, leave the machine, or when the risk tier is medium or higher.
 
-`privacy.dataSent` is also the runtime payload allowlist. Eyra always sends only `connectorId` and `jobId` automatically. It sends `task` only when `task` is declared, `cwd` only when `cwd` is declared, and selected paths only when `selected_files` is declared and every selected file resolves inside `CONNECTORS_ALLOWED_ROOTS`. File contents, screenshots, clipboard text, PDF text, and full paths are never sent unless a future runner explicitly supports that data class and the connector declares it.
+`privacy.dataSent` is also the runtime payload allowlist. Eyra always sends only `connectorId` and `jobId` automatically. It sends `task` only when `task` is declared, `cwd` only when `cwd` is declared, and selected paths only when `selected_files` is declared and every selected file resolves inside `CONNECTORS_ALLOWED_ROOTS`.
+
+`file_contents`, `pdf`, `pdf_text`, `screenshot`, and `clipboard` are reserved data classes. Manifest validation rejects them until the connector runner has explicit safe payload support for each class.
 
 ## Acceptance
 
