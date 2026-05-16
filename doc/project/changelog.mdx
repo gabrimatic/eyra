@@ -5,15 +5,11 @@ description: "Where to track shipped and unreleased Eyra changes."
 
 Eyra's source changelog lives in `CHANGELOG.md`.
 
-Current package metadata reports version `4.2.1`. Current `main` contains the 4.2.0 routing, voice, installer, and connector work plus the 4.2.1 certification fix.
+Current package metadata reports version `4.2.1`. Current `main` is staged for 4.2.1 release approval, with no tag or publish step completed yet.
 
-Current unreleased work improves guided setup for normal users: respectful plain-language setup text, optional Ollama and Local Whisper install help, safer service startup, recommended-model download when no local model exists, hidden cloud API-key entry, installer repair guidance, and `.env` preservation for the newer connector, task-store, voice, OCR, and hands-free settings.
+The 4.2.1 line collects the post-4.2.0 release-candidate work: guided setup and installer repair UX, docs under `doc/` with guarded Pages deployment, Homebrew formula mock test mode, connector privacy enforcement, text-format tool-call recovery hardening, semantic/protocol runtime history isolation, semantic-to-model worker context adaptation, and settled-file handling for file-appears triggers.
 
-Current `main` also contains 4.2.0 packaging work: a custom-tap Homebrew formula scaffold, `install.sh`, CLI support commands, source-checkout-only `.env` precedence, shell rc cleanup in setup/uninstall, installer safety checks, and matching certification rows.
-
-Current `main` also contains universal connector workers: `CONNECTORS_*` settings, manifest validation, static transports for CLI/MCP/local HTTP/remote HTTP/browser-agent/coding-agent/guarded Python-module workers, acceptance states, connector terminal commands, connector CLI validation, authenticated Web connector APIs, approval-gated file mutation, cancellation, output caps, secret redaction, sandboxed working directories, job logs/artifacts, route trace metadata, and connector certification rows.
-
-The 4.2.1 patch fixes synthetic microphone certification: `--synthetic-mic` now starts and stops `fake-mic` for virtual microphone checks instead of only labeling the result.
+`## Unreleased` in `CHANGELOG.md` should stay empty or say there are no unreleased changes while 4.2.1 is being prepared for approval.
 
 ## Read the changelog
 

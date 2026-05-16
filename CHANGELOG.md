@@ -8,23 +8,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- No unreleased changes.
+
+## [4.2.1] - 2026-05-17
+
+### Added
+
+- Docs now live under `doc/` with Mintlify validation, broken-link checks, static export, and a guarded GitHub Pages workflow; deployment only uploads/publishes when `EYRA_DEPLOY_PAGES=true`.
+- Release-preparation evidence now includes local source, wheel, installer, formula, Web, certification, and secret-scan checks for the `4.2.1` line.
+- `eyra examples` and `/examples` now show useful first prompts, local workflows, voice controls, and optional surfaces without requiring users to know the command map first.
+
 ### Changed
 
+- Package, lockfile, docs, and formula metadata now target `4.2.1`.
 - Guided setup now speaks in plain, respectful language, offers safe local dependency help for Ollama and Local Whisper, starts local services when possible, and downloads the recommended Ollama model when a user does not already have one.
 - The release installer now verifies app commands first, keeps Eyra installed when optional runtime checks need attention, and points users to `eyra setup` and `eyra doctor` for repair instead of rolling back a usable install.
 - Install and setup docs now lead with the guided path, separate normal use from source development, and document the new installer prompt and strict-verification controls.
-- `eyra examples` and `/examples` now show useful first prompts, local workflows, voice controls, and optional surfaces without requiring users to know the command map first.
-
-### Fixed
-
-- Provider setup now preserves the newer voice, task-store, connector, external-agent, MCP, OCR, and hands-free settings when rewriting `.env`.
-- Cloud API keys entered during guided setup are hidden while typing.
-
-## [4.2.1] - 2026-05-15
+- The Homebrew formula scaffold now stays in mock typed-only test mode, so formula tests do not require Ollama, Local Whisper, model downloads, microphone access, screen permissions, or network access.
+- Connector manifests now reject reserved data classes until explicit safe payload support exists for each class.
+- Connector jobs now enforce declared privacy payload classes before task execution.
+- Text-format tool-call recovery now keeps local-model compatibility while validating recovered calls before execution and refusing unknown, denied, malformed, or unsafe calls.
+- Runtime history is split into raw in-memory `ProtocolHistory` for immediate model/tool execution and typed redacted `SemanticHistory` for user-visible, durable, Web, route, job, connector, and diagnostic surfaces.
+- Semantic history can now be adapted back into valid chat-protocol context through a safe semantic-to-model adapter, so worker model calls do not receive semantic-only fields or raw protocol payloads.
 
 ### Fixed
 
 - `scripts/certify_voice_to_computer.py --synthetic-mic` now starts and stops `fake-mic` itself, so virtual microphone certification actually feeds loopback audio before voice diagnostics and synthetic barge-in checks.
+- Provider setup now preserves the newer voice, task-store, connector, external-agent, MCP, OCR, and hands-free settings when rewriting `.env`.
+- Cloud API keys entered during guided setup are hidden while typing.
+- File-appears triggers now wait for the file to settle before moving it, preventing empty or partially written destination files during downloads, sync, and generated-file workflows.
+- Web and terminal context surfaces now redact home paths, temp paths, API keys, bearer tokens, clipboard results, PDF text, connector payloads, screenshot/image payloads, and raw tool arguments.
+- Route traces, connector traces, job/task related context, `/context`, and Web `/api/context` stay prompt-independent and do not expose raw protocol messages.
+
+### Known limitations
+
+- Physical barge-in depends on the target Mac, microphone, speaker, and selected input route; certify it with `/voice-diagnose` and `/voice-test` on the release machine before claiming attended physical interruption readiness.
+- OpenAI Realtime voice remains optional and is not live-certified unless tested with a real key and explicit Realtime settings.
+- Connector payload data classes `file_contents`, `pdf`, `pdf_text`, `screenshot`, and `clipboard` are reserved and intentionally unsupported for connector payloads in this release.
+- Browser, OS automation, MCP, external-agent, and connector surfaces remain disabled by default and require separate enabled-surface validation before use.
+- Docs deployment is guarded by `EYRA_DEPLOY_PAGES=true`; validation can pass without publishing Pages.
 
 ## [4.2.0] - 2026-05-15
 
