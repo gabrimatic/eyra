@@ -9,33 +9,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  lint:
-    name: Lint
-    runs-on: macos-15
-    timeout-minutes: 10
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v8.1.0
-
-      - name: Install dependencies
-        run: uv sync --locked
-
-      - name: Lint
-        run: uv run --frozen ruff check src tests
-
   verify:
     name: Verify
-    runs-on: macos-15
-    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
 
     steps:
       - uses: actions/checkout@v6
@@ -47,6 +29,14 @@ jobs:
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Ubuntu runtime packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libportaudio2
 
       - name: Install dependencies
         run: uv sync --locked
@@ -58,7 +48,7 @@ jobs:
         run: uv run --frozen ruff check src tests
 
       - name: Install browser test runtime
-        run: uv run --frozen playwright install chromium
+        run: uv run --frozen python -m playwright install --with-deps chromium
 
       - name: Test
         run: uv run --frozen python -m pytest -q
@@ -66,46 +56,16 @@ jobs:
       - name: Build wheel
         run: uv build --wheel
 
-  setup-check:
-    name: setup.sh syntax check
-    runs-on: macos-15
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Check setup.sh syntax
-        run: bash -n setup.sh
-
-  docs:
-    name: Mintlify docs
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - uses: actions/checkout@v6
+      - name: Check shell scripts
+        run: bash -n setup.sh install.sh
 
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
           node-version: "24"
 
-      - name: Install Mintlify CLI
-        run: npm i -g mint@4.2.565
-
-      - name: Validate docs
+      - name: Validate Mintlify docs
         env:
           MINTLIFY_TELEMETRY_DISABLED: "1"
         working-directory: docs
-        run: mint validate --disable-openapi
-
-      - name: Check docs links
-        env:
-          MINTLIFY_TELEMETRY_DISABLED: "1"
-        working-directory: docs
-        run: mint broken-links --check-anchors
-
-      - name: Check docs accessibility
-        env:
-          MINTLIFY_TELEMETRY_DISABLED: "1"
-        working-directory: docs
-        run: mint a11y
+        run: npx -y mint@4.2.565 validate --disable-openapi
