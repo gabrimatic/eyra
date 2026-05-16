@@ -36,6 +36,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `scripts/certify_voice_to_computer.py --synthetic-mic` now starts and stops `fake-mic` itself, so virtual microphone certification actually feeds loopback audio before voice diagnostics and synthetic barge-in checks.
 - Provider setup now preserves the newer voice, task-store, connector, external-agent, MCP, OCR, and hands-free settings when rewriting `.env`.
 - Cloud API keys entered during guided setup are hidden while typing.
+- The release installer now rejects unsafe install directories before dependency repair or service startup checks run.
 - File-appears triggers now wait for the file to settle before moving it, preventing empty or partially written destination files during downloads, sync, and generated-file workflows.
 - Web and terminal context surfaces now redact home paths, temp paths, API keys, bearer tokens, clipboard results, PDF text, connector payloads, screenshot/image payloads, and raw tool arguments.
 - Route traces, connector traces, job/task related context, `/context`, and Web `/api/context` stay prompt-independent and do not expose raw protocol messages.

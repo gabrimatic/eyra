@@ -145,6 +145,10 @@ if ! command -v curl &>/dev/null; then
     fail "curl is required."
 fi
 
+log_step "Checking install location"
+require_safe_install_dir "$INSTALL_DIR"
+log_ok "$INSTALL_DIR"
+
 if ! command -v brew &>/dev/null; then
     log_warn "Homebrew is not installed."
     log_info "Install it from https://brew.sh for the easiest Ollama and Local Whisper setup."
@@ -282,7 +286,6 @@ if [[ -z "$package_kind" ]]; then
 fi
 
 log_step "Installing into ${INSTALL_DIR}"
-require_safe_install_dir "$INSTALL_DIR"
 staging="$tmp_dir/staging"
 mkdir -p "$staging"
 case "$package_kind" in
