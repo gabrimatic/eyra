@@ -2,12 +2,12 @@ class Eyra < Formula
   desc "Local-first voice coordinator for macOS terminals"
   homepage "https://github.com/gabrimatic/eyra"
 
-  # Custom tap scaffold: tracks master until the formula is switched to a
+  # Custom tap scaffold: tracks main until the formula is switched to a
   # tagged release asset and pinned sha256.
-  url "https://github.com/gabrimatic/eyra.git", branch: "master"
+  url "https://github.com/gabrimatic/eyra.git", branch: "main"
   version "4.2.1"
   license "PolyForm-Noncommercial-1.0.0"
-  head "https://github.com/gabrimatic/eyra.git", branch: "master"
+  head "https://github.com/gabrimatic/eyra.git", branch: "main"
 
   depends_on "python@3.11"
   depends_on "uv"
@@ -58,7 +58,7 @@ class Eyra < Formula
         eyra setup
         eyra doctor
 
-      This formula currently installs from the master branch. Switch it to a
+      This formula currently installs from the main branch. Switch it to a
       tagged release asset and sha256 before using it as a stable public tap.
 
       Voice requires Local Whisper:

@@ -52,7 +52,7 @@ eyra-connectors = "runtime.connectors.cli:main"
 Homepage = "https://github.com/gabrimatic/eyra"
 Repository = "https://github.com/gabrimatic/eyra"
 "Bug Tracker" = "https://github.com/gabrimatic/eyra/issues"
-Changelog = "https://github.com/gabrimatic/eyra/blob/master/CHANGELOG.md"
+Changelog = "https://github.com/gabrimatic/eyra/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
