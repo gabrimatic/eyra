@@ -20,6 +20,9 @@ def test_readme_points_to_published_docs_not_local_sources():
     assert "raw.githubusercontent.com/gabrimatic/eyra/main/install.sh" not in readme
     assert "](doc/" not in readme
     assert "](docs/" not in readme
+    assert "doc/" not in readme
+    assert "docs/" not in readme
+    assert "internal-docs" not in readme
 
 
 def test_installation_docs_use_short_pages_installer_url():

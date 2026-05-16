@@ -562,8 +562,6 @@ Data leaves your machine only when you choose a remote AI provider, enable Realt
 eyra/
 ├── pyproject.toml
 ├── setup.sh
-├── doc/                          # Mintlify documentation site
-├── internal-docs/                # Source notes that are not part of the public docs site
 ├── src/
 │   ├── main.py                     # Entry point, preflight, live session launch
 │   ├── runtime/
