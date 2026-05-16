@@ -1,11 +1,16 @@
 """Tests for local trigger persistence."""
 
+import asyncio
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from runtime.triggers import TriggerStatus, TriggerStore
+from runtime.triggers import TriggerStatus, TriggerStore, wait_for_file_ready
+
+
+def _run(coro):
+    return asyncio.run(coro)
 
 
 def test_trigger_store_persists_file_move_trigger(tmp_path):
@@ -30,6 +35,24 @@ def test_trigger_store_persists_file_move_trigger(tmp_path):
     assert restored.action["type"] == "file.move"
     assert second.list_triggers()[0].id == trigger.id
     second.close()
+
+
+def test_wait_for_file_ready_waits_for_stable_size(tmp_path):
+    path = tmp_path / "download.txt"
+    path.write_text("")
+
+    async def run():
+        async def finish_write():
+            await asyncio.sleep(0.015)
+            path.write_text("ready")
+
+        writer = asyncio.create_task(finish_write())
+        ready = await wait_for_file_ready(path, settle_seconds=0.02, attempts=5)
+        await writer
+        return ready
+
+    assert _run(run()) is True
+    assert path.read_text() == "ready"
 
 
 def test_trigger_store_sets_schema_version_and_common_indexes(tmp_path):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import threading
@@ -22,6 +23,22 @@ class TriggerStatus(str, Enum):
     CANCELLED = "cancelled"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+async def wait_for_file_ready(path: str | Path, *, settle_seconds: float = 0.05, attempts: int = 3) -> bool:
+    """Wait until a newly appeared file has a stable size and mtime."""
+    target = Path(path).expanduser()
+    previous: tuple[int, int] | None = None
+    for _ in range(max(1, attempts)):
+        if not target.exists():
+            return False
+        stat = target.stat()
+        current = (stat.st_size, stat.st_mtime_ns)
+        if current == previous:
+            return True
+        previous = current
+        await asyncio.sleep(max(0.01, settle_seconds))
+    return target.exists()
 
 
 @dataclass

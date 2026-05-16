@@ -52,7 +52,7 @@ from runtime.status_presenter import (
 )
 from runtime.tasks import BackgroundTask, BackgroundTaskManager, TaskStatus
 from runtime.tooling import build_tool_registry
-from runtime.triggers import TriggerStatus, TriggerStore
+from runtime.triggers import TriggerStatus, TriggerStore, wait_for_file_ready
 from runtime.vision import analyze_screen
 from runtime.voice_diagnostics import VoiceDiagnostics
 from tools.approval import ApprovalManager
@@ -1515,6 +1515,9 @@ class LiveSession:
                     await asyncio.sleep(interval_seconds)
                     continue
                 if Path(source).expanduser().exists():
+                    if not await wait_for_file_ready(source, settle_seconds=interval_seconds):
+                        await asyncio.sleep(interval_seconds)
+                        continue
                     move_result = await self._tool_registry.execute(
                         "move_path",
                         json.dumps({"source": source, "destination": destination, "overwrite": False}),

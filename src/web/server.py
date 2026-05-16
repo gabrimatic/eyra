@@ -52,7 +52,7 @@ from runtime.routing.types import RequestEnvelope, RequestSource, RoutingDecisio
 from runtime.shared import RuntimeSharedState
 from runtime.tasks import BackgroundTask, BackgroundTaskManager, TaskStatus
 from runtime.tooling import build_tool_registry
-from runtime.triggers import TriggerStatus, TriggerStore
+from runtime.triggers import TriggerStatus, TriggerStore, wait_for_file_ready
 from runtime.vision import analyze_screen, vision_model_name
 from tools.approval import ApprovalManager
 from tools.browser import BrowserSession
@@ -850,6 +850,9 @@ class WebAssistantRuntime:
                     await asyncio.sleep(interval_seconds)
                     continue
                 if Path(source).expanduser().exists():
+                    if not await wait_for_file_ready(source, settle_seconds=interval_seconds):
+                        await asyncio.sleep(interval_seconds)
+                        continue
                     moved = await self.registry.execute(
                         "move_path",
                         json.dumps({"source": source, "destination": destination, "overwrite": False}),
