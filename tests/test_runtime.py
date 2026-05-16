@@ -612,6 +612,49 @@ class TestLiveSessionCommands:
         assert "/Users/example" not in rendered
         assert "secret-token" not in rendered
 
+    def test_screen_worker_fallback_uses_semantic_context_not_raw_protocol(self):
+        from runtime.tasks import BackgroundTask
+
+        session = self._make_session()
+        seen = {}
+        session.state.append_protocol_message(
+            {"role": "user", "content": "Look at /Users/example/private.txt with token=secret-token"}
+        )
+        session.state.append_protocol_message(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {
+                            "name": "take_screenshot",
+                            "arguments": '{"path": "/Users/example/private.txt", "token": "secret-token"}',
+                        },
+                    }
+                ],
+            }
+        )
+        task = BackgroundTask(title="Screen", original_request="what is on screen")
+
+        async def fake_analyze_screen(**kwargs):
+            seen["conversation_messages"] = kwargs["conversation_messages"]
+            return "screen summary"
+
+        with patch("runtime.live_session.analyze_screen", fake_analyze_screen):
+            result = _run(session._run_direct_screen_task(task, "what is on screen?"))
+
+        rendered = str(seen["conversation_messages"])
+        assert result == "screen summary"
+        assert all(set(message) == {"role", "content"} for message in seen["conversation_messages"])
+        assert "take_screenshot" in rendered
+        assert "privacy" not in rendered
+        assert "toolCalls" not in rendered
+        assert "metadata" not in rendered
+        assert "arguments" not in rendered
+        assert "/Users/example" not in rendered
+        assert "secret-token" not in rendered
+
     def test_unknown_command_returns_true(self):
         session = self._make_session()
         result = _run(session._handle_command("/notacommand"))

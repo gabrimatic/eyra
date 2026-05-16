@@ -3,6 +3,8 @@
 import asyncio
 import os
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -53,6 +55,23 @@ def test_wait_for_file_ready_waits_for_stable_size(tmp_path):
 
     assert _run(run()) is True
     assert path.read_text() == "ready"
+
+
+def test_wait_for_file_ready_rejects_file_that_keeps_changing(tmp_path, monkeypatch):
+    path = tmp_path / "download.txt"
+    path.write_text("0")
+    real_stat = Path.stat
+    calls = {"count": 0}
+
+    def changing_stat(self):
+        if self == path:
+            calls["count"] += 1
+            return SimpleNamespace(st_size=calls["count"], st_mtime_ns=calls["count"])
+        return real_stat(self)
+
+    monkeypatch.setattr(Path, "stat", changing_stat)
+
+    assert _run(wait_for_file_ready(path, settle_seconds=0.01, attempts=4)) is False
 
 
 def test_trigger_store_sets_schema_version_and_common_indexes(tmp_path):

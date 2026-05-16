@@ -2303,7 +2303,8 @@ class LiveSession:
             settings=self.settings,
             prompt=text_content,
             conversation_messages=semantic_history_to_protocol_context(task.related_context)
-            or list(self.state.conversation_messages[-6:]),
+            or semantic_history_to_protocol_context(self.state.semantic_history.recent(6))
+            or [{"role": "user", "content": text_content}],
             current_goal=self.state.current_goal,
             model_semaphore=self._model_semaphore,
             preflight=self.preflight,

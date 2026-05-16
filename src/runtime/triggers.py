@@ -38,7 +38,7 @@ async def wait_for_file_ready(path: str | Path, *, settle_seconds: float = 0.05,
             return True
         previous = current
         await asyncio.sleep(max(0.01, settle_seconds))
-    return target.exists()
+    return False
 
 
 @dataclass
