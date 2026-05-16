@@ -3,11 +3,26 @@ title: "Troubleshooting"
 description: "Diagnose startup, model, voice, Web UI, filesystem, and tool issues."
 ---
 
-Start with `/status`, `/capabilities`, and `/context`. They show the current runtime state, enabled control surfaces, privacy boundary, recent jobs, and recent local changes.
+Start with:
+
+```bash
+eyra doctor
+eyra setup
+```
+
+`doctor` shows what is ready and what needs attention. `setup` repairs local settings and provider selection. Inside a live session, `/status`, `/capabilities`, and `/context` show runtime state, enabled control surfaces, privacy boundary, recent jobs, and recent local changes.
 
 ## Backend does not start
 
 Symptom: Eyra stops during preflight with a backend or model message.
+
+Run:
+
+```bash
+eyra setup
+```
+
+Choose Ollama for the private local default, or choose another provider if that is what you want. If Ollama has no model yet, Eyra offers to download the recommended local model.
 
 Check the provider:
 
@@ -33,7 +48,13 @@ Use deterministic controller actions for time, screen, PDF, task commands, conte
 
 ## Voice is unavailable
 
-Run:
+From the shell:
+
+```bash
+eyra doctor
+```
+
+Inside Eyra:
 
 ```text
 /voice-diagnose

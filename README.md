@@ -14,7 +14,19 @@ Cloud providers, network-backed tools, full OS command tools, MCP bridges, unive
 
 ## Quick start
 
-Runtime: macOS on Apple Silicon, Python 3.11+, Homebrew, and an OpenAI-compatible AI provider. Default provider: [Ollama](https://ollama.com) at `localhost:11434`.
+Runtime: macOS on Apple Silicon. The easiest path is the guided installer. It installs Eyra, checks the local AI and voice pieces, and tells you exactly what still needs attention.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gabrimatic/eyra/master/install.sh | bash
+```
+
+Then start Eyra:
+
+```bash
+eyra
+```
+
+If you already have the source checkout, use the source setup path:
 
 ```bash
 git clone https://github.com/gabrimatic/eyra.git
@@ -22,15 +34,15 @@ cd eyra
 chmod +x setup.sh && ./setup.sh
 ```
 
-Setup creates `.env`, installs dependencies, checks your backend and models, checks Local Whisper for voice, and registers the `eyra` command.
+Setup creates local settings, installs dependencies, offers to install or start [Ollama](https://ollama.com) and Local Whisper when it can, downloads a recommended local model when needed, checks voice, and registers the `eyra` command. It keeps the local-first default: Ollama at `localhost:11434`, Local Whisper for speech and microphone input, no telemetry, no silent network tools.
 
-Run from the repo:
+Run from the repo if your shell has not picked up `~/.local/bin` yet:
 
 ```bash
 uv run python src/main.py
 ```
 
-After your shell reloads `~/.local/bin`, the short command works too:
+After setup, the short command works too:
 
 ```bash
 eyra
@@ -52,7 +64,7 @@ eyra uninstall --dry-run
 
 `eyra setup` preserves an existing `.env`. Source checkouts use the repo `.env`; installed tool environments use `~/.config/eyra/.env`, and the repo `.env` still wins when you run from an Eyra source checkout. Eyra does not read unrelated project `.env` files from arbitrary current directories. `eyra update` only explains the correct update path for the detected install source; it does not pull, overwrite, or delete user data. `eyra uninstall` removes Eyra-created command shims and preserves `.env`, jobs, triggers, logs, and the operation ledger unless you explicitly choose data removal.
 
-For CI or temp-home smoke tests, use `./setup.sh --non-interactive`. Non-interactive setup does not start Local Whisper or other services; it reports what is missing and leaves service startup to the user.
+For CI or temp-home smoke tests, use `./setup.sh --non-interactive`. Non-interactive setup does not prompt, does not start Local Whisper or other services, and reports what is missing.
 
 Eyra runs preflight checks, then enters a live session:
 
@@ -83,9 +95,9 @@ WEB_UI_ENABLED=true eyra
 
 That shared Web frontend uses the terminal-owned approvals, jobs, task events, trigger state, tools, browser session, and operation history. Running `eyra-web` or `uv run python -m web.server` directly still starts a standalone Web runtime and reports that mode in `/api/health`.
 
-### Release install paths
+### Install paths
 
-The source setup path above remains the supported developer path. The `v4.2.1` release can also be installed from the GitHub release path when you have access to the private repository.
+The guided installer is the easiest path for normal use. The source setup path is best when you want to change Eyra itself. The `v4.2.1` release can also be installed from the GitHub release path when you have access to the private repository.
 
 GitHub Release installer:
 
@@ -94,6 +106,8 @@ curl -fsSL https://raw.githubusercontent.com/gabrimatic/eyra/master/install.sh |
 ```
 
 If this repository is private, that command needs authenticated GitHub access, for example `GITHUB_TOKEN` in the environment. It is not a public install path until the repository or release asset is public.
+
+The installer verifies the app commands first, then runs `eyra doctor` and `eyra certify` as readiness checks. Missing local AI, microphone permission, or voice setup no longer makes the app install roll back; Eyra names the next step clearly and keeps the installed command available for repair with `eyra setup` or `eyra doctor`.
 
 Custom Homebrew tap path:
 

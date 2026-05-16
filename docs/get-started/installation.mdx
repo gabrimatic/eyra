@@ -3,9 +3,39 @@ title: "Installation"
 description: "Install Eyra, configure the local runtime, and start the terminal session."
 ---
 
-Runtime: macOS, Python 3.11+, Homebrew, `uv`, and an OpenAI-compatible provider. Preferred setup: Ollama at `localhost:11434` and Local Whisper for speech.
+Runtime: macOS on Apple Silicon. The easiest path is the guided installer. It installs Eyra, checks local AI and voice, and leaves you with plain next steps if one piece still needs attention.
+
+## Guided install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gabrimatic/eyra/master/install.sh | bash
+```
+
+If the repository is private, set `GITHUB_TOKEN` first or install from a checked-out source tree.
+
+The installer:
+
+- Checks this Mac.
+- Installs `uv` when missing.
+- Offers to install Ollama when Homebrew is available.
+- Offers to install Local Whisper for speech and microphone support.
+- Starts local services when it can.
+- Runs first-run setup.
+- Verifies the app commands.
+- Runs `eyra doctor` and `eyra certify` as readiness checks.
+
+If doctor or certification needs attention, the install is still available. Run:
+
+```bash
+eyra doctor
+eyra setup
+```
+
+That gives the next repair step without making you reinstall.
 
 ## Source checkout
+
+Use this path when you want to change Eyra itself:
 
 ```bash
 git clone https://github.com/gabrimatic/eyra.git
@@ -13,7 +43,7 @@ cd eyra
 chmod +x setup.sh && ./setup.sh
 ```
 
-`setup.sh` creates `.env`, installs dependencies, checks the backend and models, checks Local Whisper when voice is enabled, and registers the `eyra` command. It preserves an existing `.env`, removes older shell lines ending in `# eyra`, then adds one current `~/.local/bin` PATH line.
+`setup.sh` creates local settings, installs dependencies, offers to install or start local AI and voice helpers when safe, checks the backend and model, checks Local Whisper when voice is enabled, and registers the `eyra` command. It preserves an existing `.env`, removes older shell lines ending in `# eyra`, then adds one current `~/.local/bin` PATH line.
 
 Run from source:
 
@@ -27,15 +57,7 @@ After your shell sees `~/.local/bin`, run:
 eyra
 ```
 
-## Installer script
-
-`install.sh` installs a release archive into a managed directory and runs non-interactive setup. For `v4.2.1`, use authenticated GitHub access while the repository is private.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/gabrimatic/eyra/master/install.sh | bash
-```
-
-Safety checks:
+## Installer safety
 
 - Requires macOS on Apple Silicon.
 - Requires Python 3.11+; installs `python@3.11` through Homebrew when possible.
@@ -43,7 +65,8 @@ Safety checks:
 - Allows install directories only under `~/.local/share/eyra/`, `~/Applications/`, or `/opt/`.
 - Refuses `/`, `$HOME`, and `~/.local` as install targets.
 - Preserves existing installs by moving them to a timestamped backup.
-- Rolls back the install directory if first-run setup fails.
+- Rolls back the install directory if app command setup fails.
+- Keeps the install when optional runtime checks need attention, so `eyra doctor` can guide repair.
 
 Supported overrides:
 
@@ -52,6 +75,18 @@ EYRA_VERSION=v4.2.1 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
 ```
 
 Private repositories require `GITHUB_TOKEN`. The installer reads GitHub release JSON, prefers release assets with checksum files, and refuses unverified tag-archive fallback unless you explicitly set `EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE=true`. For testing from a checked-out tree, use `EYRA_SOURCE_PATH=/path/to/eyra ./install.sh`; the installed app still writes user config to `~/.config/eyra/.env`, not into the app directory.
+
+Disable installer prompts with:
+
+```bash
+EYRA_INSTALL_NO_PROMPT=true ./install.sh
+```
+
+Strict installer verification is available when you want install-time certification to fail the whole install:
+
+```bash
+EYRA_INSTALL_STRICT_VERIFY=true ./install.sh
+```
 
 `eyra doctor --json` reports installer-managed app copies as `managed-install`.
 

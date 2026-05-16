@@ -8,7 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
-No changes yet.
+### Changed
+
+- Guided setup now speaks in plain, respectful language, offers safe local dependency help for Ollama and Local Whisper, starts local services when possible, and downloads the recommended Ollama model when a user does not already have one.
+- The release installer now verifies app commands first, keeps Eyra installed when optional runtime checks need attention, and points users to `eyra setup` and `eyra doctor` for repair instead of rolling back a usable install.
+- Install and setup docs now lead with the guided path, separate normal use from source development, and document the new installer prompt and strict-verification controls.
+
+### Fixed
+
+- Provider setup now preserves the newer voice, task-store, connector, external-agent, MCP, OCR, and hands-free settings when rewriting `.env`.
+- Cloud API keys entered during guided setup are hidden while typing.
 
 ## [4.2.1] - 2026-05-15
 

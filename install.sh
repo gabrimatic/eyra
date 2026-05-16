@@ -16,12 +16,45 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
 BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
 log_step() { echo -e "\n${CYAN}▶${NC} $1"; }
 log_ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
 log_warn() { echo -e "  ${YELLOW}⚠${NC} $1"; }
+log_info() { echo -e "  ${DIM}›${NC} $1"; }
 fail()     { echo -e "\n  ${RED}✗${NC} $1\n"; exit 1; }
+is_interactive() { [[ -r /dev/tty && -t 1 && "${EYRA_INSTALL_NO_PROMPT:-false}" != "true" ]]; }
+ask_yes_no() {
+    local prompt="$1"
+    local default="${2:-yes}"
+    local suffix="Y/n"
+    [[ "$default" == "no" ]] && suffix="y/N"
+    local answer
+    while true; do
+        read -r -p "  $prompt [$suffix]: " answer </dev/tty || return 1
+        answer="$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')"
+        if [[ -z "$answer" ]]; then
+            [[ "$default" == "yes" ]]
+            return
+        fi
+        case "$answer" in
+            y|yes) return 0 ;;
+            n|no) return 1 ;;
+            *) log_warn "Please type yes or no." ;;
+        esac
+    done
+}
+wait_for_ollama() {
+    local tries="${1:-15}"
+    for _ in $(seq 1 "$tries"); do
+        if curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
 
 tmp_dir=""
 cleanup() {
@@ -99,8 +132,9 @@ require_safe_install_dir() {
 }
 
 echo ""
-echo -e "${BOLD}Eyra installer${NC}"
+echo -e "${BOLD}Eyra guided installer${NC}"
 echo "Local-first voice coordinator for macOS."
+echo -e "${DIM}It installs Eyra first, then shows clear next steps for local AI and voice.${NC}"
 
 log_step "Checking this Mac"
 [[ "$(uname -s)" == "Darwin" ]] || fail "Eyra currently supports macOS."
@@ -112,7 +146,8 @@ if ! command -v curl &>/dev/null; then
 fi
 
 if ! command -v brew &>/dev/null; then
-    log_warn "Homebrew is not installed. Install it from https://brew.sh for Ollama and Local Whisper guidance."
+    log_warn "Homebrew is not installed."
+    log_info "Install it from https://brew.sh for the easiest Ollama and Local Whisper setup."
 else
     log_ok "Homebrew"
 fi
@@ -136,19 +171,42 @@ command -v uv &>/dev/null || fail "uv is still not on PATH. Open a new terminal 
 log_ok "uv"
 
 if ! command -v ollama &>/dev/null; then
-    log_warn "Ollama is not installed. Install it from https://ollama.com for the default local backend."
+    if command -v brew &>/dev/null && is_interactive && ask_yes_no "Install Ollama now for the default private local model path?" "yes"; then
+        log_info "Installing Ollama with Homebrew..."
+        brew install --cask ollama || log_warn "Ollama install did not finish. You can install it later from https://ollama.com."
+    else
+        log_warn "Ollama is not installed. Install it from https://ollama.com for the default local backend."
+    fi
 else
     log_ok "Ollama"
 fi
 
 if ! command -v wh &>/dev/null; then
-    if command -v brew &>/dev/null; then
+    if command -v brew &>/dev/null && is_interactive && ask_yes_no "Install Local Whisper now for speech and microphone support?" "yes"; then
+        log_info "Installing Local Whisper..."
+        brew tap gabrimatic/local-whisper 2>/dev/null || true
+        brew install gabrimatic/local-whisper/local-whisper || log_warn "Local Whisper install did not finish. Voice can be repaired later with: brew tap gabrimatic/local-whisper && brew install local-whisper"
+    elif command -v brew &>/dev/null; then
         log_warn "Local Whisper is missing. Install later with: brew tap gabrimatic/local-whisper && brew install local-whisper"
     else
         log_warn "Local Whisper is missing. Voice will stay unavailable until it is installed."
     fi
 else
     log_ok "Local Whisper"
+fi
+
+if command -v ollama &>/dev/null && ! curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1; then
+    log_info "Starting Ollama..."
+    open -a Ollama >/dev/null 2>&1 || true
+    if ! wait_for_ollama 8; then
+        (ollama serve >/dev/null 2>&1 &)
+        wait_for_ollama 10 || log_warn "Ollama is installed but not running. Open the Ollama app, then run: eyra setup"
+    fi
+fi
+
+if command -v wh &>/dev/null && ! wh status 2>&1 | grep -qi running; then
+    log_info "Starting Local Whisper..."
+    wh start 2>/dev/null || brew services start gabrimatic/local-whisper/local-whisper 2>/dev/null || true
 fi
 
 tmp_dir="$(mktemp -d)"
@@ -307,9 +365,16 @@ LAUNCHER
 done
 
 log_step "Running first-run setup"
-if ! "$BIN_DIR/eyra" setup --non-interactive; then
-    rollback_install
-    exit 1
+if is_interactive; then
+    if ! "$BIN_DIR/eyra" setup </dev/tty; then
+        rollback_install
+        exit 1
+    fi
+else
+    if ! "$BIN_DIR/eyra" setup --non-interactive; then
+        rollback_install
+        exit 1
+    fi
 fi
 
 log_step "Verifying installed commands"
@@ -320,18 +385,37 @@ if [[ "$VERIFY_WITH_MOCK" == "true" ]]; then
 fi
 if ! (
     "$BIN_DIR/eyra" version >/dev/null
-    env "${verify_env[@]}" "$BIN_DIR/eyra" doctor --json >/dev/null
-    env "${verify_env[@]}" "$BIN_DIR/eyra" certify --json >/dev/null
+    "$BIN_DIR/eyra" paths --json >/dev/null
+    "$BIN_DIR/eyra" setup --non-interactive --json >/dev/null
 ); then
     rollback_install
     exit 1
 fi
 log_ok "Installed command shims in $BIN_DIR"
 
+if env "${verify_env[@]}" "$BIN_DIR/eyra" doctor --json >/dev/null; then
+    log_ok "Runtime doctor passed"
+else
+    log_warn "Runtime doctor needs attention. Run: eyra doctor"
+fi
+
+if [[ "${EYRA_INSTALL_STRICT_VERIFY:-false}" == "true" ]]; then
+    if ! env "${verify_env[@]}" "$BIN_DIR/eyra" certify --json >/dev/null; then
+        rollback_install
+        fail "Strict install verification failed during certification."
+    fi
+elif env "${verify_env[@]}" "$BIN_DIR/eyra" certify --json >/dev/null; then
+    log_ok "Certification passed"
+else
+    log_warn "Certification needs attention. Run: eyra certify after local AI and voice are ready."
+fi
+
 echo ""
 echo -e "${GREEN}${BOLD}Eyra installed${NC}"
 echo "Start: eyra"
-echo "Support report: eyra doctor --json"
+echo "Setup or repair: eyra setup"
+echo "Support report: eyra doctor"
 echo "Update: eyra update"
 echo "Uninstall shims: eyra uninstall"
+echo -e "${DIM}If doctor says something needs attention, it is the next setup item to finish, not a failed install.${NC}"
 echo "User config and data stay in ~/.config/eyra, ~/.local/share/eyra, and ~/Library/Logs/Eyra."

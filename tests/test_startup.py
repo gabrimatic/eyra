@@ -16,9 +16,25 @@ class TestStartupSelector:
             "\n".join(
                 [
                     "OS_TOOLS_ENABLED=true",
+                    "SCREEN_OCR_COMMAND=/usr/local/bin/ocr",
                     "AGENT_TOOLS_ENABLED=true",
+                    "EXTERNAL_AGENT_TOOLS_ENABLED=true",
+                    "EXTERNAL_AGENT_CONFIG_PATH=~/agents.json",
+                    "CONNECTORS_ENABLED=true",
+                    "CONNECTORS_CONFIG_PATH=~/connectors.json",
+                    "CONNECTORS_ALLOWED_ROOTS=~/Documents",
+                    "CONNECTORS_TIMEOUT_SECONDS=123",
+                    "CONNECTORS_OUTPUT_CAP_BYTES=456",
+                    "CONNECTORS_ALLOW_REMOTE=true",
+                    "CONNECTORS_ALLOW_PYTHON_MODULE=true",
                     "MCP_TOOLS_ENABLED=true",
                     "MCP_CONFIG_PATH=~/mcp.json",
+                    "VOICE_MAX_DURATION_SECONDS=222",
+                    "HANDS_FREE_MODE=true",
+                    "JOB_STORE_PATH=~/jobs.sqlite3",
+                    "TRIGGER_STORE_PATH=~/triggers.sqlite3",
+                    "TRIGGER_CHECK_INTERVAL_SECONDS=2",
+                    "TRIGGER_TIMEOUT_SECONDS=99",
                     "WEB_UI_ENABLED=true",
                     "WEB_UI_HOST=0.0.0.0",
                     "WEB_UI_PORT=9999",
@@ -42,8 +58,24 @@ class TestStartupSelector:
 
         content = env_path.read_text()
         assert "OS_TOOLS_ENABLED=true" in content
+        assert "SCREEN_OCR_COMMAND=/usr/local/bin/ocr" in content
         assert "AGENT_TOOLS_ENABLED=true" in content
+        assert "EXTERNAL_AGENT_TOOLS_ENABLED=true" in content
+        assert "EXTERNAL_AGENT_CONFIG_PATH=~/agents.json" in content
+        assert "CONNECTORS_ENABLED=true" in content
+        assert "CONNECTORS_CONFIG_PATH=~/connectors.json" in content
+        assert "CONNECTORS_ALLOWED_ROOTS=~/Documents" in content
+        assert "CONNECTORS_TIMEOUT_SECONDS=123" in content
+        assert "CONNECTORS_OUTPUT_CAP_BYTES=456" in content
+        assert "CONNECTORS_ALLOW_REMOTE=true" in content
+        assert "CONNECTORS_ALLOW_PYTHON_MODULE=true" in content
         assert "MCP_TOOLS_ENABLED=true" in content
+        assert "VOICE_MAX_DURATION_SECONDS=222" in content
+        assert "HANDS_FREE_MODE=true" in content
+        assert "JOB_STORE_PATH=~/jobs.sqlite3" in content
+        assert "TRIGGER_STORE_PATH=~/triggers.sqlite3" in content
+        assert "TRIGGER_CHECK_INTERVAL_SECONDS=2" in content
+        assert "TRIGGER_TIMEOUT_SECONDS=99" in content
         assert "WEB_UI_ENABLED=true" in content
         assert "WEB_UI_REQUIRE_TOKEN=auto" in content
         assert "REALTIME_TOOLS_ENABLED=true" in content

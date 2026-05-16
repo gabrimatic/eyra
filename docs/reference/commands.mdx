@@ -3,7 +3,26 @@ title: "Commands"
 description: "Terminal commands handled locally by Eyra."
 ---
 
-Commands are controller-owned. They are intercepted before model routing and never sent to the model as ordinary chat.
+Eyra has app commands you run from your shell and session commands you type inside the live assistant.
+
+## App commands
+
+| Command | Behavior |
+| --- | --- |
+| `eyra` | Start the live terminal session |
+| `eyra setup` | Create or repair local settings with guided provider setup |
+| `eyra doctor` | Check local AI, models, voice, microphone, screen capture, paths, and optional surfaces |
+| `eyra doctor --json` | Print the same support report in machine-readable form |
+| `eyra certify` | Run the local certification matrix |
+| `eyra web` | Start the local Web UI |
+| `eyra version` | Show version, install source, commit, and Python version |
+| `eyra paths` | Show config, data, log, job, trigger, and command paths |
+| `eyra update` | Explain the right update command for this install source |
+| `eyra uninstall --dry-run` | Show what uninstall would remove while preserving local data |
+
+## Session commands
+
+Session commands are controller-owned. They are intercepted before model routing and never sent to the model as ordinary chat.
 
 ## Session
 

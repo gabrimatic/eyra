@@ -30,6 +30,37 @@ log_ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
 log_warn() { echo -e "  ${YELLOW}⚠${NC} $1"; }
 log_info() { echo -e "  ${DIM}›${NC} $1"; }
 fail()     { echo -e "\n  ${RED}✗${NC} $1\n"; exit 1; }
+is_interactive() { [[ "$NON_INTERACTIVE" == "false" && -r /dev/tty && -t 1 ]]; }
+ask_yes_no() {
+    local prompt="$1"
+    local default="${2:-yes}"
+    local suffix="Y/n"
+    [[ "$default" == "no" ]] && suffix="y/N"
+    local answer
+    while true; do
+        read -r -p "  $prompt [$suffix]: " answer </dev/tty || return 1
+        answer="$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')"
+        if [[ -z "$answer" ]]; then
+            [[ "$default" == "yes" ]]
+            return
+        fi
+        case "$answer" in
+            y|yes) return 0 ;;
+            n|no) return 1 ;;
+            *) log_warn "Please type yes or no." ;;
+        esac
+    done
+}
+wait_for_ollama() {
+    local tries="${1:-15}"
+    for _ in $(seq 1 "$tries"); do
+        if curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
 
 trap 'echo ""; echo -e "  ${DIM}Setup cancelled.${NC}"; echo ""; exit 130' INT
 
@@ -50,9 +81,17 @@ log_ok "macOS $(sw_vers -productVersion) on Apple Silicon"
 
 if command -v brew &>/dev/null; then
     log_ok "Homebrew"
+elif is_interactive && ask_yes_no "Install Homebrew now? macOS may ask for your password." "yes"; then
+    log_info "Opening the official Homebrew installer..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || fail "Homebrew install did not finish."
+    if [[ -x /opt/homebrew/bin/brew ]]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    fi
+    command -v brew &>/dev/null || fail "Homebrew installed, but it is not on PATH yet. Open a new terminal and rerun setup."
+    log_ok "Homebrew"
 else
     log_warn "Homebrew is not installed."
-    log_info "Install it from https://brew.sh, then rerun setup if you want automatic Ollama/Local Whisper guidance."
+    log_info "Install it from https://brew.sh, then rerun setup for the easiest local AI and voice setup."
 fi
 
 if python3 -c "import sys; assert sys.version_info >= (3, 11)" 2>/dev/null; then
@@ -80,17 +119,38 @@ cd "$EYRA_DIR"
 uv sync -q
 log_ok "Python environment ready"
 
-log_step "Preparing local configuration"
-if "$NON_INTERACTIVE"; then
-    uv run eyra setup --non-interactive
+log_step "Checking default local model provider"
+if command -v ollama &>/dev/null; then
+    log_ok "Ollama command found"
+elif command -v brew &>/dev/null && is_interactive && ask_yes_no "Install Ollama now for the default private local model path?" "yes"; then
+    log_info "Installing Ollama with Homebrew..."
+    brew install --cask ollama || fail "Ollama install did not finish."
+    log_ok "Ollama installed"
 else
-    uv run eyra setup
+    log_warn "Ollama is not installed."
+    log_info "Install it from https://ollama.com if you want the default local backend."
+fi
+
+if command -v ollama &>/dev/null; then
+    if curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1; then
+        log_ok "Ollama is running"
+    elif [[ "$START_SERVICES" == "true" ]]; then
+        log_info "Starting Ollama..."
+        open -a Ollama >/dev/null 2>&1 || true
+        if ! wait_for_ollama 8; then
+            (ollama serve >/dev/null 2>&1 &)
+            wait_for_ollama 10 || log_warn "Ollama is installed but not running. Open the Ollama app, then rerun: eyra setup"
+        fi
+        curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1 && log_ok "Ollama is running"
+    else
+        log_warn "Ollama is installed but not running. Open the Ollama app when you are ready to use the local model."
+    fi
 fi
 
 log_step "Checking local voice dependencies"
 if command -v wh &>/dev/null; then
     log_ok "Local Whisper command found"
-elif command -v brew &>/dev/null; then
+elif command -v brew &>/dev/null && { ! is_interactive || ask_yes_no "Install Local Whisper now for speech and microphone support?" "yes"; }; then
     log_info "Installing Local Whisper from the existing tap..."
     brew tap gabrimatic/local-whisper 2>/dev/null || true
     brew install gabrimatic/local-whisper/local-whisper || log_warn "Local Whisper install did not complete. Voice can be repaired later with: brew tap gabrimatic/local-whisper && brew install local-whisper"
@@ -114,11 +174,11 @@ if command -v wh &>/dev/null; then
     fi
 fi
 
-log_step "Checking default local model provider"
-if command -v ollama &>/dev/null; then
-    log_ok "Ollama command found"
+log_step "Preparing local configuration"
+if "$NON_INTERACTIVE"; then
+    uv run eyra setup --non-interactive
 else
-    log_warn "Ollama is not installed. Install it from https://ollama.com if you want the default local backend."
+    uv run eyra setup </dev/tty
 fi
 
 log_step "Registering commands"
@@ -166,7 +226,8 @@ echo -e "${GREEN}${BOLD}Setup complete${NC}"
 echo ""
 echo -e "  Start Eyra: ${BOLD}eyra${NC}"
 echo -e "  Open the Web UI: ${BOLD}eyra web${NC}"
-echo -e "  Check support diagnostics: ${BOLD}eyra doctor --json${NC}"
+echo -e "  Check support diagnostics: ${BOLD}eyra doctor${NC}"
 echo -e "  Run certification: ${BOLD}eyra certify${NC}"
 echo ""
+echo -e "  ${DIM}If doctor says something needs attention, nothing is broken; it is the next setup item to finish.${NC}"
 echo -e "  ${DIM}Eyra preserved existing .env, jobs, triggers, logs, and local data.${NC}"

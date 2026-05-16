@@ -5,6 +5,8 @@ description: "Configure providers, models, voice, tools, Web UI, Realtime voice,
 
 `.env` is the single source of truth for an Eyra runtime. `Settings.load_from_env()` reads every setting with defaults, validates booleans and numeric ranges, and feeds the runtime, Web UI, routing, tools, and voice stack.
 
+Most users should start with `eyra setup` and `eyra doctor`. Edit `.env` directly only when you want a specific provider, model, sandbox root, or optional capability gate.
+
 ## File precedence
 
 Installed Eyra reads:

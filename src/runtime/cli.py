@@ -331,11 +331,17 @@ def _setup(*, non_interactive: bool) -> CommandResult:
         maybe_run_startup_selector()
     data = {"envPath": str(env_path), "createdEnv": created, "preservedEnv": preserved, "paths": _paths()}
     if created:
-        message = "Created .env from .env.example. Run `eyra doctor` next."
+        message = (
+            f"Eyra setup wrote your local settings file at {env_path}.\n"
+            "Next: run `eyra doctor` to check local AI, voice, microphone, and optional features."
+        )
     elif preserved:
-        message = "Existing .env preserved. Run `eyra doctor` next."
+        message = (
+            f"Eyra setup found existing settings at {env_path} and kept them.\n"
+            "Next: run `eyra doctor` if you want a plain-language readiness check."
+        )
     else:
-        message = "No .env.example was found; no config was written. Run `eyra doctor` to inspect the install."
+        message = "No .env.example was found, so no settings were written. Run `eyra doctor` to inspect the install."
     return CommandResult(True, message, data)
 
 

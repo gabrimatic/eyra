@@ -1191,7 +1191,7 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
     source_row(
         "install_setup_idempotent",
         lambda: (
-            require("Existing .env preserved" in (root / "src/runtime/cli.py").read_text(), "setup path does not report .env preservation")
+            require("found existing settings" in (root / "src/runtime/cli.py").read_text(), "setup path does not report settings preservation")
             or "Setup command preserves existing .env."
         ),
     )

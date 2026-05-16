@@ -1,5 +1,6 @@
 """Provider + model selector shown when the backend is not configured or reachable."""
 
+import getpass
 import os
 import shutil
 import subprocess
@@ -19,6 +20,7 @@ _SKIP = (
 
 _ENV = Path(__file__).parent.parent.parent / ".env"
 _LMS_BUNDLED = "/Applications/LM Studio.app/Contents/Resources/app/.webpack/lms"
+_RECOMMENDED_LOCAL_MODEL = os.getenv("EYRA_RECOMMENDED_MODEL", "gemma4:e4b")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -102,6 +104,23 @@ def _pick(options: list[str], allow_manual: bool = False) -> str:
             sys.exit(0)
 
 
+def _ask_yes_no(prompt: str, *, default: bool = True) -> bool:
+    suffix = "Y/n" if default else "y/N"
+    while True:
+        try:
+            raw = input(f"  {prompt} [{suffix}]: ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            sys.exit(0)
+        if not raw:
+            return default
+        if raw in {"y", "yes"}:
+            return True
+        if raw in {"n", "no"}:
+            return False
+        _fail("Please type yes or no.")
+
+
 def _provider_label(url: str) -> str:
     if "11434" in url:
         return "Ollama"
@@ -122,13 +141,18 @@ def _write_env(base_url: str, api_key: str, model: str):
         "API_BASE_URL", "API_KEY", "USE_MOCK_CLIENT", "MODEL", "VISION_MODEL", "SIMPLE_MODEL", "MODERATE_MODEL",
         "AUTO_PULL_MODELS", "LIVE_LISTENING_ENABLED", "LIVE_SPEECH_ENABLED", "SPEECH_COOLDOWN_MS",
         "VOICE_INPUT_DEVICE", "VOICE_SAMPLE_RATE", "VOICE_DEBUG_RECORD_SECONDS", "VOICE_DIAGNOSTIC_SAVE_AUDIO",
-        "VOICE_SILENCE_MS", "VOICE_VAD_THRESHOLD", "NETWORK_TOOLS_ENABLED", "OS_TOOLS_ENABLED",
-        "AGENT_TOOLS_ENABLED", "MCP_TOOLS_ENABLED", "MCP_CONFIG_PATH", "WEB_UI_ENABLED", "WEB_UI_HOST",
+        "VOICE_SILENCE_MS", "VOICE_VAD_THRESHOLD", "VOICE_MAX_DURATION_SECONDS", "HANDS_FREE_MODE",
+        "NETWORK_TOOLS_ENABLED", "OS_TOOLS_ENABLED", "SCREEN_OCR_COMMAND",
+        "AGENT_TOOLS_ENABLED", "EXTERNAL_AGENT_TOOLS_ENABLED", "EXTERNAL_AGENT_CONFIG_PATH",
+        "CONNECTORS_ENABLED", "CONNECTORS_CONFIG_PATH", "CONNECTORS_ALLOWED_ROOTS", "CONNECTORS_TIMEOUT_SECONDS",
+        "CONNECTORS_OUTPUT_CAP_BYTES", "CONNECTORS_ALLOW_REMOTE", "CONNECTORS_ALLOW_PYTHON_MODULE",
+        "MCP_TOOLS_ENABLED", "MCP_CONFIG_PATH", "WEB_UI_ENABLED", "WEB_UI_HOST",
         "WEB_UI_PORT", "WEB_UI_TOKEN", "WEB_UI_REQUIRE_TOKEN", "WEB_UI_MAX_REQUEST_BYTES",
         "REALTIME_VOICE_ENABLED", "REALTIME_MODEL", "REALTIME_VOICE", "OPENAI_API_KEY",
         "REALTIME_TOOLS_ENABLED", "REALTIME_ALLOWED_TOOLS",
         "BACKGROUND_TASKS_ENABLED", "MAX_BACKGROUND_TASKS", "WORKER_MODEL", "TASK_TIMEOUT_SECONDS",
         "MAX_WORKER_TOOL_STEPS", "TOOL_TIMEOUT_SECONDS", "MODEL_CONCURRENCY", "TASK_STATUS_UPDATES",
+        "JOB_STORE_PATH", "TRIGGER_STORE_PATH", "TRIGGER_CHECK_INTERVAL_SECONDS", "TRIGGER_TIMEOUT_SECONDS",
         "FILESYSTEM_ALLOWED_PATHS", "FILESYSTEM_DEFAULT_PATH", "COMPLEXITY_ROUTING_ENABLED", "ROUTING_DEBUG",
     }
     extra: list[str] = []
@@ -146,6 +170,8 @@ def _write_env(base_url: str, api_key: str, model: str):
                     "# Optional Realtime voice",
                     "# Background tasks",
                     "# Optional OS, agent, MCP, and network tools",
+                    "# Optional connectors",
+                    "# Optional MCP bridge",
                     "# Filesystem sandbox",
                     "# Optional network tools",
                     "# Routing",
@@ -180,6 +206,8 @@ def _write_env(base_url: str, api_key: str, model: str):
         f"VOICE_DIAGNOSTIC_SAVE_AUDIO={existing.get('VOICE_DIAGNOSTIC_SAVE_AUDIO', 'false')}",
         f"VOICE_SILENCE_MS={existing.get('VOICE_SILENCE_MS', '1500')}",
         f"VOICE_VAD_THRESHOLD={existing.get('VOICE_VAD_THRESHOLD', '0.15')}",
+        f"VOICE_MAX_DURATION_SECONDS={existing.get('VOICE_MAX_DURATION_SECONDS', '300')}",
+        f"HANDS_FREE_MODE={existing.get('HANDS_FREE_MODE', 'false')}",
         "",
         "# Background tasks",
         f"BACKGROUND_TASKS_ENABLED={existing.get('BACKGROUND_TASKS_ENABLED', 'true')}",
@@ -190,6 +218,10 @@ def _write_env(base_url: str, api_key: str, model: str):
         f"TOOL_TIMEOUT_SECONDS={existing.get('TOOL_TIMEOUT_SECONDS', '30')}",
         f"MODEL_CONCURRENCY={existing.get('MODEL_CONCURRENCY', '1')}",
         f"TASK_STATUS_UPDATES={existing.get('TASK_STATUS_UPDATES', 'true')}",
+        f"JOB_STORE_PATH={existing.get('JOB_STORE_PATH', '~/.local/share/eyra/jobs.sqlite3')}",
+        f"TRIGGER_STORE_PATH={existing.get('TRIGGER_STORE_PATH', '~/.local/share/eyra/triggers.sqlite3')}",
+        f"TRIGGER_CHECK_INTERVAL_SECONDS={existing.get('TRIGGER_CHECK_INTERVAL_SECONDS', '0.5')}",
+        f"TRIGGER_TIMEOUT_SECONDS={existing.get('TRIGGER_TIMEOUT_SECONDS', '300')}",
         "",
         "# Optional Web UI",
         f"WEB_UI_ENABLED={existing.get('WEB_UI_ENABLED', 'false')}",
@@ -210,7 +242,21 @@ def _write_env(base_url: str, api_key: str, model: str):
         "# Optional OS, agent, MCP, and network tools",
         f"NETWORK_TOOLS_ENABLED={existing.get('NETWORK_TOOLS_ENABLED', 'false')}",
         f"OS_TOOLS_ENABLED={existing.get('OS_TOOLS_ENABLED', 'false')}",
+        f"SCREEN_OCR_COMMAND={existing.get('SCREEN_OCR_COMMAND', '')}",
         f"AGENT_TOOLS_ENABLED={existing.get('AGENT_TOOLS_ENABLED', 'false')}",
+        f"EXTERNAL_AGENT_TOOLS_ENABLED={existing.get('EXTERNAL_AGENT_TOOLS_ENABLED', existing.get('AGENT_TOOLS_ENABLED', 'false'))}",
+        f"EXTERNAL_AGENT_CONFIG_PATH={existing.get('EXTERNAL_AGENT_CONFIG_PATH', '~/.config/eyra/agents.json')}",
+        "",
+        "# Optional connectors",
+        f"CONNECTORS_ENABLED={existing.get('CONNECTORS_ENABLED', 'false')}",
+        f"CONNECTORS_CONFIG_PATH={existing.get('CONNECTORS_CONFIG_PATH', '~/.config/eyra/connectors.json')}",
+        f"CONNECTORS_ALLOWED_ROOTS={existing.get('CONNECTORS_ALLOWED_ROOTS', '')}",
+        f"CONNECTORS_TIMEOUT_SECONDS={existing.get('CONNECTORS_TIMEOUT_SECONDS', '600')}",
+        f"CONNECTORS_OUTPUT_CAP_BYTES={existing.get('CONNECTORS_OUTPUT_CAP_BYTES', '32768')}",
+        f"CONNECTORS_ALLOW_REMOTE={existing.get('CONNECTORS_ALLOW_REMOTE', 'false')}",
+        f"CONNECTORS_ALLOW_PYTHON_MODULE={existing.get('CONNECTORS_ALLOW_PYTHON_MODULE', 'false')}",
+        "",
+        "# Optional MCP bridge",
         f"MCP_TOOLS_ENABLED={existing.get('MCP_TOOLS_ENABLED', 'false')}",
         f"MCP_CONFIG_PATH={existing.get('MCP_CONFIG_PATH', '~/.config/eyra/mcp.json')}",
         "",
@@ -254,9 +300,14 @@ def _setup_ollama() -> tuple[str, str, str]:
     models = [line.split()[0] for line in result.stdout.splitlines()[1:] if line.strip()]
 
     if not models:
-        model = input("  No local models. Pull which model? (e.g. gemma4:e4b): ").strip()
-        if not model:
-            raise RuntimeError("Model name required.")
+        print()
+        _info(f"No local model is installed yet. Eyra can download {_RECOMMENDED_LOCAL_MODEL} for you.")
+        if _ask_yes_no(f"Download {_RECOMMENDED_LOCAL_MODEL} now?", default=True):
+            model = _RECOMMENDED_LOCAL_MODEL
+        else:
+            model = input("  Model name to download: ").strip()
+            if not model:
+                raise RuntimeError("Model name required.")
         print(f"  {DIM}› Pulling {model}... (this may take a while){NC}")
         subprocess.run(["ollama", "pull", model], check=True, timeout=600)
         _ok(f"Model: {model}")
@@ -266,11 +317,20 @@ def _setup_ollama() -> tuple[str, str, str]:
         _ok(f"Model: {models[0]}")
         return base, api_key, models[0]
 
-    print(f"\n  {BOLD}Local models:{NC}\n")
-    pull_opt = "Pull a new model"
-    choice = _pick(models + [pull_opt])
-    if choice == pull_opt:
-        model = input("  Model name (e.g. gemma4:e4b): ").strip()
+    print(f"\n  {BOLD}Choose the local model Eyra should use:{NC}\n")
+    options = models.copy()
+    recommended_opt = ""
+    if _RECOMMENDED_LOCAL_MODEL not in models:
+        recommended_opt = f"Download recommended model ({_RECOMMENDED_LOCAL_MODEL})"
+        options.insert(0, recommended_opt)
+    pull_opt = "Download a different model"
+    choice = _pick(options + [pull_opt])
+    if choice == recommended_opt:
+        model = _RECOMMENDED_LOCAL_MODEL
+        print(f"  {DIM}› Pulling {model}... (this may take a while){NC}")
+        subprocess.run(["ollama", "pull", model], check=True, timeout=600)
+    elif choice == pull_opt:
+        model = input("  Model name: ").strip()
         if not model:
             raise RuntimeError("Model name required.")
         print(f"  {DIM}› Pulling {model}... (this may take a while){NC}")
@@ -323,7 +383,7 @@ def _setup_lmstudio() -> tuple[str, str, str]:
 
 def _setup_cloud(base_url: str, key_hint: str) -> tuple[str, str, str]:
     print(f"\n  {DIM}›{NC} Get your API key at: {key_hint}")
-    api_key = input("  API key: ").strip()
+    api_key = getpass.getpass("  API key (hidden while you type): ").strip()
     if not api_key:
         raise RuntimeError("API key required.")
 
@@ -403,12 +463,13 @@ def maybe_run_startup_selector() -> bool:
         else:
             lms_tag = f"  {DIM}installed{NC}"
 
-    print(f"\n{CYAN}▶{NC} Choose your AI provider\n")
-    print(f"  {BOLD} 1{NC}  Ollama          {DIM}Local, free{NC}{ollama_tag}")
-    print(f"  {BOLD} 2{NC}  LM Studio       {DIM}Local, free{NC}{lms_tag}")
-    print(f"  {BOLD} 3{NC}  OpenRouter      {DIM}Cloud, free tier, 100+ models{NC}")
-    print(f"  {BOLD} 4{NC}  Groq            {DIM}Cloud, free tier, fast inference{NC}")
-    print(f"  {BOLD} 5{NC}  OpenAI          {DIM}Cloud, paid, reference quality{NC}")
+    print(f"\n{CYAN}▶{NC} Choose where Eyra should think\n")
+    print(f"  {DIM}Local options keep prompts on this Mac. Cloud options send model requests to that provider.{NC}\n")
+    print(f"  {BOLD} 1{NC}  Ollama          {DIM}Local, private by default, recommended{NC}{ollama_tag}")
+    print(f"  {BOLD} 2{NC}  LM Studio       {DIM}Local, private by default{NC}{lms_tag}")
+    print(f"  {BOLD} 3{NC}  OpenRouter      {DIM}Cloud, uses your API key{NC}")
+    print(f"  {BOLD} 4{NC}  Groq            {DIM}Cloud, uses your API key{NC}")
+    print(f"  {BOLD} 5{NC}  OpenAI          {DIM}Cloud, uses your API key{NC}")
     print(f"  {BOLD} 6{NC}  Custom          {DIM}Any OpenAI-compatible endpoint{NC}")
 
     if env_url and env_model:
@@ -416,7 +477,7 @@ def maybe_run_startup_selector() -> bool:
     print()
 
     try:
-        choice = input("  Provider [1-6]: ").strip()
+        choice = input("  Provider [1-6, Enter for Ollama]: ").strip() or "1"
     except (KeyboardInterrupt, EOFError):
         print()
         sys.exit(0)
@@ -445,7 +506,7 @@ def maybe_run_startup_selector() -> bool:
             base = input("  API base URL (e.g. http://localhost:8000/v1): ").strip()
             if not base:
                 raise RuntimeError("URL required.")
-            key = input("  API key (leave empty if not required): ").strip() or "none"
+            key = getpass.getpass("  API key, if required (hidden while you type; press Enter for none): ").strip() or "none"
             print()
             models = _fetch_chat_models(base, key)
             if models:
