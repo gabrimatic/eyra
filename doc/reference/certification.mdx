@@ -65,7 +65,7 @@ The matrix also covers install and command-surface behavior:
 - `eyra setup` avoids duplicate shell PATH lines and removes old Eyra shell aliases ending in `# eyra`.
 - `eyra doctor --json` exposes support fields without secret values.
 - `eyra uninstall` removes command shims and cleans Eyra shell rc lines while preserving config/data unless data removal is explicitly requested.
-- The Homebrew formula has no placeholder checksum and runs `eyra version`, `eyra paths --json`, and `eyra doctor --json`; the formula test expects a real configured backend.
+- The Homebrew formula has no placeholder checksum and runs `eyra version`, `eyra paths --json`, and `eyra doctor --json`; the formula test uses mock, typed-only mode so it does not require a real configured backend.
 - The installer rejects unsafe install targets and keeps user data separate from app files.
 
 ## Connector rows

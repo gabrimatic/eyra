@@ -106,7 +106,7 @@ Formula behavior:
 - Runs `uv sync --frozen --no-dev` at install time.
 - Command shims use `uv run --frozen --no-sync`.
 - Provides `eyra`, `eyra-web`, `eyra-doctor`, `eyra-certify`, `eyra-setup`, and `eyra-connectors`.
-- Runs `eyra version`, `eyra paths --json`, and `eyra doctor --json` in the formula test. The formula test expects a real configured backend.
+- Runs `eyra version`, `eyra paths --json`, and `eyra doctor --json` in the formula test. The formula test uses mock, typed-only mode so a clean Homebrew test does not require a running model backend.
 
 ## Local provider
 

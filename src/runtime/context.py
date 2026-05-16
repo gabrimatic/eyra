@@ -6,6 +6,7 @@ import os
 
 from runtime.jobs import DurableJobStore
 from runtime.models import LiveRuntimeState
+from utils.semantic_history import build_semantic_history
 from utils.settings import Settings
 
 
@@ -23,7 +24,7 @@ def build_context_snapshot(
         "currentGoal": state.current_goal,
         "cwd": cwd or os.getcwd(),
         "filesystemDefaultPath": settings.FILESYSTEM_DEFAULT_PATH,
-        "recentMessages": list(state.conversation_messages[-6:]),
+        "recentMessages": build_semantic_history(state.conversation_messages, max_messages=6),
         "recentJobs": [
             {
                 "id": job.id,

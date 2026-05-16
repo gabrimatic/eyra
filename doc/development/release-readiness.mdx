@@ -41,14 +41,14 @@ uv run python scripts/certify_voice_to_computer.py --include-physical --human-ph
 
 ```bash
 cd doc
-mint validate --disable-openapi
-mint broken-links --check-anchors
-mint a11y
+MINTLIFY_TELEMETRY_DISABLED=1 npx -y mint@4.2.565 validate --disable-openapi
+MINTLIFY_TELEMETRY_DISABLED=1 npx -y mint@4.2.565 broken-links
 ```
 
 Review docs for:
 
 - Current default model and settings.
+- GitHub Pages deploys are explicitly guarded with `EYRA_DEPLOY_PAGES=true`; private repos should leave the variable unset unless Pages is configured.
 - Installed config precedence: `~/.config/eyra/.env` first, repo `.env` only for Eyra source checkouts, process env last.
 - Local-first privacy contract.
 - Optional capability gates.

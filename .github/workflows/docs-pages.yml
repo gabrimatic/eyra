@@ -74,14 +74,14 @@ jobs:
           node doc/scripts/prepare-github-pages.mjs _site /eyra
 
       - name: Upload Pages artifact
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.EYRA_DEPLOY_PAGES == 'true'
         uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
   deploy:
     name: Deploy docs
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.EYRA_DEPLOY_PAGES == 'true'
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 10

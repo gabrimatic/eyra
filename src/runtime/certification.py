@@ -1271,9 +1271,9 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
         "install_homebrew_formula_test",
         lambda: (
             require(("0" * 64) not in (root / "Formula/eyra.rb").read_text(), "formula contains placeholder checksum")
-            or require('"USE_MOCK_CLIENT" => "false"' in (root / "Formula/eyra.rb").read_text(), "formula test must not use the mock client")
+            or require('"USE_MOCK_CLIENT" => "true"' in (root / "Formula/eyra.rb").read_text(), "formula test must use the mock client")
             or require('bin/"eyra", "doctor", "--json"' in (root / "Formula/eyra.rb").read_text(), "formula test does not run doctor JSON")
-            or "Formula test runs command and doctor surfaces against a real configured backend."
+            or "Formula test runs commands and doctor surfaces without requiring a live backend."
         ),
     )
     source_row(

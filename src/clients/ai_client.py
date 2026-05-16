@@ -141,6 +141,22 @@ def _parse_text_tool_calls(content: str) -> list[dict] | None:
     return results if results else None
 
 
+def _validate_recovered_text_tool_calls(
+    recovered: list[dict],
+    *,
+    tools: ToolRegistry,
+    allowed_set: set[str] | None,
+) -> tuple[list[dict], str | None]:
+    """Validate recovered text-format tool calls before suppressing text."""
+    for call in recovered:
+        name = str(call.get("name", "")).strip()
+        if not name or tools.get(name) is None:
+            return [], f"Invalid tool call: unknown tool '{name or 'unnamed'}'."
+        if allowed_set is not None and name not in allowed_set:
+            return [], f"Tool '{name}' is not allowed for this request."
+    return recovered, None
+
+
 class AIClient(BaseAIClient):
     """OpenAI-compatible client. Works with any provider that speaks /v1/chat/completions."""
 
@@ -387,6 +403,18 @@ class AIClient(BaseAIClient):
             if not tool_calls_raw and _suppress_content:
                 recovered = _parse_text_tool_calls(accumulated_content)
                 if recovered:
+                    recovered, rejection = _validate_recovered_text_tool_calls(
+                        recovered,
+                        tools=tools,
+                        allowed_set=allowed_set,
+                    )
+                    if rejection:
+                        self.logger.warning("Rejected recovered text-format tool call: %s", rejection)
+                        yield rejection
+                        messages.append({"role": "assistant", "content": rejection})
+                        if history is not None:
+                            history.append({"role": "assistant", "content": rejection})
+                        return
                     self.logger.info(
                         "Recovered text-format tool call: %s",
                         [r["name"] for r in recovered],

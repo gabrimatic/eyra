@@ -13,6 +13,7 @@ from runtime.connectors.cli import main as connectors_cli
 from runtime.connectors.manifest import parse_connector_config
 from runtime.connectors.registry import ConnectorRegistry
 from runtime.connectors.types import AcceptanceState, ConnectorJobSpec
+from runtime.jobs import DurableJobStore, JobStatus
 from runtime.models import PreflightResult
 from runtime.routing.router import RuntimeRouter
 from runtime.routing.trace import format_route_trace, trace_to_dict
@@ -251,10 +252,17 @@ def test_runner_payload_omits_undeclared_cwd_and_selected_files(tmp_path):
         "accepted",
     )
 
-    result = _run(registry.run(ConnectorJobSpec(connector_id="openclawnew", task="hello", cwd=str(tmp_path))))
+    result = _run(
+        registry.run(
+            ConnectorJobSpec(connector_id="openclawnew", task="hello", cwd=str(tmp_path), job_id="job-task-only")
+        )
+    )
     payload = json.loads(result.output)
 
     assert result.status == "completed"
+    assert set(payload) == {"connectorId", "jobId", "task"}
+    assert payload["connectorId"] == "openclawnew"
+    assert payload["jobId"] == "job-task-only"
     assert payload["task"] == "hello"
     assert "cwd" not in payload
     assert "selectedFiles" not in payload
@@ -368,6 +376,57 @@ def test_runner_refuses_task_when_privacy_omits_task(tmp_path):
 
     assert result.status == "blocked"
     assert "task is not declared" in result.output
+
+
+def test_runner_refuses_unsupported_declared_privacy_payloads(tmp_path):
+    data_classes = [
+        ("file_contents", {"canReadFiles": True}),
+        ("pdf", {"canReadFiles": True}),
+        ("pdf_text", {"canReadFiles": True}),
+        ("screenshot", {"canControlUI": True}),
+        ("clipboard", {}),
+    ]
+
+    for data_class, capabilities in data_classes:
+        config_path = tmp_path / "connectors.json"
+        config_path.write_text(
+            json.dumps(
+                _manifest(
+                    [sys.executable, "-c", "import json,sys; print(json.dumps(json.load(sys.stdin)))"],
+                    privacy={
+                        "dataSent": ["task", data_class],
+                        "destination": "local_process",
+                        "leavesMachine": False,
+                    },
+                    acceptance={"requiresHumanApproval": False},
+                    **capabilities,
+                )
+            )
+        )
+        approvals = ApprovalManager()
+        registry = ConnectorRegistry.from_settings(_settings(tmp_path), approvals=approvals)
+        registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
+            "openclawnew",
+            AcceptanceState.ACCEPTED,
+            "accepted",
+        )
+
+        result = _run(registry.run(ConnectorJobSpec(connector_id="openclawnew", task="hello", cwd=str(tmp_path))))
+        if result.status == "approval_required":
+            approvals.approve(result.approval_id)
+            result = _run(
+                registry.run(
+                    ConnectorJobSpec(
+                        connector_id="openclawnew",
+                        task="hello",
+                        cwd=str(tmp_path),
+                        approval_id=result.approval_id,
+                    )
+                )
+            )
+
+        assert result.status == "blocked"
+        assert data_class in result.output
 
 
 def test_registry_redacts_connector_destination(tmp_path):
@@ -669,6 +728,54 @@ def test_cancel_running_connector_job(tmp_path):
 
     assert cancelled is True
     assert result.status == "cancelled"
+
+
+def test_connector_job_records_logs_artifacts_and_operation_ledger(tmp_path):
+    config_path = tmp_path / "connectors.json"
+    config_path.write_text(
+        json.dumps(
+            _manifest(
+                [sys.executable, "-c", "import json,sys; p=json.load(sys.stdin); print(json.dumps({'status':'ok','task':p['task']}))"],
+                acceptance={"requiresHumanApproval": False},
+            )
+        )
+    )
+    store = DurableJobStore(tmp_path / "jobs.sqlite3")
+    job = store.create_job(
+        title="Connector job",
+        original_user_input="ask openclawnew to report status",
+        source_frontend="test",
+        id="job-openclawnew",
+    )
+    registry = ConnectorRegistry.from_settings(_settings(tmp_path), approvals=ApprovalManager(), job_store=store)
+    registry._acceptance["openclawnew"] = registry._acceptance["openclawnew"].__class__(
+        "openclawnew",
+        AcceptanceState.ACCEPTED,
+        "accepted",
+    )
+
+    result = _run(
+        registry.run(
+            ConnectorJobSpec(
+                connector_id="openclawnew",
+                task="hello",
+                cwd=str(tmp_path),
+                job_id=job.id,
+            )
+        )
+    )
+    stored = store.get_job(job.id)
+    logs = store.list_logs(job.id)
+    operations = store.list_operations(job.id)
+
+    assert result.status == "completed"
+    assert stored is not None
+    assert stored.status == JobStatus.COMPLETED
+    assert stored.artifacts and stored.artifacts[0]["connectorId"] == "openclawnew"
+    assert "hello" in (stored.final_result or "")
+    assert [log.message for log in logs] == ["Connector job started.", "Connector process exited."]
+    assert operations and operations[0].target == "openclawnew"
+    assert operations[0].success is True
 
 
 def test_connector_route_trace_is_redacted_and_policy_owned(tmp_path):

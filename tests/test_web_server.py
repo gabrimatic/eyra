@@ -1097,6 +1097,104 @@ class TestWebServerHelpers:
             server.server_close()
             runtime.close()
 
+    def test_web_api_connector_endpoints_require_auth_and_redact_status(self, tmp_path):
+        config_path = tmp_path / "connectors.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "connectors": [
+                        {
+                            "id": "openclawnew",
+                            "displayName": "OpenClawNew",
+                            "type": "cli",
+                            "enabled": True,
+                            "command": [sys.executable, "-c", "print('{\"status\":\"ok\"}')"],
+                            "cwdPolicy": "filesystem_default_path",
+                            "inputMode": "stdin_json",
+                            "outputMode": "stdout_json",
+                            "local": True,
+                            "canUseNetwork": False,
+                            "canReadFiles": False,
+                            "canMutateFiles": False,
+                            "canControlUI": False,
+                            "canRunShell": False,
+                            "requiresApproval": False,
+                            "riskTier": "read_only",
+                            "timeoutSeconds": 5,
+                            "outputCapBytes": 4096,
+                            "allowedTools": [],
+                            "deniedTools": [],
+                            "privacy": {
+                                "dataSent": ["task"],
+                                "destination": "local_process?token=secret-token",
+                                "leavesMachine": False,
+                            },
+                            "acceptance": {"requiresHumanApproval": False},
+                        }
+                    ]
+                }
+            )
+        )
+        settings = Settings(
+            WEB_UI_HOST="127.0.0.1",
+            WEB_UI_REQUIRE_TOKEN="true",
+            USE_MOCK_CLIENT=True,
+            LIVE_LISTENING_ENABLED=False,
+            LIVE_SPEECH_ENABLED=False,
+            CONNECTORS_ENABLED=True,
+            CONNECTORS_CONFIG_PATH=str(config_path),
+            CONNECTORS_ALLOWED_ROOTS=str(tmp_path),
+            FILESYSTEM_ALLOWED_PATHS=str(tmp_path),
+            FILESYSTEM_DEFAULT_PATH=str(tmp_path),
+            JOB_STORE_PATH=str(tmp_path / "jobs.sqlite3"),
+        )
+        runtime = WebAssistantRuntime(settings)
+        handler = type(
+            "TestEyraWebHandler",
+            (_EyraWebHandler,),
+            {
+                "settings": settings,
+                "runtime": runtime,
+                "web_session_token": "secret-token",
+                "realtime_tool_token": "rt-secret",
+            },
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            for path, method, data in (
+                ("/api/connectors", "GET", None),
+                ("/api/connector/openclawnew", "GET", None),
+                ("/api/connector/test", "POST", {"connectorId": "openclawnew"}),
+                ("/api/connector/run", "POST", {"connectorId": "openclawnew", "task": "status"}),
+                ("/api/connector/cancel", "POST", {"connectorId": "openclawnew"}),
+            ):
+                request = urllib.request.Request(
+                    base + path,
+                    method=method,
+                    data=json.dumps(data).encode() if data is not None else None,
+                    headers={"Content-Type": "application/json"} if data is not None else {},
+                )
+                try:
+                    urllib.request.urlopen(request, timeout=5)
+                    raise AssertionError(f"unauthorized {path} unexpectedly succeeded")
+                except urllib.error.HTTPError as e:
+                    assert e.code == 401
+
+            request = urllib.request.Request(base + "/api/connectors", headers={"X-Eyra-Web-Token": "secret-token"})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                payload = response.read().decode()
+        finally:
+            server.shutdown()
+            server.server_close()
+            runtime.close()
+
+        assert "openclawnew" in payload
+        assert "secret-token" not in payload
+        assert str(tmp_path) not in payload
+
     def test_web_api_rejects_cross_origin_requests(self):
         settings = Settings(
             WEB_UI_HOST="127.0.0.1",

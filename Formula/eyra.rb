@@ -74,7 +74,7 @@ class Eyra < Formula
   test do
     system bin/"eyra", "version"
     system bin/"eyra", "paths", "--json"
-    test_env = { "USE_MOCK_CLIENT" => "false", "LIVE_LISTENING_ENABLED" => "false", "LIVE_SPEECH_ENABLED" => "false" }
+    test_env = { "USE_MOCK_CLIENT" => "true", "LIVE_LISTENING_ENABLED" => "false", "LIVE_SPEECH_ENABLED" => "false" }
     with_env(test_env) do
       system bin/"eyra", "doctor", "--json"
     end

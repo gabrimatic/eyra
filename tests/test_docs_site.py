@@ -45,7 +45,11 @@ def test_docs_pages_workflow_is_scoped_and_static_exported():
     assert "cp install.sh _site/install.sh" in workflow
     assert "actions/upload-pages-artifact@v5" in workflow
     assert "actions/deploy-pages@v5" in workflow
-    assert "if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'" in workflow
+    deploy_guard = (
+        "if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') "
+        "&& vars.EYRA_DEPLOY_PAGES == 'true'"
+    )
+    assert workflow.count(deploy_guard) == 2
     assert 'await rm(join(siteDir, "scripts"), { recursive: true, force: true })' in DOC.joinpath(
         "scripts/prepare-github-pages.mjs"
     ).read_text()
