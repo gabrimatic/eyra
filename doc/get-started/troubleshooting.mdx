@@ -21,6 +21,12 @@ eyra open
 eyra logs --open
 ```
 
+Check menu bar availability without launching it:
+
+```bash
+eyra menu --json --check
+```
+
 ## Backend does not start
 
 Symptom: Eyra stops during preflight with a backend or model message.
@@ -103,6 +109,26 @@ curl http://127.0.0.1:8765/api/health
 If non-health endpoints return unauthorized, use the tokenized URL printed at startup or set a known high-entropy `WEB_UI_TOKEN`.
 
 Do not set `WEB_UI_REQUIRE_TOKEN=false` for `0.0.0.0`; Eyra forces auth for non-localhost binds.
+
+## Menu bar app does not open
+
+Check the menu bar state:
+
+```bash
+eyra menu --json --check
+```
+
+If `mode` is `app-bundle`, `eyra menu` opens the installed `Eyra.app`. If `mode` is `source-swiftpm` or `package-resource`, the menu bar is using the developer path and needs Swift/Xcode command-line tools. If `mode` is `unavailable`, use:
+
+```bash
+eyra open
+```
+
+From a source checkout, rebuild the local app bundle:
+
+```bash
+scripts/build_menu_bar_app.sh
+```
 
 ## File access is denied
 

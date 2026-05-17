@@ -12,6 +12,7 @@ uv run pytest -q
 uv run ruff check src tests
 uv lock --check
 bash -n setup.sh install.sh
+bash -n scripts/build_menu_bar_app.sh
 uv build --sdist --wheel
 ```
 
@@ -64,7 +65,7 @@ Review docs for:
 - Installer safety checks and allowed install directories.
 - Homebrew formula status: custom-tap scaffold that tracks `main` until a stable tap formula switches to a tagged asset and pinned sha256.
 - `eyra setup`, `eyra doctor`, `eyra paths`, `eyra update`, and `eyra uninstall` behavior.
-- Menu bar install reality: `eyra menu --json` reports source, package-resource, app-bundle, or unavailable mode; docs use `eyra open` as the reliable installed-user control path until a packaged `.app` bundle is shipped.
+- Menu bar install reality: `eyra menu --json --check` reports app-bundle, source-swiftpm, package-resource, or unavailable mode. Normal install docs lead with `eyra menu` only when the app bundle is installed.
 - Commands and Web endpoints.
 - Certification limits.
 - No private prompt/spec/control-plane files.

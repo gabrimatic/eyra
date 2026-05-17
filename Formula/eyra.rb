@@ -22,6 +22,13 @@ class Eyra < Formula
     ENV["UV_PROJECT_ENVIRONMENT"] = venv
     cd libexec do
       system Formula["uv"].opt_bin/"uv", "sync", "--frozen", "--no-dev"
+      if File.executable?("/usr/bin/swift")
+        system "bash", "scripts/build_menu_bar_app.sh"
+      end
+    end
+    if (libexec/"dist/Eyra.app").exist?
+      rm_r libexec/"Eyra.app" if (libexec/"Eyra.app").exist?
+      cp_r libexec/"dist/Eyra.app", libexec/"Eyra.app"
     end
     (bin/"eyra").write <<~SH
       #!/bin/bash
@@ -81,6 +88,7 @@ class Eyra < Formula
     test_env = { "USE_MOCK_CLIENT" => "true", "LIVE_LISTENING_ENABLED" => "false", "LIVE_SPEECH_ENABLED" => "false" }
     with_env(test_env) do
       system bin/"eyra", "doctor", "--json"
+      system bin/"eyra", "menu", "--json", "--check"
     end
   end
 end

@@ -37,10 +37,10 @@ That gives the next repair step without making you reinstall.
 
 ## After install
 
-Open the installed-user control UI:
+Open the menu bar controls:
 
 ```bash
-eyra open
+eyra menu
 ```
 
 Start a terminal session:
@@ -49,13 +49,13 @@ Start a terminal session:
 eyra
 ```
 
-Check the menu bar developer preview:
+Open the local Web control UI:
 
 ```bash
-eyra menu --json
+eyra open
 ```
 
-The menu bar preview requires Swift/Xcode command-line tools until a packaged `.app` bundle ships. If it is unavailable, keep using `eyra open`.
+The guided installer places `Eyra.app` under `~/.local/share/eyra/` when the bundle is available. If the menu bar app is unavailable, `eyra open` remains the fallback control surface.
 
 ## Source checkout
 
@@ -75,9 +75,10 @@ Run from source:
 uv run python src/main.py
 ```
 
-Run the menu bar developer preview from source:
+Build and run the menu bar app from source:
 
 ```bash
+scripts/build_menu_bar_app.sh
 eyra menu
 ```
 

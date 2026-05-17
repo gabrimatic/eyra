@@ -119,6 +119,19 @@ cd "$EYRA_DIR"
 uv sync -q
 log_ok "Python environment ready"
 
+log_step "Preparing menu bar app"
+if [[ -d "$EYRA_DIR/dist/Eyra.app" ]]; then
+    log_ok "Menu bar app bundle is ready"
+elif command -v swift &>/dev/null; then
+    if "$EYRA_DIR/scripts/build_menu_bar_app.sh" >/dev/null; then
+        log_ok "Menu bar app bundle built"
+    else
+        log_warn "Menu bar app bundle build did not finish. Use: eyra open"
+    fi
+else
+    log_warn "Swift is not installed. Menu bar developer preview is unavailable; use: eyra open"
+fi
+
 log_step "Checking default local model provider"
 if command -v ollama &>/dev/null; then
     log_ok "Ollama command found"
@@ -225,10 +238,11 @@ echo ""
 echo -e "${GREEN}${BOLD}Setup complete${NC}"
 echo ""
 echo -e "  Start Eyra: ${BOLD}eyra${NC}"
+echo -e "  Open Eyra menu bar: ${BOLD}eyra menu${NC}"
 echo -e "  Open the Web UI: ${BOLD}eyra open${NC}"
 echo -e "  See useful first prompts: ${BOLD}eyra examples${NC}"
 echo -e "  Check support diagnostics: ${BOLD}eyra doctor${NC}"
-echo -e "  Check menu bar preview: ${BOLD}eyra menu --json${NC}"
+echo -e "  Check menu bar status: ${BOLD}eyra menu --json --check${NC}"
 echo -e "  Run certification: ${BOLD}eyra certify${NC}"
 echo ""
 echo -e "  ${DIM}If doctor says something needs attention, nothing is broken; it is the next setup item to finish.${NC}"

@@ -20,6 +20,7 @@ class TestPackageMetadata:
         assert wheel["force-include"]["apps/EyraMenuBar/Package.swift"] == "runtime/resources/EyraMenuBar/Package.swift"
         assert wheel["force-include"]["apps/EyraMenuBar/Sources"] == "runtime/resources/EyraMenuBar/Sources"
         assert wheel["force-include"]["apps/EyraMenuBar/Tests"] == "runtime/resources/EyraMenuBar/Tests"
+        assert wheel["force-include"]["scripts/build_menu_bar_app.sh"] == "runtime/resources/scripts/build_menu_bar_app.sh"
         assert all(".build" not in path for path in wheel["force-include"])
         assert all(".build" not in path for path in wheel["force-include"].values())
 

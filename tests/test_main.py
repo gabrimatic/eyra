@@ -282,9 +282,32 @@ class TestCliSupportCommands:
         resource = _find_menu_bar_resource()
 
         assert resource.resource_available is True
-        assert resource.mode == "source"
+        assert resource.mode == "source-swiftpm"
         assert resource.path == package
         assert resource.swift_required is True
+
+    def test_menu_bar_installed_app_bundle_is_preferred_without_swift(self, monkeypatch, tmp_path):
+        home = tmp_path / "home"
+        app_binary = home / ".local" / "share" / "eyra" / "Eyra.app" / "Contents" / "MacOS" / "EyraMenuBar"
+        app_binary.parent.mkdir(parents=True)
+        app_binary.write_text("#!/bin/bash\n")
+        repo = tmp_path / "repo"
+        package = repo / "apps" / "EyraMenuBar"
+        package.mkdir(parents=True)
+        (package / "Package.swift").write_text("// swift package\n")
+        monkeypatch.setattr("runtime.cli.Path.home", lambda: home)
+        monkeypatch.setattr("runtime.cli._repo_root", lambda: repo)
+        monkeypatch.setattr("runtime.cli._package_menu_bar_resource_path", lambda: None)
+        monkeypatch.setattr("runtime.cli.shutil.which", lambda command: None if command == "swift" else "/usr/bin/tool")
+
+        result = _launch_menu_bar(check_only=True)
+
+        assert result.ok is True
+        assert result.data["available"] is True
+        assert result.data["mode"] == "app-bundle"
+        assert result.data["swiftRequired"] is False
+        assert result.data["swiftAvailable"] is None
+        assert result.data["path"].endswith("Eyra.app")
 
     def test_menu_bar_package_resource_is_discovered_for_installed_wheel(self, monkeypatch, tmp_path):
         repo = tmp_path / "install-root"
@@ -327,7 +350,7 @@ class TestCliSupportCommands:
         assert result.ok is False
         assert result.data["resourceAvailable"] is True
         assert result.data["available"] is False
-        assert result.data["mode"] == "source"
+        assert result.data["mode"] == "source-swiftpm"
         assert result.data["swiftRequired"] is True
         assert result.data["swiftAvailable"] is False
         assert result.data["fallbackCommand"] == "eyra open"

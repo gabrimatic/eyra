@@ -5,6 +5,7 @@ REPO="${EYRA_REPO:-gabrimatic/eyra}"
 VERSION="${EYRA_VERSION:-latest}"
 INSTALL_DIR="${EYRA_INSTALL_DIR:-$HOME/.local/share/eyra/app}"
 BIN_DIR="${EYRA_BIN_DIR:-$HOME/.local/bin}"
+MENU_APP_DIR="${EYRA_MENU_APP_DIR:-$HOME/.local/share/eyra/Eyra.app}"
 GITHUB_HOST="${GITHUB_HOST:-github.com}"
 API_HOST="${GITHUB_API_HOST:-api.github.com}"
 SOURCE_PATH="${EYRA_SOURCE_PATH:-}"
@@ -54,6 +55,75 @@ wait_for_ollama() {
         sleep 1
     done
     return 1
+}
+
+find_packaged_menu_script() {
+    local python_bin="$1"
+    "$python_bin" - <<'PY' 2>/dev/null || true
+import importlib.resources as resources
+
+script = resources.files("runtime").joinpath("resources", "scripts", "build_menu_bar_app.sh")
+print(script if script.is_file() else "")
+PY
+}
+
+find_packaged_menu_package() {
+    local python_bin="$1"
+    "$python_bin" - <<'PY' 2>/dev/null || true
+import importlib.resources as resources
+
+package = resources.files("runtime").joinpath("resources", "EyraMenuBar")
+print(package if package.joinpath("Package.swift").is_file() else "")
+PY
+}
+
+installed_package_version() {
+    local python_bin="$1"
+    "$python_bin" - <<'PY' 2>/dev/null || true
+import importlib.metadata
+
+try:
+    print(importlib.metadata.version("eyra"))
+except importlib.metadata.PackageNotFoundError:
+    print("")
+PY
+}
+
+install_menu_bar_app() {
+    local source_app="$INSTALL_DIR/dist/Eyra.app"
+    local builder="$INSTALL_DIR/scripts/build_menu_bar_app.sh"
+    local package_dir="$INSTALL_DIR/apps/EyraMenuBar"
+
+    if [[ ! -d "$source_app" && -x "$builder" && -f "$package_dir/Package.swift" ]] && command -v swift >/dev/null 2>&1; then
+        log_info "Building Eyra.app menu bar bundle..."
+        (cd "$INSTALL_DIR" && "$builder" >/dev/null) || log_warn "Menu bar app bundle build did not finish. Use: eyra open"
+    fi
+
+    if [[ ! -d "$source_app" && -x "$INSTALL_DIR/.venv/bin/python" ]] && command -v swift >/dev/null 2>&1; then
+        packaged_builder="$(find_packaged_menu_script "$INSTALL_DIR/.venv/bin/python")"
+        packaged_package="$(find_packaged_menu_package "$INSTALL_DIR/.venv/bin/python")"
+        if [[ -n "$packaged_builder" && -n "$packaged_package" ]]; then
+            log_info "Building Eyra.app menu bar bundle from installed package resources..."
+            package_version="$(installed_package_version "$INSTALL_DIR/.venv/bin/python")"
+            EYRA_MENU_BAR_PACKAGE_DIR="$packaged_package" EYRA_MENU_BAR_OUTPUT_DIR="$INSTALL_DIR/dist" EYRA_MENU_BAR_VERSION="$package_version" "$packaged_builder" >/dev/null || \
+                log_warn "Menu bar app bundle build did not finish. Use: eyra open"
+        fi
+    fi
+
+    if [[ ! -d "$source_app" ]]; then
+        log_warn "Menu bar app bundle is unavailable. Use: eyra open"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$MENU_APP_DIR")"
+    if [[ -e "$MENU_APP_DIR" ]]; then
+        menu_app_backup="${MENU_APP_DIR}.backup.$(date +%Y%m%d%H%M%S)"
+        mv "$MENU_APP_DIR" "$menu_app_backup"
+        log_warn "Existing menu bar app moved to $menu_app_backup"
+    fi
+    cp -R "$source_app" "$MENU_APP_DIR"
+    menu_app_installed=true
+    log_ok "Menu bar app installed at $MENU_APP_DIR"
 }
 
 tmp_dir=""
@@ -215,6 +285,8 @@ fi
 
 tmp_dir="$(mktemp -d)"
 backup=""
+menu_app_backup=""
+menu_app_installed=false
 package_kind=""
 package_path=""
 asset_name=""
@@ -292,6 +364,7 @@ case "$package_kind" in
     source-dir)
         cp -R "$package_path"/. "$staging"/
         rm -rf "$staging/.git" "$staging/.venv" "$staging/.pytest_cache" "$staging/dist" "$staging/build"
+        find "$staging" -type d -name .build -prune -exec rm -rf {} +
         ;;
     archive)
         case "$package_path" in
@@ -325,6 +398,10 @@ rollback_install() {
     log_warn "Install verification failed; rolling back install directory."
     rm -rf "$INSTALL_DIR"
     [[ -n "${backup:-}" && -d "$backup" ]] && mv "$backup" "$INSTALL_DIR"
+    if [[ "$menu_app_installed" == "true" ]]; then
+        rm -rf "$MENU_APP_DIR"
+        [[ -n "${menu_app_backup:-}" && -d "$menu_app_backup" ]] && mv "$menu_app_backup" "$MENU_APP_DIR"
+    fi
 }
 
 if [[ "$package_kind" == "wheel" ]]; then
@@ -337,6 +414,9 @@ if [[ "$package_kind" == "wheel" ]]; then
         fail "Could not install the Eyra wheel."
     fi
 fi
+
+log_step "Preparing menu bar app"
+install_menu_bar_app
 
 write_shim() {
     local name="$1"
@@ -416,8 +496,13 @@ fi
 echo ""
 echo -e "${GREEN}${BOLD}Eyra installed${NC}"
 echo "Start: eyra"
+if [[ -d "$MENU_APP_DIR" ]]; then
+    echo "Open Eyra: eyra menu"
+else
+    echo "Open Eyra: eyra open"
+fi
 echo "Web controls: eyra open"
-echo "Menu bar preview check: eyra menu --json"
+echo "Menu bar check: eyra menu --json --check"
 echo "Useful first prompts: eyra examples"
 echo "Setup or repair: eyra setup"
 echo "Support report: eyra doctor"
