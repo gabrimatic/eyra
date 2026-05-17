@@ -415,7 +415,9 @@ def _format_doctor(data: dict[str, Any], ok: bool) -> str:
 def _status(settings: Settings) -> CommandResult:
     doctor_result = _run_async(_doctor(settings))
     service = service_status(settings)
-    data = {**doctor_result.data, "service": service}
+    menu_resource = _find_menu_bar_resource()
+    menu_data = _menu_bar_resource_data(menu_resource, shutil.which("swift"))
+    data = {**doctor_result.data, "service": service, "menuBar": menu_data}
     preflight = data["preflight"]
     lines = ["Eyra status", ""]
     lines.append(f"Local model: {'Ready' if preflight.get('backendReachable') and not preflight.get('modelsMissing') else 'Needs attention'}")
@@ -429,6 +431,7 @@ def _status(settings: Settings) -> CommandResult:
     else:
         voice = "Needs attention"
     lines.append(f"Voice: {voice}")
+    lines.append(f"Menu bar: {'Ready' if menu_data['available'] and menu_data['mode'] == 'app-bundle' else 'Fallback available'}")
     lines.append(f"Web control: {'Running' if service['running'] else 'Stopped'}")
     lines.append(f"Local-first default: {'No data leaves your Mac by default' if _local_first_default(data['settings']) else 'Review enabled remote/network settings'}")
     lines.append(f"Network tools: {'On' if data['settings']['networkToolsEnabled'] else 'Off'}")
@@ -441,6 +444,8 @@ def _status(settings: Settings) -> CommandResult:
         lines.append("- Run `eyra setup` to repair local AI/model setup.")
     elif voice == "Needs attention":
         lines.append("- Run `eyra doctor` or `/voice-diagnose` to repair voice.")
+    elif menu_data["available"] and menu_data["mode"] == "app-bundle":
+        lines.append("- Run `eyra menu` to open the menu bar, or `eyra open` for the Web control UI.")
     elif not service["running"]:
         lines.append("- Run `eyra open` to start the local Web control UI.")
     else:
