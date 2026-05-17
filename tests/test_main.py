@@ -11,6 +11,7 @@ from main import get_log_file_path
 from runtime.cli import (
     _detect_install_source,
     _is_source_checkout,
+    _logs,
     _paths,
     _primary_env_path,
     _safe_settings,
@@ -203,3 +204,67 @@ class TestCliSupportCommands:
         assert "eyra setup" in output
         assert "What would leave my machine?" in output
         assert "Plain requests are fine" in output
+
+    def test_settings_list_redacts_secret_values(self, monkeypatch, tmp_path, capsys):
+        app = tmp_path / "app"
+        home = tmp_path / "home"
+        (app / "src").mkdir(parents=True)
+        (app / "src" / "main.py").write_text("")
+        (app / "pyproject.toml").write_text('[project]\nname = "eyra"\n')
+        env = home / ".config" / "eyra" / ".env"
+        env.parent.mkdir(parents=True)
+        env.write_text("API_KEY=secret-value\nOPENAI_API_KEY=sk-secret\nMODEL=test-model\n")
+        monkeypatch.setattr("runtime.cli._repo_root", lambda: app)
+        monkeypatch.setattr("runtime.cli.Path.home", lambda: home)
+        monkeypatch.setattr("utils.settings.Path.home", lambda: home)
+        monkeypatch.delenv("API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("MODEL", raising=False)
+
+        exit_code = cli(["settings", "--json"])
+        output = capsys.readouterr().out
+
+        assert exit_code == 0
+        assert "secret-value" not in output
+        assert "sk-secret" not in output
+        assert "configured" in output
+
+    def test_settings_set_validates_bool_and_preserves_file(self, monkeypatch, tmp_path):
+        app = tmp_path / "app"
+        home = tmp_path / "home"
+        (app / "src").mkdir(parents=True)
+        (app / "src" / "main.py").write_text("")
+        (app / "pyproject.toml").write_text('[project]\nname = "eyra"\n')
+        existing = home / ".config" / "eyra" / ".env"
+        existing.parent.mkdir(parents=True)
+        existing.write_text("# keep\nMODEL=old-model\nLIVE_SPEECH_ENABLED=true\n")
+        monkeypatch.setattr("runtime.cli._repo_root", lambda: app)
+        monkeypatch.setattr("runtime.cli.Path.home", lambda: home)
+        monkeypatch.setattr("utils.settings.Path.home", lambda: home)
+
+        exit_code = cli(["settings", "set", "LIVE_SPEECH_ENABLED", "false"])
+
+        assert exit_code == 0
+        text = existing.read_text()
+        assert "# keep" in text
+        assert "LIVE_SPEECH_ENABLED=false" in text
+
+    def test_settings_set_rejects_secret_edits(self, monkeypatch, tmp_path):
+        app = tmp_path / "app"
+        home = tmp_path / "home"
+        (app / "src").mkdir(parents=True)
+        (app / "src" / "main.py").write_text("")
+        (app / "pyproject.toml").write_text('[project]\nname = "eyra"\n')
+        monkeypatch.setattr("runtime.cli._repo_root", lambda: app)
+        monkeypatch.setattr("runtime.cli.Path.home", lambda: home)
+
+        exit_code = cli(["settings", "set", "API_KEY", "secret"])
+
+        assert exit_code == 1
+
+    def test_logs_reports_paths_without_dumping_content(self):
+        result = _logs(open_folder=False)
+
+        assert result.ok is True
+        assert "App log:" in result.message
+        assert "Do not share" in result.message

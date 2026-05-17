@@ -5,7 +5,22 @@ description: "Configure providers, models, voice, tools, Web UI, Realtime voice,
 
 `.env` is the single source of truth for an Eyra runtime. `Settings.load_from_env()` reads every setting with defaults, validates booleans and numeric ranges, and feeds the runtime, Web UI, routing, tools, and voice stack.
 
-Most users should start with `eyra setup` and `eyra doctor`. Edit `.env` directly only when you want a specific provider, model, sandbox root, or optional capability gate.
+Most people should start with `eyra setup`, `eyra status`, and `eyra settings`. Edit `.env` directly only when you want a specific provider, model, sandbox root, or optional capability gate.
+
+## Simple settings
+
+Use the settings command for the normal path:
+
+```bash
+eyra settings
+eyra settings get MODEL
+eyra settings set LIVE_SPEECH_ENABLED false
+eyra settings set NETWORK_TOOLS_ENABLED true
+```
+
+`eyra settings` shows safe front-door controls and redacts secrets. It refuses direct edits to provider keys; use `eyra setup` for those.
+
+The menu bar uses the same settings surface, so terminal and menu controls stay in sync.
 
 ## File precedence
 

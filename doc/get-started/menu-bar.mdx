@@ -1,0 +1,88 @@
+---
+title: "Menu bar"
+description: "Use Eyra from the macOS menu bar."
+---
+
+The menu bar is the simplest way to control Eyra on a Mac. It keeps the normal path out of configuration files and long terminal commands.
+
+Open it from a source checkout or installed command:
+
+```bash
+eyra menu
+```
+
+The menu bar can:
+
+- Show whether Eyra's local control service is running.
+- Start, stop, or restart the local control service.
+- Open the Web UI.
+- Run Doctor.
+- Open guided setup in Terminal.
+- Open logs and docs.
+- Toggle simple voice and privacy settings.
+- Show whether the local model and voice path need attention.
+
+It does not replace Eyra's safety system. Network tools, Mac control tools, connectors, Realtime voice, MCP, and external agents stay off until you enable them. Risky actions still go through Eyra's policy and approval gates.
+
+## Status
+
+The menu shows plain-language status:
+
+- `Local model ready` or `Local model needs setup`
+- `Voice: Ready`, `Voice: Partly ready`, `Voice: Needs attention`, or `Voice: Off`
+- `Web control running` or `Web control stopped`
+- A privacy line that says whether data leaves your Mac by default
+
+If the local model needs setup, choose **Open setup in Terminal** or run:
+
+```bash
+eyra setup
+```
+
+If voice needs attention, choose **Run Doctor** or run:
+
+```bash
+eyra doctor
+```
+
+## Simple Settings
+
+The menu bar exposes front-door settings only:
+
+- Voice input
+- Speech output
+- Network tools
+- Mac control tools
+- Connectors
+- Realtime voice
+
+Advanced settings still exist in the terminal and docs. Use:
+
+```bash
+eyra settings
+eyra settings --json
+eyra settings get MODEL
+eyra settings set LIVE_SPEECH_ENABLED false
+```
+
+Secret values are never shown by the menu bar or `eyra settings`.
+
+## Control Service
+
+The menu bar controls Eyra through stable local commands:
+
+```bash
+eyra status --json
+eyra settings --json
+eyra start
+eyra stop
+eyra restart
+eyra open
+eyra logs
+```
+
+`eyra start` starts the local Web control service on localhost. Non-health Web endpoints still require a token.
+
+## Limits
+
+The current menu bar app is a native SwiftUI menu-bar control surface. It does not install a privileged helper, does not require `sudo`, does not publish anything, and does not enable optional tools by itself.

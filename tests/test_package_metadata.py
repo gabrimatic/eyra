@@ -14,8 +14,10 @@ class TestPackageMetadata:
         assert data["project"]["scripts"]["eyra-doctor"] == "runtime.cli:doctor"
         assert data["project"]["scripts"]["eyra-setup"] == "runtime.cli:setup"
         assert data["project"]["scripts"]["eyra-certify"] == "runtime.cli:certify"
+        assert data["project"]["scripts"]["eyra-menu"] == "runtime.cli:menu"
         wheel = data["tool"]["hatch"]["build"]["targets"]["wheel"]
         assert wheel["force-include"]["src/main.py"] == "main.py"
+        assert wheel["force-include"]["apps/EyraMenuBar"] == "apps/EyraMenuBar"
 
     def test_release_candidate_version_is_pep440(self):
         data = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())

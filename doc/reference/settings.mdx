@@ -5,6 +5,16 @@ description: "Complete .env reference for Eyra."
 
 `.env` controls runtime behavior. Every field has a default in `src/utils/settings.py`; `setup.sh` writes the initial file.
 
+For normal setup, use:
+
+```bash
+eyra settings
+eyra settings get MODEL
+eyra settings set LIVE_SPEECH_ENABLED false
+```
+
+`eyra settings` shows the simple controls first and redacts secrets. This reference lists the full `.env` surface for advanced configuration.
+
 ## Provider and models
 
 | Setting | Default | Purpose |

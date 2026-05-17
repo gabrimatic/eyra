@@ -196,7 +196,7 @@ cd "$EYRA_DIR" && exec uv run eyra web "\$@"
 LAUNCHER
 chmod +x "$BIN_DIR/eyra-web"
 
-for name in eyra-doctor eyra-certify eyra-setup eyra-connectors; do
+for name in eyra-doctor eyra-certify eyra-setup eyra-connectors eyra-menu; do
     subcommand="${name#eyra-}"
     cat > "$BIN_DIR/$name" <<LAUNCHER
 #!/bin/bash
@@ -225,8 +225,9 @@ echo ""
 echo -e "${GREEN}${BOLD}Setup complete${NC}"
 echo ""
 echo -e "  Start Eyra: ${BOLD}eyra${NC}"
+echo -e "  Open menu bar controls: ${BOLD}eyra menu${NC}"
 echo -e "  See useful first prompts: ${BOLD}eyra examples${NC}"
-echo -e "  Open the Web UI: ${BOLD}eyra web${NC}"
+echo -e "  Open the Web UI: ${BOLD}eyra open${NC}"
 echo -e "  Check support diagnostics: ${BOLD}eyra doctor${NC}"
 echo -e "  Run certification: ${BOLD}eyra certify${NC}"
 echo ""

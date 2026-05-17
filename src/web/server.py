@@ -1222,6 +1222,7 @@ def render_index_html(settings: Settings) -> str:
     body {{
       margin: 0;
       min-height: 100vh;
+      overflow-x: hidden;
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background:
         radial-gradient(circle at 20% -10%, rgba(85, 214, 190, 0.16), transparent 30%),
@@ -1229,7 +1230,8 @@ def render_index_html(settings: Settings) -> str:
       color: var(--text);
     }}
     main {{
-      width: min(920px, 100%);
+      width: 100%;
+      max-width: 920px;
       min-height: 100vh;
       margin: 0 auto;
       display: grid;
@@ -1238,9 +1240,9 @@ def render_index_html(settings: Settings) -> str:
       gap: 14px;
     }}
     header {{
-      display: flex;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
       align-items: center;
-      justify-content: space-between;
       gap: 12px;
       border-bottom: 1px solid var(--line);
       padding-bottom: 14px;
@@ -1255,6 +1257,7 @@ def render_index_html(settings: Settings) -> str:
       gap: 8px;
       flex-wrap: wrap;
       justify-content: flex-end;
+      min-width: 0;
       color: var(--muted);
       font-size: 13px;
     }}
@@ -1367,7 +1370,7 @@ def render_index_html(settings: Settings) -> str:
     }}
     @media (max-width: 640px) {{
       main {{ padding: 12px; }}
-      header {{ align-items: flex-start; flex-direction: column; }}
+      header {{ align-items: flex-start; grid-template-columns: 1fr; }}
       .status {{ justify-content: flex-start; }}
       .msg {{ max-width: 94%; }}
       form {{ grid-template-columns: 1fr auto; }}

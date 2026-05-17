@@ -20,6 +20,7 @@
         "pages": [
           "index",
           "get-started/installation",
+          "get-started/menu-bar",
           "get-started/first-session",
           "get-started/configuration",
           "get-started/troubleshooting"

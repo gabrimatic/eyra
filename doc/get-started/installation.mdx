@@ -1,6 +1,6 @@
 ---
 title: "Installation"
-description: "Install Eyra, configure the local runtime, and start the terminal session."
+description: "Install Eyra, open the menu bar, and start the local runtime."
 ---
 
 Runtime: macOS on Apple Silicon. The easiest path is the guided installer. It installs Eyra, checks local AI and voice, and leaves you with plain next steps if one piece still needs attention.
@@ -27,6 +27,7 @@ The installer:
 If doctor or certification needs attention, the install is still available. Run:
 
 ```bash
+eyra status
 eyra doctor
 eyra setup
 eyra examples
@@ -34,9 +35,29 @@ eyra examples
 
 That gives the next repair step without making you reinstall.
 
+## After install
+
+Open menu bar controls:
+
+```bash
+eyra menu
+```
+
+Start a terminal session:
+
+```bash
+eyra
+```
+
+Open the local Web control UI:
+
+```bash
+eyra open
+```
+
 ## Source checkout
 
-Use this path when you want to change Eyra itself:
+Advanced path: use this when you want to change Eyra itself.
 
 ```bash
 git clone https://github.com/gabrimatic/eyra.git
@@ -50,6 +71,12 @@ Run from source:
 
 ```bash
 uv run python src/main.py
+```
+
+Run the menu bar app from source:
+
+```bash
+eyra menu
 ```
 
 After your shell sees `~/.local/bin`, run:
@@ -105,7 +132,7 @@ Formula behavior:
 
 - Runs `uv sync --frozen --no-dev` at install time.
 - Command shims execute the installed virtual environment's console scripts.
-- Provides `eyra`, `eyra-web`, `eyra-doctor`, `eyra-certify`, `eyra-setup`, and `eyra-connectors`.
+- Provides `eyra`, `eyra-web`, `eyra-doctor`, `eyra-certify`, `eyra-setup`, `eyra-connectors`, and `eyra-menu`.
 - Runs `eyra version`, `eyra paths --json`, and `eyra doctor --json` in the formula test. The formula test uses mock, typed-only mode so a clean Homebrew test does not require a running model backend.
 
 ## Local provider

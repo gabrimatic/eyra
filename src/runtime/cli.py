@@ -14,12 +14,15 @@ import re
 import shutil
 import subprocess
 import sys
+import webbrowser
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 from runtime.examples import render_examples
 from runtime.preflight import PreflightManager
+from runtime.service import service_paths, service_status, start_service, stop_service, web_url_with_token
+from runtime.settings_catalog import get_setting, setting_specs, settings_snapshot, write_setting
 from utils.settings import Settings
 
 
@@ -34,6 +37,27 @@ def cli(argv: list[str] | None = None) -> int:
     """Run the Eyra command router. No args starts the live session."""
     parser = argparse.ArgumentParser(prog="eyra", description="Local-first voice coordinator for macOS.")
     subcommands = parser.add_subparsers(dest="command")
+
+    start = subcommands.add_parser("start", help="Start Eyra's local Web control service in the background.")
+    start.add_argument("--json", action="store_true", help="Print machine-readable service status.")
+    stop = subcommands.add_parser("stop", help="Stop Eyra's local Web control service.")
+    stop.add_argument("--json", action="store_true", help="Print machine-readable service status.")
+    restart = subcommands.add_parser("restart", help="Restart Eyra's local Web control service.")
+    restart.add_argument("--json", action="store_true", help="Print machine-readable service status.")
+    menu = subcommands.add_parser("menu", help="Launch the native macOS menu bar control surface.")
+    menu.add_argument("--json", action="store_true", help="Print machine-readable launch status.")
+    status = subcommands.add_parser("status", help="Show simple local readiness and service status.")
+    status.add_argument("--json", action="store_true", help="Print machine-readable status.")
+    open_cmd = subcommands.add_parser("open", help="Open Eyra's local Web UI, starting it if needed.")
+    open_cmd.add_argument("--json", action="store_true", help="Print machine-readable open status.")
+    logs = subcommands.add_parser("logs", help="Show or open Eyra log locations.")
+    logs.add_argument("--open", action="store_true", help="Open the log folder in Finder.")
+    logs.add_argument("--json", action="store_true", help="Print machine-readable log paths.")
+    service = subcommands.add_parser("service", help="Manage the local Web control service.")
+    service_subcommands = service.add_subparsers(dest="service_action", required=True)
+    for action in ("status", "start", "stop", "restart"):
+        service_action = service_subcommands.add_parser(action, help=f"{action.title()} the service.")
+        service_action.add_argument("--json", action="store_true", help="Print machine-readable service status.")
 
     subcommands.add_parser("web", help="Start the local Web UI.")
     subcommands.add_parser("examples", help="Show useful first prompts and local workflows.")
@@ -71,9 +95,21 @@ def cli(argv: list[str] | None = None) -> int:
     paths = subcommands.add_parser("paths", help="Print config, log, job, trigger, and command paths.")
     paths.add_argument("--json", action="store_true", help="Print machine-readable path info.")
 
+    settings = subcommands.add_parser("settings", help="Show or edit simple Eyra settings.")
+    settings.add_argument("--json", action="store_true", help="Print machine-readable settings.")
+    settings_subcommands = settings.add_subparsers(dest="settings_action")
+    settings_subcommands.add_parser("list", help="List settings.")
+    settings_get = settings_subcommands.add_parser("get", help="Show one setting.")
+    settings_get.add_argument("key")
+    settings_set = settings_subcommands.add_parser("set", help="Set one simple setting.")
+    settings_set.add_argument("key")
+    settings_set.add_argument("value")
+
     args = parser.parse_args(argv)
     if args.command is None:
         return _run_live_session()
+    if args.command in {"start", "stop", "restart", "menu", "status", "open", "logs", "service", "settings"}:
+        return _handle_simple_command(args)
     if args.command == "web":
         from web.server import run
 
@@ -136,6 +172,10 @@ def certify() -> None:
     raise SystemExit(cli(["certify", *sys.argv[1:]]))
 
 
+def menu() -> None:
+    raise SystemExit(cli(["menu", *sys.argv[1:]]))
+
+
 def _run_live_session() -> int:
     from main import main
     from runtime.startup import maybe_run_startup_selector
@@ -159,6 +199,60 @@ def _run_live_session() -> int:
 
 def _run_async(coro):
     return asyncio.run(coro)
+
+
+def _handle_simple_command(args) -> int:
+    if args.command == "settings":
+        return _handle_settings_command(args)
+    if args.command == "logs":
+        return _emit(_logs(open_folder=args.open), json_output=args.json)
+    if args.command == "menu":
+        return _emit(_launch_menu_bar(), json_output=args.json)
+
+    settings = Settings.load_from_env()
+    json_output = bool(getattr(args, "json", False))
+    action = args.command
+    if args.command == "service":
+        action = args.service_action
+        json_output = bool(getattr(args, "json", False))
+
+    if action == "status":
+        if args.command == "status":
+            return _emit(_status(settings), json_output=json_output)
+        return _emit(_service_result(service_status(settings)), json_output=json_output)
+    if action == "start":
+        return _emit(_service_result(start_service(settings)), json_output=json_output)
+    if action == "stop":
+        return _emit(_service_result(stop_service(settings)), json_output=json_output)
+    if action == "restart":
+        stop_service(settings)
+        return _emit(_service_result(start_service(settings)), json_output=json_output)
+    if action == "open":
+        return _emit(_open_web(settings), json_output=json_output)
+    raise SystemExit(f"unknown command: {args.command}")
+
+
+def _handle_settings_command(args) -> int:
+    settings = Settings.load_from_env()
+    action = args.settings_action or "list"
+    json_output = bool(args.json)
+    try:
+        if action == "list":
+            rows = settings_snapshot(settings)
+            return _emit(
+                CommandResult(True, _format_settings(rows), {"settings": rows, "schema": setting_specs()}),
+                json_output=json_output,
+            )
+        if action == "get":
+            row = get_setting(settings, args.key)
+            return _emit(CommandResult(True, _format_one_setting(row), {"setting": row}), json_output=json_output)
+        if action == "set":
+            value = write_setting(_primary_env_path(), args.key, args.value)
+            message = f"Updated {args.key.upper()} to {value}.\nRestart Eyra if it is already running."
+            return _emit(CommandResult(True, message, {"key": args.key.upper(), "value": value, "restartRequired": True}), json_output=json_output)
+    except (KeyError, ValueError) as exc:
+        return _emit(CommandResult(False, str(exc), {}), json_output=json_output)
+    return _emit(CommandResult(False, f"Unknown settings action: {action}", {}), json_output=json_output)
 
 
 def _emit(result: CommandResult, *, json_output: bool) -> int:
@@ -307,6 +401,140 @@ def _format_doctor(data: dict[str, Any], ok: bool) -> str:
     return "\n".join(lines)
 
 
+def _status(settings: Settings) -> CommandResult:
+    doctor_result = _run_async(_doctor(settings))
+    service = service_status(settings)
+    data = {**doctor_result.data, "service": service}
+    preflight = data["preflight"]
+    lines = ["Eyra status", ""]
+    lines.append(f"Local model: {'Ready' if preflight.get('backendReachable') and not preflight.get('modelsMissing') else 'Needs attention'}")
+    wh = preflight.get("localWhisper", {})
+    if not (data["settings"]["liveListeningEnabled"] or data["settings"]["liveSpeechEnabled"]):
+        voice = "Off"
+    elif wh.get("available") and wh.get("listeningAvailable") is not False and wh.get("speechAvailable") is not False:
+        voice = "Ready"
+    elif wh.get("available"):
+        voice = "Partly ready"
+    else:
+        voice = "Needs attention"
+    lines.append(f"Voice: {voice}")
+    lines.append(f"Web control: {'Running' if service['running'] else 'Stopped'}")
+    lines.append(f"Local-first default: {'No data leaves your Mac by default' if _local_first_default(data['settings']) else 'Review enabled remote/network settings'}")
+    lines.append(f"Network tools: {'On' if data['settings']['networkToolsEnabled'] else 'Off'}")
+    lines.append(f"Mac control tools: {'On' if data['settings']['osToolsEnabled'] else 'Off'}")
+    lines.append(f"Connectors: {'On' if data['settings']['connectorsEnabled'] else 'Off'}")
+    lines.append(f"Realtime voice: {'On' if data['settings']['realtimeVoiceEnabled'] else 'Off'}")
+    lines.append("")
+    lines.append("Next:")
+    if not preflight.get("backendReachable") or preflight.get("modelsMissing"):
+        lines.append("- Run `eyra setup` to repair local AI/model setup.")
+    elif voice == "Needs attention":
+        lines.append("- Run `eyra doctor` or `/voice-diagnose` to repair voice.")
+    elif not service["running"]:
+        lines.append("- Run `eyra open` to start the local Web control UI.")
+    else:
+        lines.append("- Run `eyra` for the terminal assistant, or use the Web control UI.")
+    return CommandResult(doctor_result.ok, "\n".join(lines), data)
+
+
+def _local_first_default(settings: dict[str, Any]) -> bool:
+    return not any(
+        [
+            settings["networkToolsEnabled"],
+            settings["osToolsEnabled"],
+            settings["mcpToolsEnabled"],
+            settings["connectorsEnabled"],
+            settings["agentToolsEnabled"],
+            settings["externalAgentToolsEnabled"],
+            settings["realtimeVoiceEnabled"],
+        ]
+    ) and "localhost" in settings["apiBaseUrl"]
+
+
+def _service_result(payload: dict[str, Any]) -> CommandResult:
+    lines = ["Eyra service", "", payload.get("message", "")]
+    if payload.get("running"):
+        lines.append(f"Open: {payload.get('openUrl') or payload.get('url')}")
+    else:
+        lines.append("Start it with: eyra start")
+    lines.append(f"Log: {payload.get('log')}")
+    return CommandResult(True, "\n".join(lines), {"service": payload})
+
+
+def _open_web(settings: Settings) -> CommandResult:
+    status = service_status(settings)
+    if not status["running"]:
+        status = start_service(settings)
+    if status["running"]:
+        url = status.get("openUrl") or web_url_with_token(settings)
+        webbrowser.open(url)
+        return CommandResult(True, f"Opened Eyra Web UI: {url}", {"service": status, "url": url})
+    return CommandResult(False, "Eyra Web UI could not start. Run `eyra logs` or `eyra doctor` for the next step.", {"service": status})
+
+
+def _logs(*, open_folder: bool) -> CommandResult:
+    from main import get_log_file_path
+
+    app_log = get_log_file_path()
+    service_log = service_paths().log
+    if open_folder:
+        webbrowser.open(str(app_log.parent))
+    message = "\n".join(
+        [
+            "Eyra logs",
+            "",
+            f"App log: {app_log}",
+            f"Web service log: {service_log}",
+            "Logs can include local paths and diagnostics. Do not share them without reviewing first.",
+        ]
+    )
+    return CommandResult(True, message, {"appLog": str(app_log), "webServiceLog": str(service_log)})
+
+
+def _launch_menu_bar() -> CommandResult:
+    package = _repo_root() / "apps" / "EyraMenuBar"
+    if not package.exists():
+        return CommandResult(False, "Eyra menu bar app is not included in this install yet. Use `eyra open` for the Web control UI.", {"available": False})
+    swift = shutil.which("swift")
+    if not swift:
+        return CommandResult(False, "Swift is required to run the menu bar app from source. Install Xcode or use `eyra open`.", {"available": False})
+    subprocess.Popen(
+        [swift, "run", "--package-path", str(package), "EyraMenuBar"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    return CommandResult(True, "Eyra menu bar app is launching.", {"available": True, "package": str(package)})
+
+
+def _format_settings(rows: list[dict[str, Any]]) -> str:
+    lines = ["Eyra settings", ""]
+    current_category = ""
+    for row in rows:
+        if not row["simple"]:
+            continue
+        if row["category"] != current_category:
+            current_category = row["category"]
+            lines.extend(["", current_category])
+        lines.append(f"  {row['key']}: {row['value']}")
+    lines.extend(["", "Use `eyra settings get MODEL` or `eyra settings set LIVE_SPEECH_ENABLED false`."])
+    lines.append("Advanced settings are still available in `eyra settings --json` and the docs.")
+    return "\n".join(lines).strip()
+
+
+def _format_one_setting(row: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            f"{row['label']} ({row['key']})",
+            f"Value: {row['value']}",
+            f"Category: {row['category']}",
+            f"Privacy: {row['privacy']}",
+            f"Restart required: {'yes' if row['restart_required'] else 'no'}",
+            row["description"],
+        ]
+    )
+
+
 def _optional_surface_summary(settings: dict[str, Any]) -> str:
     enabled = [
         name
@@ -378,7 +606,7 @@ def _uninstall(*, dry_run: bool, assume_yes: bool, with_data: bool) -> CommandRe
     paths = _paths()
     candidates = [
         Path(paths["userBin"]) / name
-        for name in ("eyra", "eyra-web", "eyra-doctor", "eyra-certify", "eyra-setup", "eyra-connectors")
+        for name in ("eyra", "eyra-web", "eyra-doctor", "eyra-certify", "eyra-setup", "eyra-connectors", "eyra-menu")
     ]
     existing = [path for path in candidates if path.exists()]
     data_paths = [Path(paths[name]).expanduser() for name in ("configDir", "dataDir", "logDir")]

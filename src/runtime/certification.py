@@ -1213,7 +1213,8 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
         "install_command_shims",
         lambda: (
             require("eyra-connectors" in (root / "setup.sh").read_text(), "setup does not install connector command shim")
-            or "Setup registers eyra, eyra-web, eyra-doctor, eyra-certify, eyra-setup, and eyra-connectors shims."
+            or require("eyra-menu" in (root / "setup.sh").read_text(), "setup does not install menu bar command shim")
+            or "Setup registers eyra, eyra-web, eyra-doctor, eyra-certify, eyra-setup, eyra-connectors, and eyra-menu shims."
         ),
     )
     row(
@@ -1295,7 +1296,8 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
         "install_clean_wheel_commands",
         lambda: (
             require(_version_info()["version"], "version info is unavailable")
-            or "Wheel metadata exposes live, web, doctor, setup, and certify commands."
+            or require("eyra-menu" in (root / "pyproject.toml").read_text(), "wheel metadata does not expose menu command")
+            or "Wheel metadata exposes live, web, doctor, setup, certify, connectors, and menu commands."
         ),
     )
     source_row(

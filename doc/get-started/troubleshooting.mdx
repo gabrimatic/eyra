@@ -6,11 +6,20 @@ description: "Diagnose startup, model, voice, Web UI, filesystem, and tool issue
 Start with:
 
 ```bash
+eyra status
 eyra doctor
 eyra setup
 ```
 
-`doctor` shows what is ready and what needs attention. `setup` repairs local settings and provider selection. Inside a live session, `/status`, `/capabilities`, and `/context` show runtime state, enabled control surfaces, privacy boundary, recent jobs, and recent local changes.
+`status` gives the short answer. `doctor` shows what is ready and what needs attention. `setup` repairs local settings and provider selection. Inside a live session, `/status`, `/capabilities`, and `/context` show runtime state, enabled control surfaces, privacy boundary, recent jobs, and recent local changes.
+
+If you want visible controls:
+
+```bash
+eyra menu
+eyra open
+eyra logs --open
+```
 
 ## Backend does not start
 
@@ -76,6 +85,14 @@ VOICE_INPUT_DEVICE=<index-or-name>
 ```
 
 ## Web UI cannot connect
+
+Start or restart the local control service:
+
+```bash
+eyra start
+eyra restart
+eyra open
+```
 
 Check health:
 

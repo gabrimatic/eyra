@@ -358,7 +358,7 @@ cat > "$BIN_DIR/eyra-web" <<LAUNCHER
 exec "$BIN_DIR/eyra" web "\$@"
 LAUNCHER
 chmod +x "$BIN_DIR/eyra-web"
-for name in eyra-doctor eyra-certify eyra-setup eyra-connectors; do
+for name in eyra-doctor eyra-certify eyra-setup eyra-connectors eyra-menu; do
     subcommand="${name#eyra-}"
     cat > "$BIN_DIR/$name" <<LAUNCHER
 #!/bin/bash
@@ -416,6 +416,8 @@ fi
 echo ""
 echo -e "${GREEN}${BOLD}Eyra installed${NC}"
 echo "Start: eyra"
+echo "Menu bar controls: eyra menu"
+echo "Web controls: eyra open"
 echo "Useful first prompts: eyra examples"
 echo "Setup or repair: eyra setup"
 echo "Support report: eyra doctor"

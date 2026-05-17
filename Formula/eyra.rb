@@ -47,6 +47,10 @@ class Eyra < Formula
       #!/bin/bash
       exec "#{venv}/bin/eyra-connectors" "$@"
     SH
+    (bin/"eyra-menu").write <<~SH
+      #!/bin/bash
+      exec "#{venv}/bin/eyra-menu" "$@"
+    SH
   end
 
   def caveats

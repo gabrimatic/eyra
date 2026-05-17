@@ -47,6 +47,7 @@ eyra-doctor = "runtime.cli:doctor"
 eyra-setup = "runtime.cli:setup"
 eyra-certify = "runtime.cli:certify"
 eyra-connectors = "runtime.connectors.cli:main"
+eyra-menu = "runtime.cli:menu"
 
 [project.urls]
 Homepage = "https://github.com/gabrimatic/eyra"
@@ -71,7 +72,7 @@ ignore = ["E501"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/chat", "src/clients", "src/tools", "src/utils", "src/runtime", "src/web"]
-force-include = { "src/main.py" = "main.py" }
+force-include = { "src/main.py" = "main.py", "apps/EyraMenuBar" = "apps/EyraMenuBar" }
 
 [tool.hatch.metadata]
 allow-direct-references = true

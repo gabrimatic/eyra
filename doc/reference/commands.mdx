@@ -5,14 +5,41 @@ description: "Terminal commands handled locally by Eyra."
 
 Eyra has app commands you run from your shell and session commands you type inside the live assistant.
 
+Most people only need:
+
+```bash
+eyra menu
+eyra status
+eyra setup
+eyra doctor
+eyra open
+eyra
+```
+
 ## App commands
 
 | Command | Behavior |
 | --- | --- |
 | `eyra` | Start the live terminal session |
+| `eyra menu` | Launch the native macOS menu bar controls |
+| `eyra-menu` | Launch the same menu bar controls from the standalone console script |
+| `eyra status` | Show a short readiness, privacy, and service summary |
 | `eyra setup` | Create or repair local settings with guided provider setup |
 | `eyra doctor` | Check local AI, models, voice, microphone, screen capture, paths, and optional surfaces |
 | `eyra doctor --json` | Print the same support report in machine-readable form |
+| `eyra start` | Start the local Web control service in the background |
+| `eyra stop` | Stop the local Web control service started by Eyra |
+| `eyra restart` | Restart the local Web control service |
+| `eyra open` | Start and open the local Web UI |
+| `eyra logs` | Show app and Web service log paths without dumping log content |
+| `eyra logs --open` | Open the log folder in Finder |
+| `eyra settings` | List simple settings with secret values redacted |
+| `eyra settings get <key>` | Show one setting with its privacy note |
+| `eyra settings set <key> <value>` | Change one simple setting safely |
+| `eyra service status` | Show local Web service state |
+| `eyra service start` | Start the local Web service |
+| `eyra service stop` | Stop the local Web service |
+| `eyra service restart` | Restart the local Web service |
 | `eyra examples` | Show useful first prompts and local workflows |
 | `eyra certify` | Run the local certification matrix |
 | `eyra connectors validate` | Validate connector manifests and print a redacted summary |
