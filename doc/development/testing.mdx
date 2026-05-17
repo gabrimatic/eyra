@@ -11,7 +11,7 @@ Verification is part of done. Use the checks that match the changed surface.
 uv run pytest -q
 uv run ruff check src tests
 uv lock --check
-bash -n setup.sh
+bash -n setup.sh install.sh
 ```
 
 ## Package gate
@@ -59,12 +59,11 @@ Keep synthetic and physical microphone results separate.
 
 ```bash
 cd doc
-mint validate --disable-openapi
-mint broken-links --check-anchors
-mint a11y
+MINTLIFY_TELEMETRY_DISABLED=1 npx -y mint@4.2.565 validate --disable-openapi
+MINTLIFY_TELEMETRY_DISABLED=1 npx -y mint@4.2.565 broken-links
 ```
 
-Use `--disable-openapi` because Eyra docs do not define an OpenAPI spec.
+Use `--disable-openapi` because Eyra docs do not define an OpenAPI spec. Use Node 24 LTS or another Mintlify-supported LTS runtime; `mint@4.2.565` rejects Node 25+.
 
 ## Focused tests
 

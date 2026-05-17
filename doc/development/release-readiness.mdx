@@ -11,7 +11,7 @@ Release readiness means the current head is proven, not assumed.
 uv run pytest -q
 uv run ruff check src tests
 uv lock --check
-bash -n setup.sh
+bash -n setup.sh install.sh
 uv build --sdist --wheel
 ```
 
@@ -43,7 +43,16 @@ uv run python scripts/certify_voice_to_computer.py --include-physical --human-ph
 cd doc
 MINTLIFY_TELEMETRY_DISABLED=1 npx -y mint@4.2.565 validate --disable-openapi
 MINTLIFY_TELEMETRY_DISABLED=1 npx -y mint@4.2.565 broken-links
+MINTLIFY_TELEMETRY_DISABLED=1 npx -y mint@4.2.565 export --disable-openapi --output ../docs-export.zip
+cd ..
+rm -rf _site
+mkdir -p _site
+unzip -q docs-export.zip -d _site
+cp install.sh _site/install.sh
+node doc/scripts/prepare-github-pages.mjs _site /eyra
 ```
+
+Mintlify `4.2.565` rejects Node 25+. Use Node 24 LTS or another supported LTS runtime for release docs checks.
 
 Review docs for:
 

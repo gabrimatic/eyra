@@ -144,7 +144,7 @@ Run the project gate:
 uv run pytest -q
 uv run ruff check src tests
 uv lock --check
-bash -n setup.sh
+bash -n setup.sh install.sh
 ```
 
 If a failure depends on physical microphone hardware, keep that gate separate from code-path certification and state the environment that was actually tested.

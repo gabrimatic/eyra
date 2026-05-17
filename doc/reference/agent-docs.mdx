@@ -51,20 +51,15 @@ The `llms.txt` summary uses the `description` field in `docs.json`, and each pag
 
 ## Mintlify checks
 
-Install the CLI:
-
-```bash
-npm i -g mint
-```
-
 Validate locally:
 
 ```bash
 cd doc
-mint validate --disable-openapi
-mint broken-links --check-anchors
-mint a11y
+MINTLIFY_TELEMETRY_DISABLED=1 npx -y mint@4.2.565 validate --disable-openapi
+MINTLIFY_TELEMETRY_DISABLED=1 npx -y mint@4.2.565 broken-links
 ```
+
+Use Node 24 LTS or another Mintlify-supported LTS runtime. `mint@4.2.565` rejects Node 25+.
 
 Preview locally:
 

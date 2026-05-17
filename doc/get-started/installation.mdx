@@ -104,7 +104,7 @@ The checked-in formula installs from the `main` branch and reports `4.2.1`. The 
 Formula behavior:
 
 - Runs `uv sync --frozen --no-dev` at install time.
-- Command shims use `uv run --frozen --no-sync`.
+- Command shims execute the installed virtual environment's console scripts.
 - Provides `eyra`, `eyra-web`, `eyra-doctor`, `eyra-certify`, `eyra-setup`, and `eyra-connectors`.
 - Runs `eyra version`, `eyra paths --json`, and `eyra doctor --json` in the formula test. The formula test uses mock, typed-only mode so a clean Homebrew test does not require a running model backend.
 
@@ -165,7 +165,7 @@ Run the standard local checks:
 uv run pytest -q
 uv run ruff check src tests
 uv lock --check
-bash -n setup.sh
+bash -n setup.sh install.sh
 ```
 
 Run certification when validating voice-to-computer behavior:

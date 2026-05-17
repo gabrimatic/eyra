@@ -46,14 +46,13 @@ Run the relevant gate:
 uv run pytest -q
 uv run ruff check src tests
 uv lock --check
-bash -n setup.sh
+bash -n setup.sh install.sh
 ```
 
 For docs changes:
 
 ```bash
 cd doc
-mint validate --disable-openapi
-mint broken-links --check-anchors
-mint a11y
+MINTLIFY_TELEMETRY_DISABLED=1 npx -y mint@4.2.565 validate --disable-openapi
+MINTLIFY_TELEMETRY_DISABLED=1 npx -y mint@4.2.565 broken-links
 ```

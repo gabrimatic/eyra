@@ -8,7 +8,7 @@ Eyra is a local-first voice agent for the macOS terminal.
 
 Speak or type. Eyra routes the request to an OpenAI-compatible model, calls local tools when needed, and speaks back through Local Whisper. Long work runs as owned background tasks, so the main coordinator stays available for quick questions, status, and cancellation. The default path stays on your machine: Ollama at localhost, Silero VAD in process, screenshots in memory, local PDFs/files, no telemetry.
 
-Cloud providers, network-backed tools, full OS command tools, MCP bridges, universal connectors, external agent delegation, Realtime voice, and the Web UI are opt-in. Current `main` is staged as the `4.2.1` release line on top of the published `v4.2.0` release.
+Cloud providers, network-backed tools, full OS command tools, MCP bridges, universal connectors, external agent delegation, Realtime voice, and the Web UI are opt-in. The current release line is `4.2.1`.
 
 [Read the docs](https://gabrimatic.github.io/eyra/) for installation, configuration, commands, architecture, and release checks.
 
@@ -58,6 +58,7 @@ eyra doctor
 eyra examples
 eyra doctor --json
 eyra certify
+eyra connectors validate
 eyra web
 eyra version
 eyra paths
@@ -827,7 +828,7 @@ cd eyra
 uv run python -m pytest -q
 uv run ruff check src tests
 uv lock --check
-bash -n setup.sh
+bash -n setup.sh install.sh
 uv build --wheel
 USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv run python src/main.py
 WEB_UI_ENABLED=true USE_MOCK_CLIENT=true uv run python -m web.server

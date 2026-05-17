@@ -29,7 +29,7 @@ USE_MOCK_CLIENT=true LIVE_LISTENING_ENABLED=false LIVE_SPEECH_ENABLED=false uv r
 uv run pytest -q
 uv run ruff check src tests
 uv lock --check
-bash -n setup.sh
+bash -n setup.sh install.sh
 ```
 
 Build package artifacts:
@@ -40,14 +40,12 @@ uv build --sdist --wheel
 
 ## Mintlify docs checks
 
-Mintlify requires Node.js 20.17+ for the CLI.
+Mintlify requires a supported LTS Node.js runtime. The pinned release check uses Node 24 because `mint@4.2.565` rejects Node 25+.
 
 ```bash
-npm i -g mint
 cd doc
-mint validate --disable-openapi
-mint broken-links --check-anchors
-mint a11y
+MINTLIFY_TELEMETRY_DISABLED=1 npx -y mint@4.2.565 validate --disable-openapi
+MINTLIFY_TELEMETRY_DISABLED=1 npx -y mint@4.2.565 broken-links
 ```
 
 Preview:
@@ -55,13 +53,6 @@ Preview:
 ```bash
 cd doc
 mint dev --no-open --disable-openapi
-```
-
-Disable Mintlify CLI telemetry for local checks:
-
-```bash
-cd doc
-MINTLIFY_TELEMETRY_DISABLED=1 mint validate --disable-openapi
 ```
 
 ## Test layout
