@@ -1,11 +1,23 @@
 ---
 title: "Menu bar"
-description: "Use Eyra from the macOS menu bar."
+description: "Try Eyra's native macOS menu bar developer preview."
 ---
 
-The menu bar is the simplest way to control Eyra on a Mac. It keeps the normal path out of configuration files and long terminal commands.
+The menu bar is a native macOS control surface for Eyra. In `4.2.1`, it is a developer preview: source and wheel installs include the Swift package, but running it still requires Swift/Xcode command-line tools until Eyra ships a packaged `.app` bundle.
 
-Open it from a source checkout or installed command:
+For normal installed use today, open the local Web control UI:
+
+```bash
+eyra open
+```
+
+Check whether the menu bar preview can run on this Mac:
+
+```bash
+eyra menu --json
+```
+
+The JSON response includes `mode`, `swiftRequired`, `swiftAvailable`, and `fallbackCommand`. Launch the preview when Swift is available:
 
 ```bash
 eyra menu
@@ -86,3 +98,5 @@ eyra logs
 ## Limits
 
 The current menu bar app is a native SwiftUI menu-bar control surface. It does not install a privileged helper, does not require `sudo`, does not publish anything, and does not enable optional tools by itself.
+
+It is not yet the default normal-user path because it is not packaged as a standalone `.app` bundle. Use `eyra open` as the reliable installed-user control surface until that packaging work is complete.

@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import contextlib
 import importlib.metadata
+import importlib.resources as resources
 import io
 import json
 import os
@@ -33,6 +34,15 @@ class CommandResult:
     data: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class MenuBarResource:
+    resource_available: bool
+    mode: str
+    path: Path | None
+    swift_required: bool
+    fallback_command: str = "eyra open"
+
+
 def cli(argv: list[str] | None = None) -> int:
     """Run the Eyra command router. No args starts the live session."""
     parser = argparse.ArgumentParser(prog="eyra", description="Local-first voice coordinator for macOS.")
@@ -44,7 +54,7 @@ def cli(argv: list[str] | None = None) -> int:
     stop.add_argument("--json", action="store_true", help="Print machine-readable service status.")
     restart = subcommands.add_parser("restart", help="Restart Eyra's local Web control service.")
     restart.add_argument("--json", action="store_true", help="Print machine-readable service status.")
-    menu = subcommands.add_parser("menu", help="Launch the native macOS menu bar control surface.")
+    menu = subcommands.add_parser("menu", help="Launch the native macOS menu bar developer preview.")
     menu.add_argument("--json", action="store_true", help="Print machine-readable launch status.")
     status = subcommands.add_parser("status", help="Show simple local readiness and service status.")
     status.add_argument("--json", action="store_true", help="Print machine-readable status.")
@@ -492,19 +502,137 @@ def _logs(*, open_folder: bool) -> CommandResult:
 
 
 def _launch_menu_bar() -> CommandResult:
-    package = _repo_root() / "apps" / "EyraMenuBar"
-    if not package.exists():
-        return CommandResult(False, "Eyra menu bar app is not included in this install yet. Use `eyra open` for the Web control UI.", {"available": False})
+    resource = _find_menu_bar_resource()
     swift = shutil.which("swift")
+    data = _menu_bar_resource_data(resource, swift)
+    if not resource.resource_available or resource.path is None:
+        return CommandResult(
+            False,
+            "Eyra menu bar resources are not included in this install yet. Use `eyra open` for the installed control UI.",
+            data,
+        )
+    if resource.mode == "app-bundle":
+        subprocess.Popen(
+            ["/usr/bin/open", str(resource.path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        return CommandResult(True, "Eyra menu bar app is launching.", data)
     if not swift:
-        return CommandResult(False, "Swift is required to run the menu bar app from source. Install Xcode or use `eyra open`.", {"available": False})
+        return CommandResult(
+            False,
+            "Eyra menu bar is a developer preview in this install and needs Swift/Xcode to run. Use `eyra open` for the installed control UI.",
+            data,
+        )
+    env = os.environ.copy()
+    env["EYRA_CLI_PATH"] = _current_eyra_command()
     subprocess.Popen(
-        [swift, "run", "--package-path", str(package), "EyraMenuBar"],
+        [swift, "run", "--package-path", str(resource.path), "EyraMenuBar"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
+        env=env,
     )
-    return CommandResult(True, "Eyra menu bar app is launching.", {"available": True, "package": str(package)})
+    return CommandResult(True, "Eyra menu bar developer preview is launching.", data)
+
+
+def _find_menu_bar_resource() -> MenuBarResource:
+    for mode, path in _menu_bar_package_candidates():
+        if (path / "Package.swift").exists():
+            return MenuBarResource(True, mode, path, swift_required=True)
+    for path in _menu_bar_app_bundle_candidates():
+        if (path / "Contents" / "MacOS" / "EyraMenuBar").exists():
+            return MenuBarResource(True, "app-bundle", path, swift_required=False)
+    return MenuBarResource(False, "unavailable", None, swift_required=False)
+
+
+def _menu_bar_package_candidates() -> list[tuple[str, Path]]:
+    home = Path.home()
+    repo_package = _repo_root() / "apps" / "EyraMenuBar"
+    package_resource = _package_menu_bar_resource_path()
+    candidates: list[tuple[str, Path | None]] = [
+        ("source", repo_package),
+        ("package-resource", package_resource),
+        ("managed-install", home / ".local" / "share" / "eyra" / "app" / "apps" / "EyraMenuBar"),
+        ("homebrew", Path("/opt/homebrew/opt/eyra/libexec/apps/EyraMenuBar")),
+        ("homebrew", Path("/usr/local/opt/eyra/libexec/apps/EyraMenuBar")),
+        ("homebrew", Path("/opt/homebrew/var/eyra/app/apps/EyraMenuBar")),
+        ("homebrew", Path("/usr/local/var/eyra/app/apps/EyraMenuBar")),
+    ]
+    return [(mode, path) for mode, path in candidates if path is not None]
+
+
+def _package_menu_bar_resource_path() -> Path | None:
+    try:
+        root = resources.files("runtime").joinpath("resources", "EyraMenuBar")
+    except (FileNotFoundError, ModuleNotFoundError):
+        return None
+    if not root.joinpath("Package.swift").is_file():
+        return None
+    path = Path(str(root))
+    if path.exists():
+        return path
+    return _materialize_menu_bar_resource(root)
+
+
+def _materialize_menu_bar_resource(root) -> Path | None:
+    target = Path.home() / ".local" / "share" / "eyra" / "menu-bar" / "EyraMenuBar"
+    try:
+        if (target / "Package.swift").exists():
+            return target
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+        _copy_traversable(root, target)
+    except OSError:
+        return None
+    return target if (target / "Package.swift").exists() else None
+
+
+def _copy_traversable(source, target: Path) -> None:
+    target.mkdir(parents=True, exist_ok=True)
+    for child in source.iterdir():
+        destination = target / child.name
+        if child.is_dir():
+            _copy_traversable(child, destination)
+        else:
+            destination.write_bytes(child.read_bytes())
+
+
+def _menu_bar_app_bundle_candidates() -> list[Path]:
+    home = Path.home()
+    return [
+        _repo_root() / "apps" / "EyraMenuBar.app",
+        home / ".local" / "share" / "eyra" / "EyraMenuBar.app",
+        home / "Applications" / "EyraMenuBar.app",
+        Path("/Applications/EyraMenuBar.app"),
+        Path("/opt/homebrew/opt/eyra/libexec/EyraMenuBar.app"),
+        Path("/usr/local/opt/eyra/libexec/EyraMenuBar.app"),
+    ]
+
+
+def _current_eyra_command() -> str:
+    candidate = Path(sys.argv[0]).expanduser()
+    if candidate.exists():
+        try:
+            return str(candidate.resolve())
+        except OSError:
+            return str(candidate)
+    resolved = shutil.which("eyra")
+    return resolved or sys.argv[0] or "eyra"
+
+
+def _menu_bar_resource_data(resource: MenuBarResource, swift: str | None) -> dict[str, Any]:
+    return {
+        "available": resource.resource_available and (resource.mode == "app-bundle" or bool(swift)),
+        "resourceAvailable": resource.resource_available,
+        "mode": resource.mode,
+        "path": str(resource.path) if resource.path else "",
+        "swiftRequired": resource.swift_required,
+        "swiftAvailable": bool(swift),
+        "swiftPath": swift or "",
+        "fallbackCommand": resource.fallback_command,
+    }
 
 
 def _format_settings(rows: list[dict[str, Any]]) -> str:

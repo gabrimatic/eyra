@@ -16,13 +16,13 @@ Install Eyra:
 curl -fsSL https://gabrimatic.github.io/eyra/install.sh | bash
 ```
 
-Then open the menu bar controls:
+Then open the local control UI:
 
 ```bash
-eyra menu
+eyra open
 ```
 
-The menu bar is the easiest control surface. It can start or stop Eyra's local control service, open the Web UI, run setup, run Doctor, open logs, open docs, and toggle simple voice/privacy settings.
+`eyra open` starts Eyra's local control service and opens the Web UI on this Mac. It is the easiest installed-user control surface today.
 
 If you prefer the terminal assistant directly:
 
@@ -37,7 +37,7 @@ eyra setup
 eyra status
 eyra doctor
 eyra examples
-eyra open
+eyra menu
 ```
 
 Inside Eyra, try:
@@ -93,13 +93,21 @@ Secrets are not printed by `eyra status`, `eyra settings`, the menu bar, or Doct
 
 ## Menu Bar App
 
+The native macOS menu bar app exists as a developer preview in `4.2.1`. It is included in source and wheel resources, but it still requires Swift/Xcode command-line tools until Eyra ships a packaged `.app` bundle.
+
 Run:
 
 ```bash
 eyra menu
 ```
 
-The native macOS menu bar app shows:
+`eyra menu --json` reports whether the menu bar resource is available, whether Swift is required, and the fallback command. If Swift is not available, use:
+
+```bash
+eyra open
+```
+
+The menu bar preview shows:
 
 - Local model readiness
 - Voice status
@@ -107,7 +115,7 @@ The native macOS menu bar app shows:
 - Whether the default path keeps data on this Mac
 - Simple toggles for voice, speech, network tools, Mac control tools, connectors, and Realtime voice
 
-It does not bypass approvals or enable risky tools by itself.
+It does not bypass approvals or enable risky tools by itself. Do not treat it as the default normal-user path until the `.app` bundle is packaged.
 
 ## Simple Settings
 

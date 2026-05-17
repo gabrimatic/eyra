@@ -72,7 +72,7 @@ ignore = ["E501"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/chat", "src/clients", "src/tools", "src/utils", "src/runtime", "src/web"]
-force-include = { "src/main.py" = "main.py", "apps/EyraMenuBar" = "apps/EyraMenuBar" }
+force-include = { "src/main.py" = "main.py", "apps/EyraMenuBar/Package.swift" = "runtime/resources/EyraMenuBar/Package.swift", "apps/EyraMenuBar/Sources" = "runtime/resources/EyraMenuBar/Sources", "apps/EyraMenuBar/Tests" = "runtime/resources/EyraMenuBar/Tests" }
 
 [tool.hatch.metadata]
 allow-direct-references = true

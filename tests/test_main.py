@@ -10,7 +10,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from main import get_log_file_path
 from runtime.cli import (
     _detect_install_source,
+    _find_menu_bar_resource,
     _is_source_checkout,
+    _launch_menu_bar,
     _logs,
     _paths,
     _primary_env_path,
@@ -268,3 +270,65 @@ class TestCliSupportCommands:
         assert result.ok is True
         assert "App log:" in result.message
         assert "Do not share" in result.message
+
+    def test_menu_bar_source_checkout_resource_is_discovered(self, monkeypatch, tmp_path):
+        repo = tmp_path / "repo"
+        package = repo / "apps" / "EyraMenuBar"
+        package.mkdir(parents=True)
+        (package / "Package.swift").write_text("// swift package\n")
+        monkeypatch.setattr("runtime.cli._repo_root", lambda: repo)
+        monkeypatch.setattr("runtime.cli._package_menu_bar_resource_path", lambda: None)
+
+        resource = _find_menu_bar_resource()
+
+        assert resource.resource_available is True
+        assert resource.mode == "source"
+        assert resource.path == package
+        assert resource.swift_required is True
+
+    def test_menu_bar_package_resource_is_discovered_for_installed_wheel(self, monkeypatch, tmp_path):
+        repo = tmp_path / "install-root"
+        package = tmp_path / "site-packages" / "runtime" / "resources" / "EyraMenuBar"
+        package.mkdir(parents=True)
+        (package / "Package.swift").write_text("// swift package\n")
+        monkeypatch.setattr("runtime.cli._repo_root", lambda: repo)
+        monkeypatch.setattr("runtime.cli._package_menu_bar_resource_path", lambda: package)
+
+        resource = _find_menu_bar_resource()
+
+        assert resource.resource_available is True
+        assert resource.mode == "package-resource"
+        assert resource.path == package
+
+    def test_menu_bar_missing_resource_returns_installed_fallback(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("runtime.cli._repo_root", lambda: tmp_path / "missing")
+        monkeypatch.setattr("runtime.cli._package_menu_bar_resource_path", lambda: None)
+        monkeypatch.setattr("runtime.cli.Path.home", lambda: tmp_path / "home")
+
+        result = _launch_menu_bar()
+
+        assert result.ok is False
+        assert result.data["available"] is False
+        assert result.data["mode"] == "unavailable"
+        assert result.data["fallbackCommand"] == "eyra open"
+        assert "eyra open" in result.message
+
+    def test_menu_bar_without_swift_reports_clear_developer_preview_fallback(self, monkeypatch, tmp_path):
+        repo = tmp_path / "repo"
+        package = repo / "apps" / "EyraMenuBar"
+        package.mkdir(parents=True)
+        (package / "Package.swift").write_text("// swift package\n")
+        monkeypatch.setattr("runtime.cli._repo_root", lambda: repo)
+        monkeypatch.setattr("runtime.cli._package_menu_bar_resource_path", lambda: None)
+        monkeypatch.setattr("runtime.cli.shutil.which", lambda command: None if command == "swift" else "/usr/bin/tool")
+
+        result = _launch_menu_bar()
+
+        assert result.ok is False
+        assert result.data["resourceAvailable"] is True
+        assert result.data["available"] is False
+        assert result.data["mode"] == "source"
+        assert result.data["swiftRequired"] is True
+        assert result.data["swiftAvailable"] is False
+        assert result.data["fallbackCommand"] == "eyra open"
+        assert "developer preview" in result.message

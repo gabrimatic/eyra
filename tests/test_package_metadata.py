@@ -17,7 +17,11 @@ class TestPackageMetadata:
         assert data["project"]["scripts"]["eyra-menu"] == "runtime.cli:menu"
         wheel = data["tool"]["hatch"]["build"]["targets"]["wheel"]
         assert wheel["force-include"]["src/main.py"] == "main.py"
-        assert wheel["force-include"]["apps/EyraMenuBar"] == "apps/EyraMenuBar"
+        assert wheel["force-include"]["apps/EyraMenuBar/Package.swift"] == "runtime/resources/EyraMenuBar/Package.swift"
+        assert wheel["force-include"]["apps/EyraMenuBar/Sources"] == "runtime/resources/EyraMenuBar/Sources"
+        assert wheel["force-include"]["apps/EyraMenuBar/Tests"] == "runtime/resources/EyraMenuBar/Tests"
+        assert all(".build" not in path for path in wheel["force-include"])
+        assert all(".build" not in path for path in wheel["force-include"].values())
 
     def test_release_candidate_version_is_pep440(self):
         data = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())

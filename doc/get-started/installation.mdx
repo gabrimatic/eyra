@@ -1,6 +1,6 @@
 ---
 title: "Installation"
-description: "Install Eyra, open the menu bar, and start the local runtime."
+description: "Install Eyra, open local controls, and start the local runtime."
 ---
 
 Runtime: macOS on Apple Silicon. The easiest path is the guided installer. It installs Eyra, checks local AI and voice, and leaves you with plain next steps if one piece still needs attention.
@@ -37,10 +37,10 @@ That gives the next repair step without making you reinstall.
 
 ## After install
 
-Open menu bar controls:
+Open the installed-user control UI:
 
 ```bash
-eyra menu
+eyra open
 ```
 
 Start a terminal session:
@@ -49,11 +49,13 @@ Start a terminal session:
 eyra
 ```
 
-Open the local Web control UI:
+Check the menu bar developer preview:
 
 ```bash
-eyra open
+eyra menu --json
 ```
+
+The menu bar preview requires Swift/Xcode command-line tools until a packaged `.app` bundle ships. If it is unavailable, keep using `eyra open`.
 
 ## Source checkout
 
@@ -73,7 +75,7 @@ Run from source:
 uv run python src/main.py
 ```
 
-Run the menu bar app from source:
+Run the menu bar developer preview from source:
 
 ```bash
 eyra menu

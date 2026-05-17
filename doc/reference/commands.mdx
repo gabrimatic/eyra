@@ -8,11 +8,11 @@ Eyra has app commands you run from your shell and session commands you type insi
 Most people only need:
 
 ```bash
-eyra menu
+eyra open
 eyra status
 eyra setup
 eyra doctor
-eyra open
+eyra menu --json
 eyra
 ```
 
@@ -21,8 +21,9 @@ eyra
 | Command | Behavior |
 | --- | --- |
 | `eyra` | Start the live terminal session |
-| `eyra menu` | Launch the native macOS menu bar controls |
-| `eyra-menu` | Launch the same menu bar controls from the standalone console script |
+| `eyra menu` | Launch the native macOS menu bar developer preview when available |
+| `eyra menu --json` | Report menu bar availability, install mode, Swift requirement, and fallback command |
+| `eyra-menu` | Launch the same menu bar preview from the standalone console script |
 | `eyra status` | Show a short readiness, privacy, and service summary |
 | `eyra setup` | Create or repair local settings with guided provider setup |
 | `eyra doctor` | Check local AI, models, voice, microphone, screen capture, paths, and optional surfaces |
