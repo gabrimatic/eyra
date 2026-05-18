@@ -70,6 +70,22 @@ line-length = 120
 select = ["E", "F", "I", "W"]
 ignore = ["E501"]
 
+[tool.hatch.build]
+exclude = [
+    "/.playwright-mcp",
+    "/.pytest_cache",
+    "/.ruff_cache",
+    "/.scratchpad",
+    "/.venv",
+    "/apps/EyraMenuBar/.build",
+    "/dist",
+    "/docs-export.zip",
+    "/eyra.log",
+    "/site",
+    "**/__pycache__",
+    "**/*.pyc",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/chat", "src/clients", "src/tools", "src/utils", "src/runtime", "src/web"]
 force-include = { "src/main.py" = "main.py", "apps/EyraMenuBar/Package.swift" = "runtime/resources/EyraMenuBar/Package.swift", "apps/EyraMenuBar/Sources" = "runtime/resources/EyraMenuBar/Sources", "apps/EyraMenuBar/Tests" = "runtime/resources/EyraMenuBar/Tests", "scripts/build_menu_bar_app.sh" = "runtime/resources/scripts/build_menu_bar_app.sh" }
