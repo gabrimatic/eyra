@@ -122,7 +122,7 @@ eyra doctor
 `doctor` checks command availability and asks the memory MCP server for a small compact context. If the command is missing:
 
 ```bash
-npm install -g mcp-prose-memory
+npm install -g mcp-prose-memory || npm install -g https://github.com/gabrimatic/mcp-prose-memory/releases/download/v3.1.0/mcp-prose-memory-3.1.0.tgz
 ```
 
 If the status says `memory file error`, the local JSON file may be corrupt or unreadable. The path is shown by `eyra memory status`. Move the file aside if you want Eyra to start a fresh memory file.

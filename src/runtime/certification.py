@@ -1255,10 +1255,10 @@ def _add_installation_rows(report: CertificationReport, settings: Settings, tmp_
         command="eyra uninstall --dry-run",
     )
     source_row(
-        "install_private_repo_warning",
+        "install_release_download_guidance",
         lambda: (
-            require("Private repositories require GITHUB_TOKEN" in (root / "install.sh").read_text(), "release installer lacks private repo guidance")
-            or "Release installer reports private-repo authentication needs."
+            require("private fork" in (root / "install.sh").read_text(), "release installer lacks private-fork authentication guidance")
+            or "Release installer reports private-fork authentication needs."
         ),
     )
     source_row(

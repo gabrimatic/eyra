@@ -161,7 +161,7 @@ def test_certification_matrix_contains_required_structured_rows(tmp_path):
         "install_web_command",
         "install_update_source_detection",
         "install_uninstall_dry_run",
-        "install_private_repo_warning",
+        "install_release_download_guidance",
         "install_homebrew_tap_formula_exists",
         "install_homebrew_formula_test",
         "install_uv_tool_compatibility",

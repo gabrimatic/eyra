@@ -21,6 +21,8 @@ for arg in "$@"; do
     esac
 done
 START_SERVICES="${EYRA_SETUP_START_SERVICES:-true}"
+MCP_MEMORY_PACKAGE="${EYRA_MCP_MEMORY_PACKAGE:-mcp-prose-memory}"
+MCP_MEMORY_FALLBACK_PACKAGE="${EYRA_MCP_MEMORY_FALLBACK_PACKAGE:-https://github.com/gabrimatic/mcp-prose-memory/releases/download/v3.1.0/mcp-prose-memory-3.1.0.tgz}"
 if "$NON_INTERACTIVE"; then
     START_SERVICES=false
 fi
@@ -60,6 +62,9 @@ wait_for_ollama() {
         sleep 1
     done
     return 1
+}
+install_mcp_prose_memory() {
+    npm install -g "$MCP_MEMORY_PACKAGE" || npm install -g "$MCP_MEMORY_FALLBACK_PACKAGE"
 }
 
 trap 'echo ""; echo -e "  ${DIM}Setup cancelled.${NC}"; echo ""; exit 130' INT
@@ -193,13 +198,13 @@ if command -v mcp-prose-memory &>/dev/null; then
 else
     if ! command -v npm &>/dev/null && command -v brew &>/dev/null && { ! is_interactive || ask_yes_no "Install Node.js now so Eyra can install local memory support?" "yes"; }; then
         log_info "Installing Node.js with Homebrew..."
-        brew install node || log_warn "Node.js install did not finish. Memory can be repaired later with: npm install -g mcp-prose-memory"
+        brew install node || log_warn "Node.js install did not finish. Memory can be repaired later with: npm install -g $MCP_MEMORY_FALLBACK_PACKAGE"
     fi
     if command -v npm &>/dev/null; then
         log_info "Installing mcp-prose-memory..."
-        npm install -g mcp-prose-memory || log_warn "mcp-prose-memory install did not finish. Memory can be repaired later with: npm install -g mcp-prose-memory"
+        install_mcp_prose_memory || log_warn "mcp-prose-memory install did not finish. Memory can be repaired later with: npm install -g $MCP_MEMORY_FALLBACK_PACKAGE"
     else
-        log_warn "mcp-prose-memory is missing. Memory will need setup with: npm install -g mcp-prose-memory"
+        log_warn "mcp-prose-memory is missing. Memory will need setup with: npm install -g $MCP_MEMORY_FALLBACK_PACKAGE"
     fi
 fi
 

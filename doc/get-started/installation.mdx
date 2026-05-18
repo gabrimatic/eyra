@@ -11,8 +11,6 @@ Runtime: macOS on Apple Silicon. The easiest path is the guided installer. It in
 curl -fsSL https://gabrimatic.github.io/eyra/install.sh | bash
 ```
 
-If the repository is private, set `GITHUB_TOKEN` first or install from a checked-out source tree.
-
 The installer:
 
 - Checks this Mac.
@@ -103,10 +101,10 @@ eyra
 Supported overrides:
 
 ```bash
-EYRA_VERSION=v4.3.1 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
+EYRA_VERSION=v4.3.2 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
 ```
 
-Private repositories require `GITHUB_TOKEN`. The installer reads GitHub release JSON, prefers release assets with checksum files, and refuses unverified tag-archive fallback unless you explicitly set `EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE=true`. For testing from a checked-out tree, use `EYRA_SOURCE_PATH=/path/to/eyra ./install.sh`; the installed app still writes user config to `~/.config/eyra/.env`, not into the app directory.
+The installer reads GitHub release JSON, prefers release assets with checksum files, and refuses unverified tag-archive fallback unless you explicitly set `EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE=true`. For testing from a checked-out tree, use `EYRA_SOURCE_PATH=/path/to/eyra ./install.sh`; the installed app still writes user config to `~/.config/eyra/.env`, not into the app directory.
 
 Disable installer prompts with:
 
@@ -130,7 +128,7 @@ Current formula status: custom-tap scaffold.
 brew install gabrimatic/eyra/eyra
 ```
 
-The checked-in formula installs from the `main` branch and reports `4.3.1`. The formula remains tap preparation until it is switched to a tagged release URL and pinned sha256. Treat it as tap preparation, not a stable public formula.
+The checked-in formula installs from the `main` branch and reports `4.3.2`. The formula remains tap preparation until it is switched to a tagged release URL and pinned sha256. Treat it as tap preparation, not a stable public formula.
 
 Formula behavior:
 
@@ -165,11 +163,11 @@ brew install local-whisper
 Eyra uses `mcp-prose-memory` for compact local memory.
 
 ```bash
-npm install -g mcp-prose-memory
+npm install -g mcp-prose-memory || npm install -g https://github.com/gabrimatic/mcp-prose-memory/releases/download/v3.1.0/mcp-prose-memory-3.1.0.tgz
 eyra memory status
 ```
 
-The guided installer and `setup.sh` try this for you when npm is available. If Node.js is missing, install it from Homebrew or from nodejs.org, then rerun `eyra doctor`.
+The guided installer and `setup.sh` try the npm package first, then fall back to the GitHub release tarball while npm publication is unavailable. If Node.js is missing, install it from Homebrew or from nodejs.org, then rerun `eyra doctor`.
 
 Preflight resolves the `wh` binary from `PATH`, LaunchAgent plists, and common Homebrew paths. If voice is disabled, the Local Whisper check is skipped.
 

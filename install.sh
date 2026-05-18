@@ -11,6 +11,8 @@ API_HOST="${GITHUB_API_HOST:-api.github.com}"
 SOURCE_PATH="${EYRA_SOURCE_PATH:-}"
 ALLOW_UNVERIFIED_TAG_ARCHIVE="${EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE:-false}"
 VERIFY_WITH_MOCK="${EYRA_INSTALL_VERIFY_MOCK:-false}"
+MCP_MEMORY_PACKAGE="${EYRA_MCP_MEMORY_PACKAGE:-mcp-prose-memory}"
+MCP_MEMORY_FALLBACK_PACKAGE="${EYRA_MCP_MEMORY_FALLBACK_PACKAGE:-https://github.com/gabrimatic/mcp-prose-memory/releases/download/v3.1.0/mcp-prose-memory-3.1.0.tgz}"
 
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
@@ -55,6 +57,9 @@ wait_for_ollama() {
         sleep 1
     done
     return 1
+}
+install_mcp_prose_memory() {
+    npm install -g "$MCP_MEMORY_PACKAGE" || npm install -g "$MCP_MEMORY_FALLBACK_PACKAGE"
 }
 
 find_packaged_menu_script() {
@@ -272,13 +277,13 @@ fi
 if ! command -v mcp-prose-memory &>/dev/null; then
     if ! command -v npm &>/dev/null && command -v brew &>/dev/null && is_interactive && ask_yes_no "Install Node.js now so Eyra can install local memory support?" "yes"; then
         log_info "Installing Node.js..."
-        brew install node || log_warn "Node.js install did not finish. Memory can be repaired later with: npm install -g mcp-prose-memory"
+        brew install node || log_warn "Node.js install did not finish. Memory can be repaired later with: npm install -g $MCP_MEMORY_FALLBACK_PACKAGE"
     fi
     if command -v npm &>/dev/null; then
         log_info "Installing mcp-prose-memory..."
-        npm install -g mcp-prose-memory || log_warn "mcp-prose-memory install did not finish. Memory can be repaired later with: npm install -g mcp-prose-memory"
+        install_mcp_prose_memory || log_warn "mcp-prose-memory install did not finish. Memory can be repaired later with: npm install -g $MCP_MEMORY_FALLBACK_PACKAGE"
     else
-        log_warn "mcp-prose-memory is missing. Memory will need setup with: npm install -g mcp-prose-memory"
+        log_warn "mcp-prose-memory is missing. Memory will need setup with: npm install -g $MCP_MEMORY_FALLBACK_PACKAGE"
     fi
 else
     log_ok "mcp-prose-memory"
@@ -352,7 +357,7 @@ elif [[ "$VERSION" == "latest" || "$VERSION" == v* ]]; then
             fail "Release asset checksum is missing. Add a checksum release asset or set EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE=true for tag archive fallback only."
         fi
     else
-        [[ "$VERSION" != "latest" ]] || fail "Could not read the latest GitHub release. If the repo is private, set GITHUB_TOKEN or install from a checked-out source tree."
+        [[ "$VERSION" != "latest" ]] || fail "Could not read the latest GitHub release. If you are installing from a private fork, set GITHUB_TOKEN or install from a checked-out source tree."
         log_warn "Could not read release JSON for ${VERSION}; falling back to tag archive."
     fi
 else
@@ -368,7 +373,7 @@ if [[ -z "$package_kind" ]]; then
     package_kind="archive"
     package_path="$tmp_dir/eyra.tar.gz"
     if ! download "$archive_url" "$package_path"; then
-        fail "Could not download ${archive_url}. Private repositories require GITHUB_TOKEN."
+        fail "Could not download ${archive_url}. If you are installing from a private fork, set GITHUB_TOKEN."
     fi
 fi
 
