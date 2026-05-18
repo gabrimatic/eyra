@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+No unreleased changes.
+
+## [4.3.1] - 2026-05-18
+
 ### Fixed
 
 - `MEMORY_WRITE_REQUIRE_CONFIRMATION=true` now blocks automatic non-explicit memory saves while keeping direct `remember` commands active.

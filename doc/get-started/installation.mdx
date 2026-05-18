@@ -103,7 +103,7 @@ eyra
 Supported overrides:
 
 ```bash
-EYRA_VERSION=v4.3.0 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
+EYRA_VERSION=v4.3.1 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
 ```
 
 Private repositories require `GITHUB_TOKEN`. The installer reads GitHub release JSON, prefers release assets with checksum files, and refuses unverified tag-archive fallback unless you explicitly set `EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE=true`. For testing from a checked-out tree, use `EYRA_SOURCE_PATH=/path/to/eyra ./install.sh`; the installed app still writes user config to `~/.config/eyra/.env`, not into the app directory.
@@ -130,7 +130,7 @@ Current formula status: custom-tap scaffold.
 brew install gabrimatic/eyra/eyra
 ```
 
-The checked-in formula installs from the `main` branch and reports `4.3.0`. The formula remains tap preparation until it is switched to a tagged release URL and pinned sha256. Treat it as tap preparation, not a stable public formula.
+The checked-in formula installs from the `main` branch and reports `4.3.1`. The formula remains tap preparation until it is switched to a tagged release URL and pinned sha256. Treat it as tap preparation, not a stable public formula.
 
 Formula behavior:
 
