@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,8 +44,8 @@ def test_docs_pages_workflow_is_scoped_and_static_exported():
     assert "mint@4.2.565 export" in workflow
     assert "prepare-github-pages.mjs _site /eyra" in workflow
     assert "cp install.sh _site/install.sh" in workflow
-    assert "actions/upload-pages-artifact@v5" in workflow
-    assert "actions/deploy-pages@v5" in workflow
+    assert re.search(r"actions/upload-pages-artifact@[0-9a-f]{40}", workflow)
+    assert re.search(r"actions/deploy-pages@[0-9a-f]{40}", workflow)
     deploy_guard = (
         "if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') "
         "&& vars.EYRA_DEPLOY_PAGES == 'true'"
