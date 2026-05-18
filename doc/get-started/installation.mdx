@@ -101,7 +101,7 @@ eyra
 Supported overrides:
 
 ```bash
-EYRA_VERSION=v4.3.2 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
+EYRA_VERSION=v4.3.3 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
 ```
 
 The installer reads GitHub release JSON, prefers release assets with checksum files, and refuses unverified tag-archive fallback unless you explicitly set `EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE=true`. For testing from a checked-out tree, use `EYRA_SOURCE_PATH=/path/to/eyra ./install.sh`; the installed app still writes user config to `~/.config/eyra/.env`, not into the app directory.
@@ -122,13 +122,14 @@ EYRA_INSTALL_STRICT_VERIFY=true ./install.sh
 
 ## Homebrew tap
 
-Current formula status: custom-tap scaffold.
+Current formula status: public tap formula.
 
 ```bash
-brew install gabrimatic/eyra/eyra
+brew tap gabrimatic/tap
+brew install eyra
 ```
 
-The checked-in formula installs from the `main` branch and reports `4.3.2`. The formula remains tap preparation until it is switched to a tagged release URL and pinned sha256. Treat it as tap preparation, not a stable public formula.
+The formula installs the latest tagged GitHub release asset with a pinned checksum.
 
 Formula behavior:
 
@@ -167,7 +168,7 @@ npm install -g mcp-prose-memory || npm install -g https://github.com/gabrimatic/
 eyra memory status
 ```
 
-The guided installer and `setup.sh` try the npm package first, then fall back to the GitHub release tarball while npm publication is unavailable. If Node.js is missing, install it from Homebrew or from nodejs.org, then rerun `eyra doctor`.
+The guided installer and `setup.sh` try the npm package first, then fall back to the GitHub release tarball if npm authentication or registry access is unavailable. If Node.js is missing, install it from Homebrew or from nodejs.org, then rerun `eyra doctor`.
 
 Preflight resolves the `wh` binary from `PATH`, LaunchAgent plists, and common Homebrew paths. If voice is disabled, the Local Whisper check is skipped.
 

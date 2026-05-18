@@ -2,10 +2,9 @@ class Eyra < Formula
   desc "Local-first voice coordinator for macOS terminals"
   homepage "https://github.com/gabrimatic/eyra"
 
-  # Custom tap scaffold: tracks main until the formula is switched to a
-  # tagged release asset and pinned sha256.
-  url "https://github.com/gabrimatic/eyra.git", branch: "main"
-  version "4.3.2"
+  url "https://github.com/gabrimatic/eyra/releases/download/v4.3.3/eyra-4.3.3.tar.gz"
+  sha256 "656668d34ef5b64fd0cac00bdcd5fc8dbb9f77092e1e46458d3df9b128edb2ae"
+  version "4.3.3"
   license "PolyForm-Noncommercial-1.0.0"
   head "https://github.com/gabrimatic/eyra.git", branch: "main"
 

@@ -10,12 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 No unreleased changes.
 
-## [4.3.2] - 2026-05-18
+## [4.3.3] - 2026-05-18
 
 ### Changed
 
 - Install docs now match the public GitHub repository and no longer describe Eyra as a private-repository install.
 - Setup and installer memory dependency repair now fall back to the `mcp-prose-memory` GitHub release tarball while npm publication is unavailable.
+- Homebrew install docs now point to the public `gabrimatic/tap` formula instead of the source repository.
+- Refreshed the lockfile for the pending Dependabot updates: `numpy` 2.4.5, `openai` 2.37.0, and `ruff` 0.15.13.
 
 ## [4.3.1] - 2026-05-18
 

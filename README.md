@@ -6,7 +6,7 @@
 
 Eyra is a local-first voice assistant for your Mac. You can speak or type, ask it to help with local files, screen context, reminders, tasks, and safe computer-control workflows, and keep the default path on your machine.
 
-The current release line is `4.3.2`. Full docs: [gabrimatic.github.io/eyra](https://gabrimatic.github.io/eyra/).
+The current release line is `4.3.3`. Full docs: [gabrimatic.github.io/eyra](https://gabrimatic.github.io/eyra/).
 
 ## For Normal Users
 
@@ -230,13 +230,18 @@ Recommended normal-user install:
 curl -fsSL https://gabrimatic.github.io/eyra/install.sh | bash
 ```
 
-The checked-in Homebrew formula is still custom-tap preparation. It installs from `main` and should not be treated as a stable public formula until it points at a tagged release asset and pinned sha256.
+Homebrew users can install Eyra from the public tap:
+
+```bash
+brew tap gabrimatic/tap
+brew install eyra
+```
 
 Python tool installs remain available for advanced users:
 
 ```bash
-uv tool install git+https://github.com/gabrimatic/eyra@v4.3.2
-pipx install git+https://github.com/gabrimatic/eyra@v4.3.2
+uv tool install git+https://github.com/gabrimatic/eyra@v4.3.3
+pipx install git+https://github.com/gabrimatic/eyra@v4.3.3
 ```
 
 ## Support

@@ -835,7 +835,7 @@ def _update_guidance() -> CommandResult:
     commands = {
         "source": "cd <eyra checkout> && git pull --ff-only && uv sync",
         "managed-install": "Run the latest install.sh for the release you want, after verifying the source.",
-        "homebrew": "brew update && brew upgrade gabrimatic/eyra/eyra",
+        "homebrew": "brew update && brew upgrade eyra",
         "uv-tool": "uv tool upgrade eyra",
         "pipx": "pipx upgrade eyra",
         "wheel": "Install a newer wheel, then rerun `eyra doctor`.",
