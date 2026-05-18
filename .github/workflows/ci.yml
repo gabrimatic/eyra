@@ -17,6 +17,7 @@ on:
       - "README.md"
       - ".github/workflows/docs-pages.yml"
       - "tests/test_docs_site.py"
+  workflow_dispatch:
 
 permissions:
   contents: read
