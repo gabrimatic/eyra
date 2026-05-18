@@ -43,6 +43,7 @@ class TestWebServerHelpers:
         assert payload["web"]["enabled"] is True
         assert payload["voice"]["localWhisper"] is True
         assert payload["voice"]["realtime"] is False
+        assert payload["tools"]["memory"] is True
         assert payload["capabilities"]["localFirst"] is True
         assert payload["capabilities"]["privacy"]["leavesMachineByDefault"] is False
         assert "tools" not in payload["capabilities"]
@@ -90,6 +91,7 @@ class TestWebServerHelpers:
         assert "id=\"micButton\"" in html
         assert "Realtime" in html
         assert "Local Whisper" in html
+        assert "Memory on" in html
         assert "fetch('/api/chat'" in html
         assert "MediaRecorder" in html
         assert "/api/local-voice-turn" in html

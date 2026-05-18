@@ -269,6 +269,21 @@ else
     log_ok "Local Whisper"
 fi
 
+if ! command -v mcp-prose-memory &>/dev/null; then
+    if ! command -v npm &>/dev/null && command -v brew &>/dev/null && is_interactive && ask_yes_no "Install Node.js now so Eyra can install local memory support?" "yes"; then
+        log_info "Installing Node.js..."
+        brew install node || log_warn "Node.js install did not finish. Memory can be repaired later with: npm install -g mcp-prose-memory"
+    fi
+    if command -v npm &>/dev/null; then
+        log_info "Installing mcp-prose-memory..."
+        npm install -g mcp-prose-memory || log_warn "mcp-prose-memory install did not finish. Memory can be repaired later with: npm install -g mcp-prose-memory"
+    else
+        log_warn "mcp-prose-memory is missing. Memory will need setup with: npm install -g mcp-prose-memory"
+    fi
+else
+    log_ok "mcp-prose-memory"
+fi
+
 if command -v ollama &>/dev/null && ! curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1; then
     log_info "Starting Ollama..."
     open -a Ollama >/dev/null 2>&1 || true

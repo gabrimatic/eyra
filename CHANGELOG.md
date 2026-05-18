@@ -8,7 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
-- No unreleased changes.
+No unreleased changes.
+
+## [4.3.0] - 2026-05-18
+
+### Added
+
+- Compact local memory is now enabled by default through `mcp-prose-memory`, with `eyra memory ...`, `/memory ...`, natural-language remember/forget handling, Web API, and menu bar controls.
+- Eyra now creates and loads user-editable `~/.config/eyra/AGENTS.md` and `~/.config/eyra/personality.md` into each model turn with strict context budgets.
+- Memory and instruction docs now cover local storage, compact key/value facts, setup repair, settings, commands, Web endpoints, and menu bar controls.
+
+### Changed
+
+- Setup and the guided installer now try to install `mcp-prose-memory` when npm is available and show the repair command when it is missing.
+- Prompt construction now injects core style, compact user rules, compact personality, session goal, and bounded memory context in priority order.
+
+### Fixed
+
+- Eyra's first-class memory client now speaks the current line-delimited MCP stdio transport used by the MCP SDK.
 
 ## [4.2.1] - 2026-05-17
 

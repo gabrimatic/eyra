@@ -5,7 +5,7 @@ class Eyra < Formula
   # Custom tap scaffold: tracks main until the formula is switched to a
   # tagged release asset and pinned sha256.
   url "https://github.com/gabrimatic/eyra.git", branch: "main"
-  version "4.2.1"
+  version "4.3.0"
   license "PolyForm-Noncommercial-1.0.0"
   head "https://github.com/gabrimatic/eyra.git", branch: "main"
 

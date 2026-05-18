@@ -132,6 +132,12 @@ def build_capability_snapshot(
             "os": {"enabled": settings.OS_TOOLS_ENABLED},
             "browser": {"enabled": settings.NETWORK_TOOLS_ENABLED},
             "mcp": {"enabled": settings.MCP_TOOLS_ENABLED, "configPath": settings.MCP_CONFIG_PATH},
+            "memory": {
+                "enabled": settings.MEMORY_ENABLED,
+                "provider": settings.MEMORY_PROVIDER,
+                "path": settings.MEMORY_PATH,
+                "contextMaxChars": settings.MEMORY_CONTEXT_MAX_CHARS,
+            },
             "connectors": connector_registry.capability_snapshot(),
             "agents": {
                 "enabled": settings.AGENT_TOOLS_ENABLED or settings.EXTERNAL_AGENT_TOOLS_ENABLED,
@@ -149,6 +155,7 @@ def build_capability_snapshot(
             "telemetry": False,
             "analytics": False,
             "localJobStore": settings.JOB_STORE_PATH,
+            "localMemoryStore": settings.MEMORY_PATH,
             "boundaries": [
                 privacy_decision_dict(
                     evaluate_privacy_boundary(

@@ -24,6 +24,8 @@ def render_examples() -> str:
             "  Move the latest downloaded file to Documents.",
             "  Summarize this PDF.",
             "  Remind me in 10 minutes to stand up.",
+            "  Remember that I prefer short answers.",
+            "  What do you remember?",
             "  Start dictation.",
             "  What changed?",
             "",

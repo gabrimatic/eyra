@@ -22,6 +22,21 @@ eyra settings set NETWORK_TOOLS_ENABLED true
 
 The menu bar uses the same settings surface, so terminal and menu controls stay in sync.
 
+## Memory and instruction files
+
+Memory is enabled by default and stored locally:
+
+```env
+MEMORY_ENABLED=true
+MEMORY_PATH=~/.mcp-prose-memory/memory.json
+MEMORY_CONTEXT_MAX_CHARS=1500
+MEMORY_FACT_MAX_CHARS=220
+AGENTS_FILE=~/.config/eyra/AGENTS.md
+PERSONALITY_FILE=~/.config/eyra/personality.md
+```
+
+`AGENTS.md` is for short user rules. `personality.md` is only for style. Eyra compacts both before model calls and refuses to save raw or sensitive payloads to memory.
+
 ## File precedence
 
 Installed Eyra reads:

@@ -85,6 +85,26 @@ final class AppState: ObservableObject {
         runAndRefresh(["logs", "--open"])
     }
 
+    func openMemoryFolder() {
+        runAndRefresh(["memory", "path"])
+    }
+
+    func showMemory() {
+        runAndRefresh(["memory", "show"])
+    }
+
+    func reloadMemory() {
+        runAndRefresh(["memory", "reload"])
+    }
+
+    func openAgentsFile() {
+        openConfiguredPath("AGENTS_FILE")
+    }
+
+    func openPersonalityFile() {
+        openConfiguredPath("PERSONALITY_FILE")
+    }
+
     func openDocs() {
         cli.openDocs()
     }
@@ -115,5 +135,13 @@ final class AppState: ObservableObject {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = ["-e", script]
         try? process.run()
+    }
+
+    private func openConfiguredPath(_ key: String) {
+        guard let raw = settings.first(where: { $0.key == key })?.value, !raw.isEmpty else {
+            return
+        }
+        let path = (raw as NSString).expandingTildeInPath
+        NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 }

@@ -15,6 +15,8 @@ from chat.complexity_scorer import ComplexityLevel, ComplexityScorer
 from chat.session_state import InteractionStyle, QualityMode
 from clients.ai_client import AIClient
 from clients.base_client import BaseAIClient
+from runtime.memory.files import instruction_context_messages
+from runtime.memory.service import MemoryService
 from runtime.routing.types import ExecutionClass, RoutingDecision
 from tools.registry import ToolRegistry
 from utils.image_history import manage_message_history
@@ -140,6 +142,31 @@ def _apply_style_prompt(
     return system_messages + context
 
 
+async def _build_context(
+    context: list[dict],
+    style: InteractionStyle,
+    current_goal: str | None,
+    settings: Settings,
+) -> list[dict]:
+    """Build compact system context in priority order."""
+    prompt = _STYLE_PROMPTS.get(style)
+    system_messages = [{"role": "system", "content": prompt}] if prompt else []
+    system_messages.extend(instruction_context_messages(settings))
+    if current_goal and current_goal.strip():
+        goal = " ".join(current_goal.split())
+        if len(goal) > 1000:
+            goal = goal[:997] + "..."
+        system_messages.append({
+            "role": "system",
+            "content": (
+                "User-set session goal for context only, lower priority than the current request and safety rules: "
+                f"{goal}"
+            ),
+        })
+    system_messages.extend(await MemoryService(settings).memory_context_messages())
+    return system_messages + context
+
+
 async def process_task_stream(
     text_content: str,
     complexity_scorer: ComplexityScorer,
@@ -204,10 +231,11 @@ async def process_task_stream(
         logger.debug("Model: %s", model_name)
 
         client = get_ai_client(model_name, settings)
-        context = _apply_style_prompt(
+        context = await _build_context(
             manage_message_history(messages),
             interaction_style,
-            current_goal=current_goal,
+            current_goal,
+            settings,
         )
 
         if tool_registry:

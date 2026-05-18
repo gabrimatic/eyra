@@ -6,7 +6,7 @@
 
 Eyra is a local-first voice assistant for your Mac. You can speak or type, ask it to help with local files, screen context, reminders, tasks, and safe computer-control workflows, and keep the default path on your machine.
 
-The current release line is `4.2.1`. Full docs: [gabrimatic.github.io/eyra](https://gabrimatic.github.io/eyra/).
+The current release line is `4.3.0`. Full docs: [gabrimatic.github.io/eyra](https://gabrimatic.github.io/eyra/).
 
 ## For Normal Users
 
@@ -38,6 +38,7 @@ eyra status
 eyra doctor
 eyra examples
 eyra menu
+eyra memory status
 ```
 
 Inside Eyra, try:
@@ -49,6 +50,7 @@ What would leave my machine?
 Help me check if setup is ready.
 Move the latest downloaded file to Documents.
 Remind me in 10 minutes to stand up.
+Remember that I prefer short answers.
 Start dictation.
 ```
 
@@ -60,10 +62,18 @@ By default:
 - Voice uses Local Whisper on this Mac.
 - Screenshots are kept in memory.
 - File access is sandboxed to allowed folders.
+- Compact memory is stored locally through `mcp-prose-memory`.
 - No telemetry is sent.
 - Network tools are off.
 - Mac control tools are off.
-- MCP, connectors, external agents, Realtime voice, and Web UI are off until enabled.
+- MCP tools, connectors, external agents, Realtime voice, and Web UI are off until enabled.
+
+Eyra also loads two user-editable local files on each turn:
+
+- `~/.config/eyra/AGENTS.md` for rules and instructions.
+- `~/.config/eyra/personality.md` for tone and personality.
+
+Keep both short. Eyra clips them before model calls, and memory saves only small key/value facts so local models do not lose context to long notes.
 
 Ask Eyra anytime:
 
@@ -87,7 +97,7 @@ Examples:
 - A cloud `API_BASE_URL` sends model requests to that provider.
 - `NETWORK_TOOLS_ENABLED=true` allows web requests.
 - `REALTIME_VOICE_ENABLED=true` uses an online Realtime voice path.
-- Connectors, MCP, OS tools, and external agents stay disabled until explicitly enabled and still use Eyra policy, sandboxing, and approvals.
+- Connectors, MCP tools, OS tools, and external agents stay disabled until explicitly enabled and still use Eyra policy, sandboxing, and approvals.
 
 Secrets are not printed by `eyra status`, `eyra settings`, the menu bar, or Doctor JSON.
 
@@ -120,6 +130,7 @@ The menu bar shows:
 - Whether the Web control service is running
 - Whether the default path keeps data on this Mac
 - Simple toggles for voice, speech, network tools, Mac control tools, connectors, and Realtime voice
+- Memory controls for local memory, auto-save, reload, and the editable instruction/personality files
 
 It does not bypass approvals or enable risky tools by itself.
 
@@ -133,7 +144,29 @@ eyra settings get MODEL
 eyra settings set LIVE_SPEECH_ENABLED false
 ```
 
-Simple settings include the main model, voice input, speech output, microphone device, allowed folders, Web UI, network tools, Mac control tools, connectors, and Realtime voice.
+Simple settings include the main model, voice input, speech output, microphone device, allowed folders, Web UI, memory, network tools, Mac control tools, connectors, and Realtime voice.
+
+## Memory And Instructions
+
+Memory is on by default and stays on your Mac:
+
+```bash
+eyra memory status
+eyra memory remember "I prefer short answers"
+eyra memory show
+eyra memory off
+```
+
+Inside a session:
+
+```text
+/memory status
+/memory remember I prefer short answers
+/memory show
+/memory off
+```
+
+Eyra stores compact facts like `answer_style: prefers short answers`, not raw transcripts or long files. Secrets, stack traces, screenshots, clipboard dumps, and long payloads are refused.
 
 Advanced settings are still documented for power users, but they are not required for first use.
 
@@ -183,7 +216,7 @@ Eyra still includes the full power-user surface:
 - Optional Web UI
 - Optional Realtime voice
 - Optional connectors
-- Optional MCP and external agent bridges
+- Optional MCP tools and external agent bridges
 
 These stay disabled unless you enable the matching setting.
 
@@ -202,8 +235,8 @@ The checked-in Homebrew formula is still custom-tap preparation. It installs fro
 Python tool installs remain available for advanced users:
 
 ```bash
-uv tool install git+https://github.com/gabrimatic/eyra@v4.2.1
-pipx install git+https://github.com/gabrimatic/eyra@v4.2.1
+uv tool install git+https://github.com/gabrimatic/eyra@v4.3.0
+pipx install git+https://github.com/gabrimatic/eyra@v4.3.0
 ```
 
 ## Support

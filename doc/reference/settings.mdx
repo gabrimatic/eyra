@@ -75,6 +75,28 @@ eyra settings set LIVE_SPEECH_ENABLED false
 | `MCP_TOOLS_ENABLED` | `false` | stdio MCP bridge |
 | `MCP_CONFIG_PATH` | `~/.config/eyra/mcp.json` | MCP config |
 
+## Memory and instructions
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `MEMORY_ENABLED` | `true` | Enable compact local memory |
+| `MEMORY_PROVIDER` | `mcp-prose-memory` | Memory backend |
+| `MEMORY_AUTO_SAVE_ENABLED` | `true` | Allow explicit memory saves |
+| `MEMORY_PATH` | `~/.mcp-prose-memory/memory.json` | Local memory JSON file |
+| `MEMORY_MCP_COMMAND` | `mcp-prose-memory` | MCP memory command |
+| `MEMORY_MCP_ARGS` | empty | Optional memory command args |
+| `MEMORY_CONTEXT_MAX_CHARS` | `1500` | Max memory context injected into model calls |
+| `MEMORY_FACT_MAX_CHARS` | `220` | Max stored fact length after compaction |
+| `MEMORY_SECTION_MAX_FACTS` | `30` | Expected per-section memory limit |
+| `MEMORY_WRITE_REQUIRE_CONFIRMATION` | `false` | Reserved confirmation gate for future stricter memory writes |
+| `MEMORY_DEBUG` | `false` | Extra memory diagnostics |
+| `AGENTS_FILE` | `~/.config/eyra/AGENTS.md` | User rules loaded into context |
+| `AGENTS_MAX_CHARS` | `1200` | Max compacted AGENTS.md context |
+| `PERSONALITY_FILE` | `~/.config/eyra/personality.md` | User personality loaded into context |
+| `PERSONALITY_MAX_CHARS` | `800` | Max compacted personality context |
+
+Memory is local by default. Eyra stores compact key/value facts and refuses raw conversations, secrets, screenshots, clipboard dumps, stack traces, PDF text, and long tool output.
+
 ## Connectors
 
 | Setting | Default | Purpose |

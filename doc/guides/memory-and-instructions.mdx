@@ -1,0 +1,117 @@
+---
+title: "Memory and instructions"
+description: "Use compact local memory, AGENTS.md, and personality.md."
+---
+
+Eyra has three local context sources:
+
+- Compact durable memory through `mcp-prose-memory`.
+- `~/.config/eyra/AGENTS.md` for rules and instructions.
+- `~/.config/eyra/personality.md` for tone and personality.
+
+All three are local. They are also budgeted before model calls. This is intentional: local models have limited context, so Eyra stores and injects small facts instead of raw transcripts.
+
+## Normal use
+
+Check memory:
+
+```bash
+eyra memory status
+eyra memory show
+```
+
+Save one fact:
+
+```bash
+eyra memory remember "I prefer short answers"
+```
+
+Inside Eyra:
+
+```text
+/memory status
+/memory remember I prefer short answers
+/memory show
+/memory forget short answers
+```
+
+You can also say:
+
+```text
+Remember that I prefer short answers.
+What do you remember?
+Forget short answers.
+```
+
+## What gets saved
+
+Eyra stores compact key/value facts. A long sentence is reduced before it reaches memory.
+
+Example:
+
+```text
+answer_style: Prefers concise answers
+```
+
+Eyra refuses to save raw conversations, secrets, screenshots, clipboard dumps, stack traces, PDF text, connector payloads, and long tool outputs.
+
+## Files
+
+`eyra setup` creates these files if they do not exist:
+
+```text
+~/.config/eyra/AGENTS.md
+~/.config/eyra/personality.md
+```
+
+Use `AGENTS.md` for rules:
+
+```md
+- Keep answers short unless I ask for detail.
+- Use real local tools instead of guessing.
+```
+
+Use `personality.md` only for style:
+
+```md
+Warm, calm, direct, and lightly playful.
+```
+
+Do not paste long manuals into either file. Eyra clips `AGENTS.md` to `AGENTS_MAX_CHARS` and `personality.md` to `PERSONALITY_MAX_CHARS`.
+
+## Settings
+
+```env
+MEMORY_ENABLED=true
+MEMORY_AUTO_SAVE_ENABLED=true
+MEMORY_PATH=~/.mcp-prose-memory/memory.json
+MEMORY_CONTEXT_MAX_CHARS=1500
+MEMORY_FACT_MAX_CHARS=220
+AGENTS_FILE=~/.config/eyra/AGENTS.md
+AGENTS_MAX_CHARS=1200
+PERSONALITY_FILE=~/.config/eyra/personality.md
+PERSONALITY_MAX_CHARS=800
+```
+
+Disable memory:
+
+```bash
+eyra memory off
+```
+
+Turn it back on:
+
+```bash
+eyra memory on
+```
+
+## Dependency
+
+Eyra uses `mcp-prose-memory` underneath. Setup and the installer try to install it for you. To repair it manually:
+
+```bash
+npm install -g mcp-prose-memory
+eyra doctor
+```
+
+If memory is unavailable, Eyra can still answer without memory. `eyra doctor` will show the repair step.

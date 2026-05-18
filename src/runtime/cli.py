@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Any
 
 from runtime.examples import render_examples
+from runtime.memory import ensure_instruction_files
+from runtime.memory.service import MemoryService
 from runtime.preflight import PreflightManager
 from runtime.service import service_paths, service_status, start_service, stop_service, web_url_with_token
 from runtime.settings_catalog import get_setting, setting_specs, settings_snapshot, write_setting
@@ -91,6 +93,16 @@ def cli(argv: list[str] | None = None) -> int:
     connectors.add_argument("connector_id", nargs="?", help="Connector id for the test action.")
     connectors.add_argument("--json", action="store_true", dest="json_output", help="Print machine-readable connector output.")
 
+    memory = subcommands.add_parser("memory", help="Inspect and manage Eyra's compact local memory.")
+    memory.add_argument("--json", action="store_true", help="Print machine-readable memory output.")
+    memory_subcommands = memory.add_subparsers(dest="memory_action")
+    for action in ("status", "show", "on", "off", "path", "reload"):
+        memory_subcommands.add_parser(action, help=f"{action.title()} memory.")
+    memory_remember = memory_subcommands.add_parser("remember", help="Save one compact durable fact.")
+    memory_remember.add_argument("text", nargs="+")
+    memory_forget = memory_subcommands.add_parser("forget", help="Forget a matching memory fact.")
+    memory_forget.add_argument("query", nargs="+")
+
     update = subcommands.add_parser("update", help="Explain the correct update command for this install.")
     update.add_argument("--json", action="store_true", help="Print machine-readable update guidance.")
 
@@ -119,7 +131,7 @@ def cli(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command is None:
         return _run_live_session()
-    if args.command in {"start", "stop", "restart", "menu", "status", "open", "logs", "service", "settings"}:
+    if args.command in {"start", "stop", "restart", "menu", "status", "open", "logs", "service", "settings", "memory"}:
         return _handle_simple_command(args)
     if args.command == "web":
         from web.server import run
@@ -215,6 +227,8 @@ def _run_async(coro):
 def _handle_simple_command(args) -> int:
     if args.command == "settings":
         return _handle_settings_command(args)
+    if args.command == "memory":
+        return _handle_memory_command(args)
     if args.command == "logs":
         return _emit(_logs(open_folder=args.open), json_output=args.json)
     if args.command == "menu":
@@ -266,6 +280,50 @@ def _handle_settings_command(args) -> int:
     return _emit(CommandResult(False, f"Unknown settings action: {action}", {}), json_output=json_output)
 
 
+def _handle_memory_command(args) -> int:
+    settings = Settings.load_from_env()
+    service = MemoryService(settings)
+    action = args.memory_action or "status"
+    json_output = bool(args.json)
+    try:
+        if action == "status":
+            status = _run_async(service.status())
+            ready = "ready" if status["ready"] else "needs setup" if status["enabled"] else "off"
+            message = f"Eyra memory is {ready}.\nPath: {status['path']}"
+            if status.get("error"):
+                message += f"\n{status['error']}"
+            return _emit(CommandResult(True, message, {"memory": status}), json_output=json_output)
+        if action == "show":
+            text = _run_async(service.show())
+            return _emit(CommandResult(True, text, {"memory": {"summary": text}}), json_output=json_output)
+        if action == "remember":
+            result = _run_async(service.remember(" ".join(args.text)))
+            return _emit(CommandResult(True, result, {"memory": {"result": result}}), json_output=json_output)
+        if action == "forget":
+            result = _run_async(service.forget(" ".join(args.query)))
+            return _emit(CommandResult(True, result, {"memory": {"result": result}}), json_output=json_output)
+        if action in {"on", "off"}:
+            value = "true" if action == "on" else "false"
+            write_setting(_primary_env_path(), "MEMORY_ENABLED", value)
+            return _emit(
+                CommandResult(
+                    True,
+                    f"Memory {action}. Restart Eyra if it is already running.",
+                    {"key": "MEMORY_ENABLED", "value": value},
+                ),
+                json_output=json_output,
+            )
+        if action == "path":
+            status = _run_async(service.status())
+            return _emit(CommandResult(True, status["path"], {"memory": {"path": status["path"]}}), json_output=json_output)
+        if action == "reload":
+            status = _run_async(service.status())
+            return _emit(CommandResult(True, "Memory context will reload on the next turn.", {"memory": status}), json_output=json_output)
+    except Exception as exc:
+        return _emit(CommandResult(False, f"Memory error: {exc}", {}), json_output=json_output)
+    return _emit(CommandResult(False, f"Unknown memory action: {action}", {}), json_output=json_output)
+
+
 def _emit(result: CommandResult, *, json_output: bool) -> int:
     if json_output:
         print(json.dumps({"ok": result.ok, "message": result.message, **result.data}, indent=2, sort_keys=True))
@@ -285,6 +343,7 @@ async def _doctor(settings_override: Settings | None = None) -> CommandResult:
     except Exception as exc:
         preflight_error = str(exc) or exc.__class__.__name__
 
+    memory_status = await MemoryService(settings).status()
     data = {
         "version": _version_info(),
         "paths": _paths(settings),
@@ -298,11 +357,15 @@ async def _doctor(settings_override: Settings | None = None) -> CommandResult:
         "settings": _safe_settings(settings),
         "preflight": _preflight_summary(preflight, preflight_error),
         "microphones": _microphone_summary(),
+        "memory": memory_status,
         "recentErrors": _recent_errors(),
     }
     voice_requested = settings.LIVE_LISTENING_ENABLED or settings.LIVE_SPEECH_ENABLED
     voice_ok = not voice_requested or bool(preflight and preflight.wh_available)
-    ok = not preflight_error and bool(preflight and preflight.backend_reachable and not preflight.models_missing and voice_ok)
+    memory_ok = not settings.MEMORY_ENABLED or memory_status.get("commandAvailable", False)
+    ok = not preflight_error and bool(
+        preflight and preflight.backend_reachable and not preflight.models_missing and voice_ok and memory_ok
+    )
     if settings.USE_MOCK_CLIENT:
         ok = not preflight_error
     message = _format_doctor(data, ok)
@@ -369,6 +432,12 @@ def _safe_settings(settings: Settings) -> dict[str, Any]:
         "liveSpeechEnabled": settings.LIVE_SPEECH_ENABLED,
         "osToolsEnabled": settings.OS_TOOLS_ENABLED,
         "mcpToolsEnabled": settings.MCP_TOOLS_ENABLED,
+        "memoryEnabled": settings.MEMORY_ENABLED,
+        "memoryAutoSaveEnabled": settings.MEMORY_AUTO_SAVE_ENABLED,
+        "memoryProvider": settings.MEMORY_PROVIDER,
+        "memoryPath": _redact_path(settings.MEMORY_PATH),
+        "agentsFile": _redact_path(settings.AGENTS_FILE),
+        "personalityFile": _redact_path(settings.PERSONALITY_FILE),
         "connectorsEnabled": settings.CONNECTORS_ENABLED,
         "connectorsAllowRemote": settings.CONNECTORS_ALLOW_REMOTE,
         "agentToolsEnabled": settings.AGENT_TOOLS_ENABLED,
@@ -399,6 +468,11 @@ def _format_doctor(data: dict[str, Any], ok: bool) -> str:
         lines.append(f"Local Whisper: {'ready' if wh.get('available') else 'not ready'}")
     lines.append(f"Microphones: {data['microphones']['inputDeviceCount']} input device(s)")
     lines.append(f"Screen capture: {'ready' if preflight.get('screenCaptureAvailable') else 'not ready'}")
+    memory = data.get("memory", {})
+    if memory.get("enabled"):
+        lines.append(f"Memory: {'ready' if memory.get('ready') else 'needs setup'}")
+    else:
+        lines.append("Memory: off")
     lines.append(f"Web UI: {'enabled' if data['settings']['webUiEnabled'] else 'disabled'}")
     lines.append(f"Network/OS/MCP/connectors/agents: {_optional_surface_summary(data['settings'])}")
     if preflight.get("error"):
@@ -408,6 +482,8 @@ def _format_doctor(data: dict[str, Any], ok: bool) -> str:
         lines.append("Next: run `eyra setup` for guided provider and model setup.")
     elif voice_enabled and not wh.get("available"):
         lines.append("Next: install or start Local Whisper, then rerun `eyra doctor`.")
+    elif memory.get("enabled") and not memory.get("ready"):
+        lines.append("Next: install mcp-prose-memory with `npm install -g mcp-prose-memory`, then rerun `eyra doctor`.")
     lines.append("Run `eyra certify` for the release matrix.")
     return "\n".join(lines)
 
@@ -431,6 +507,8 @@ def _status(settings: Settings) -> CommandResult:
     else:
         voice = "Needs attention"
     lines.append(f"Voice: {voice}")
+    memory = data.get("memory", {})
+    lines.append(f"Memory: {'Ready' if memory.get('ready') else 'Needs setup' if memory.get('enabled') else 'Off'}")
     lines.append(f"Menu bar: {'Ready' if menu_data['available'] and menu_data['mode'] == 'app-bundle' else 'Fallback available'}")
     lines.append(f"Web control: {'Running' if service['running'] else 'Stopped'}")
     lines.append(f"Local-first default: {'No data leaves your Mac by default' if _local_first_default(data['settings']) else 'Review enabled remote/network settings'}")
@@ -711,11 +789,18 @@ def _setup(*, non_interactive: bool) -> CommandResult:
         env_path.write_text(example.read_text() if example.exists() else _default_env_text())
         created = True
     _ensure_user_dirs()
+    created_instruction_files = ensure_instruction_files(Settings.load_from_env())
     if not non_interactive:
         from runtime.startup import maybe_run_startup_selector
 
         maybe_run_startup_selector()
-    data = {"envPath": str(env_path), "createdEnv": created, "preservedEnv": preserved, "paths": _paths()}
+    data = {
+        "envPath": str(env_path),
+        "createdEnv": created,
+        "preservedEnv": preserved,
+        "createdInstructionFiles": [str(path) for path in created_instruction_files],
+        "paths": _paths(),
+    }
     if created:
         message = (
             f"Eyra setup wrote your local settings file at {env_path}.\n"
@@ -912,6 +997,21 @@ def _default_env_text() -> str:
             "AGENT_TOOLS_ENABLED=false",
             "EXTERNAL_AGENT_TOOLS_ENABLED=false",
             "MCP_TOOLS_ENABLED=false",
+            "MEMORY_ENABLED=true",
+            "MEMORY_PROVIDER=mcp-prose-memory",
+            "MEMORY_AUTO_SAVE_ENABLED=true",
+            "MEMORY_PATH=~/.mcp-prose-memory/memory.json",
+            "MEMORY_MCP_COMMAND=mcp-prose-memory",
+            "MEMORY_MCP_ARGS=",
+            "MEMORY_CONTEXT_MAX_CHARS=1500",
+            "MEMORY_FACT_MAX_CHARS=220",
+            "MEMORY_SECTION_MAX_FACTS=30",
+            "MEMORY_WRITE_REQUIRE_CONFIRMATION=false",
+            "MEMORY_DEBUG=false",
+            "AGENTS_FILE=~/.config/eyra/AGENTS.md",
+            "AGENTS_MAX_CHARS=1200",
+            "PERSONALITY_FILE=~/.config/eyra/personality.md",
+            "PERSONALITY_MAX_CHARS=800",
             "WEB_UI_ENABLED=false",
             "REALTIME_VOICE_ENABLED=false",
             "FILESYSTEM_ALLOWED_PATHS=~/Documents,~/Desktop,~/Downloads,/tmp",
@@ -1025,6 +1125,9 @@ def _paths(settings: Settings | None = None) -> dict[str, str]:
         "triggerStore": _redact_path(settings.TRIGGER_STORE_PATH),
         "externalAgentConfig": _redact_path(settings.EXTERNAL_AGENT_CONFIG_PATH),
         "mcpConfig": _redact_path(settings.MCP_CONFIG_PATH),
+        "memory": _redact_path(settings.MEMORY_PATH),
+        "agentsFile": _redact_path(settings.AGENTS_FILE),
+        "personalityFile": _redact_path(settings.PERSONALITY_FILE),
         "userBin": str(home / ".local" / "bin"),
     }
 

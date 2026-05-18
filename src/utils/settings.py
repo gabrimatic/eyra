@@ -74,6 +74,23 @@ class Settings:
     # MCP bridges are opt-in and disabled by default.
     MCP_TOOLS_ENABLED: bool = False
     MCP_CONFIG_PATH: str = "~/.config/eyra/mcp.json"
+    # Local durable memory is first-class and enabled by default. It uses the
+    # mcp-prose-memory stdio server underneath, but Eyra owns the compact policy.
+    MEMORY_ENABLED: bool = True
+    MEMORY_PROVIDER: str = "mcp-prose-memory"
+    MEMORY_AUTO_SAVE_ENABLED: bool = True
+    MEMORY_PATH: str = "~/.mcp-prose-memory/memory.json"
+    MEMORY_MCP_COMMAND: str = "mcp-prose-memory"
+    MEMORY_MCP_ARGS: str = ""
+    MEMORY_CONTEXT_MAX_CHARS: int = 1500
+    MEMORY_FACT_MAX_CHARS: int = 220
+    MEMORY_SECTION_MAX_FACTS: int = 30
+    MEMORY_WRITE_REQUIRE_CONFIRMATION: bool = False
+    MEMORY_DEBUG: bool = False
+    AGENTS_FILE: str = "~/.config/eyra/AGENTS.md"
+    AGENTS_MAX_CHARS: int = 1200
+    PERSONALITY_FILE: str = "~/.config/eyra/personality.md"
+    PERSONALITY_MAX_CHARS: int = 800
     # Built-in Web UI. Disabled by default so terminal-only local use stays quiet.
     WEB_UI_ENABLED: bool = False
     WEB_UI_HOST: str = "127.0.0.1"
@@ -184,6 +201,21 @@ class Settings:
             CONNECTORS_ALLOW_PYTHON_MODULE=_bool("CONNECTORS_ALLOW_PYTHON_MODULE", "false"),
             MCP_TOOLS_ENABLED=_bool("MCP_TOOLS_ENABLED", "false"),
             MCP_CONFIG_PATH=_getenv("MCP_CONFIG_PATH", "~/.config/eyra/mcp.json"),
+            MEMORY_ENABLED=_bool("MEMORY_ENABLED", "true"),
+            MEMORY_PROVIDER=_getenv("MEMORY_PROVIDER", "mcp-prose-memory"),
+            MEMORY_AUTO_SAVE_ENABLED=_bool("MEMORY_AUTO_SAVE_ENABLED", "true"),
+            MEMORY_PATH=_getenv("MEMORY_PATH", "~/.mcp-prose-memory/memory.json"),
+            MEMORY_MCP_COMMAND=_getenv("MEMORY_MCP_COMMAND", "mcp-prose-memory"),
+            MEMORY_MCP_ARGS=_getenv("MEMORY_MCP_ARGS", ""),
+            MEMORY_CONTEXT_MAX_CHARS=_int("MEMORY_CONTEXT_MAX_CHARS", "1500"),
+            MEMORY_FACT_MAX_CHARS=_int("MEMORY_FACT_MAX_CHARS", "220"),
+            MEMORY_SECTION_MAX_FACTS=_int("MEMORY_SECTION_MAX_FACTS", "30"),
+            MEMORY_WRITE_REQUIRE_CONFIRMATION=_bool("MEMORY_WRITE_REQUIRE_CONFIRMATION", "false"),
+            MEMORY_DEBUG=_bool("MEMORY_DEBUG", "false"),
+            AGENTS_FILE=_getenv("AGENTS_FILE", "~/.config/eyra/AGENTS.md"),
+            AGENTS_MAX_CHARS=_int("AGENTS_MAX_CHARS", "1200"),
+            PERSONALITY_FILE=_getenv("PERSONALITY_FILE", "~/.config/eyra/personality.md"),
+            PERSONALITY_MAX_CHARS=_int("PERSONALITY_MAX_CHARS", "800"),
             WEB_UI_ENABLED=_bool("WEB_UI_ENABLED", "false"),
             WEB_UI_HOST=_getenv("WEB_UI_HOST", "127.0.0.1"),
             WEB_UI_PORT=_int("WEB_UI_PORT", "8765"),

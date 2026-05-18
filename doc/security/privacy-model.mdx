@@ -5,6 +5,8 @@ description: "Eyra's local-first default, opt-in remote paths, approvals, and re
 
 Eyra's default is local-first. No telemetry, no analytics, no silent network calls, no remote browsing, no online voice, no connector execution, and no agent delegation unless you enable the relevant setting.
 
+Compact memory is local by default. It is stored in `~/.mcp-prose-memory/memory.json` through `mcp-prose-memory`. Eyra injects only a bounded summary into model calls and refuses raw conversations, secrets, screenshots, clipboard dumps, stack traces, PDF text, connector payloads, and long tool output.
+
 ## Remote paths
 
 | Path | Default | What may leave |

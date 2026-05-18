@@ -19,6 +19,7 @@ The installer:
 - Installs `uv` when missing.
 - Offers to install Ollama when Homebrew is available.
 - Offers to install Local Whisper for speech and microphone support.
+- Installs `mcp-prose-memory` for compact local memory when npm is available.
 - Starts local services when it can.
 - Runs first-run setup.
 - Verifies the app commands.
@@ -102,7 +103,7 @@ eyra
 Supported overrides:
 
 ```bash
-EYRA_VERSION=v4.2.1 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
+EYRA_VERSION=v4.3.0 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
 ```
 
 Private repositories require `GITHUB_TOKEN`. The installer reads GitHub release JSON, prefers release assets with checksum files, and refuses unverified tag-archive fallback unless you explicitly set `EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE=true`. For testing from a checked-out tree, use `EYRA_SOURCE_PATH=/path/to/eyra ./install.sh`; the installed app still writes user config to `~/.config/eyra/.env`, not into the app directory.
@@ -129,7 +130,7 @@ Current formula status: custom-tap scaffold.
 brew install gabrimatic/eyra/eyra
 ```
 
-The checked-in formula installs from the `main` branch and reports `4.2.1`. The formula remains tap preparation until it is switched to a tagged release URL and pinned sha256. Treat it as tap preparation, not a stable public formula.
+The checked-in formula installs from the `main` branch and reports `4.3.0`. The formula remains tap preparation until it is switched to a tagged release URL and pinned sha256. Treat it as tap preparation, not a stable public formula.
 
 Formula behavior:
 
@@ -158,6 +159,17 @@ Eyra uses Local Whisper for both transcription and speech output.
 brew tap gabrimatic/local-whisper
 brew install local-whisper
 ```
+
+## Memory dependency
+
+Eyra uses `mcp-prose-memory` for compact local memory.
+
+```bash
+npm install -g mcp-prose-memory
+eyra memory status
+```
+
+The guided installer and `setup.sh` try this for you when npm is available. If Node.js is missing, install it from Homebrew or from nodejs.org, then rerun `eyra doctor`.
 
 Preflight resolves the `wh` binary from `PATH`, LaunchAgent plists, and common Homebrew paths. If voice is disabled, the Local Whisper check is skipped.
 

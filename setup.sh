@@ -187,6 +187,22 @@ if command -v wh &>/dev/null; then
     fi
 fi
 
+log_step "Checking compact local memory"
+if command -v mcp-prose-memory &>/dev/null; then
+    log_ok "mcp-prose-memory command found"
+else
+    if ! command -v npm &>/dev/null && command -v brew &>/dev/null && { ! is_interactive || ask_yes_no "Install Node.js now so Eyra can install local memory support?" "yes"; }; then
+        log_info "Installing Node.js with Homebrew..."
+        brew install node || log_warn "Node.js install did not finish. Memory can be repaired later with: npm install -g mcp-prose-memory"
+    fi
+    if command -v npm &>/dev/null; then
+        log_info "Installing mcp-prose-memory..."
+        npm install -g mcp-prose-memory || log_warn "mcp-prose-memory install did not finish. Memory can be repaired later with: npm install -g mcp-prose-memory"
+    else
+        log_warn "mcp-prose-memory is missing. Memory will need setup with: npm install -g mcp-prose-memory"
+    fi
+fi
+
 log_step "Preparing local configuration"
 if "$NON_INTERACTIVE"; then
     uv run eyra setup --non-interactive

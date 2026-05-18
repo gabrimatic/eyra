@@ -37,6 +37,12 @@ eyra
 | `eyra settings` | List simple settings with secret values redacted |
 | `eyra settings get <key>` | Show one setting with its privacy note |
 | `eyra settings set <key> <value>` | Change one simple setting safely |
+| `eyra memory status` | Show compact local memory readiness |
+| `eyra memory show` | Show the compact memory summary |
+| `eyra memory remember <text>` | Save one durable fact as compact memory |
+| `eyra memory forget <query>` | Remove one matching memory fact |
+| `eyra memory on\|off` | Enable or disable memory |
+| `eyra memory path` | Show the local memory file path |
 | `eyra service status` | Show local Web service state |
 | `eyra service start` | Start the local Web service |
 | `eyra service stop` | Stop the local Web service |
@@ -65,6 +71,12 @@ Session commands are controller-owned. They are intercepted before model routing
 | `/capabilities` | Show control surfaces and privacy boundary |
 | `/context` | Show goal, working directory, recent jobs, and recent changes |
 | `/goal <text>` | Set session context |
+| `/memory status` | Show memory readiness |
+| `/memory show` | Show compact memory |
+| `/memory remember <fact>` | Save a compact durable fact |
+| `/memory forget <query>` | Remove one matching memory fact |
+| `/memory on\|off` | Enable or disable memory |
+| `/memory path` | Show the local memory file path |
 | `/mode fast\|balanced\|best` | Set quality mode |
 | `/route last` | Show the last routing trace when available |
 | `/examples` | Show useful first prompts and local workflows |
@@ -135,6 +147,9 @@ Eyra also handles common voice phrases locally:
 - `pause that`
 - `resume that`
 - `show status`
+- `remember that ...`
+- `what do you remember`
+- `forget ...`
 - `what are you doing`
 - `what changed`
 - `approve that`

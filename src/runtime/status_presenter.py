@@ -161,6 +161,7 @@ def render_help_card():
         ("/status    ", "Show session info"),
         ("/route last", "Show last routing trace"),
         ("/examples ", "Show useful first prompts"),
+        ("/memory   ", "status|show|remember|forget|on|off"),
         ("/tasks     ", "Show active and recent tasks"),
         ("/task ID   ", "Show task details"),
         ("/cancel ID ", "Cancel a task or all"),

@@ -43,6 +43,7 @@ from runtime.intents import (
     task_title,
 )
 from runtime.jobs import DurableJobStore, RiskLevel
+from runtime.memory.service import MemoryService
 from runtime.models import PreflightResult
 from runtime.preflight import PreflightManager
 from runtime.routing.model_registry import worker_model_settings
@@ -142,6 +143,7 @@ def build_health_payload(
             "os": settings.OS_TOOLS_ENABLED,
             "agents": settings.AGENT_TOOLS_ENABLED or settings.EXTERNAL_AGENT_TOOLS_ENABLED,
             "mcp": settings.MCP_TOOLS_ENABLED,
+            "memory": settings.MEMORY_ENABLED,
             "connectors": settings.CONNECTORS_ENABLED,
         },
     }
@@ -278,6 +280,7 @@ class WebAssistantRuntime:
                 job_store=self.job_store,
             )
         self.router = RuntimeRouter(self.scorer)
+        self.memory_service = MemoryService(settings)
         self.last_route_trace = shared.last_route_trace if shared is not None else None
         self.model_semaphore = asyncio.Semaphore(max(1, int(settings.MODEL_CONCURRENCY)))
         self._task_event_subscribers: set[queue.Queue[dict[str, Any]]] = set()
@@ -334,6 +337,10 @@ class WebAssistantRuntime:
         ):
             snapshot = build_capability_snapshot(self.settings, preflight=self.preflight)
             return {"reply": format_capability_answer(snapshot)}
+        memory_result = await self.memory_service.handle_natural_memory_request(text)
+        if memory_result is not None:
+            return {"reply": memory_result}
+        await self.memory_service.maybe_auto_remember(text)
         if re.search(
             r"\b(system information|system info|macos version|mac os version|disk space|storage|memory|ram|uptime|battery)\b",
             text,
@@ -951,6 +958,33 @@ class WebAssistantRuntime:
             preflight=self.preflight,
         )
 
+    async def memory(self) -> dict[str, Any]:
+        status = await self.memory_service.status()
+        summary = ""
+        if status.get("enabled") and status.get("commandAvailable"):
+            summary = await self.memory_service.show()
+        return {"memory": _redact_api_value({**status, "summary": summary})}
+
+    async def update_memory(self, action: str, text: str = "") -> dict[str, Any]:
+        from runtime.cli import _primary_env_path
+        from runtime.settings_catalog import write_setting
+
+        action = action.strip().lower()
+        if action == "remember":
+            return {"result": await self.memory_service.remember(text)}
+        if action == "forget":
+            return {"result": await self.memory_service.forget(text)}
+        if action in {"on", "off"}:
+            value = "true" if action == "on" else "false"
+            write_setting(_primary_env_path(), "MEMORY_ENABLED", value)
+            self.settings.MEMORY_ENABLED = action == "on"
+            self.memory_service = MemoryService(self.settings)
+            return {"result": f"Memory {action}.", "memory": await self.memory_service.status()}
+        if action == "reload":
+            self.memory_service = MemoryService(self.settings)
+            return {"result": "Memory reloaded.", "memory": await self.memory_service.status()}
+        return {"error": "Unsupported memory action."}
+
     async def context_snapshot(self) -> dict[str, Any]:
         state = self._context_state()
         return {"context": _redact_api_value(build_context_snapshot(self.settings, state=state, job_store=self.job_store))}
@@ -1390,6 +1424,7 @@ def render_index_html(settings: Settings) -> str:
         <span class="pill">{escape(realtime_label)}</span>
         <span class="pill">Network {'on' if settings.NETWORK_TOOLS_ENABLED else 'off'}</span>
         <span class="pill">OS tools {'on' if settings.OS_TOOLS_ENABLED else 'off'}</span>
+        <span class="pill">Memory {'on' if settings.MEMORY_ENABLED else 'off'}</span>
         <span class="pill">MCP {'on' if settings.MCP_TOOLS_ENABLED else 'off'}</span>
         <span class="pill">Connectors {'on' if settings.CONNECTORS_ENABLED else 'off'}</span>
       </div>
@@ -1812,6 +1847,11 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(200, self.runtime.run_sync(self.runtime.capabilities()))
             return
+        if parsed.path == "/api/memory":
+            if not self._authorized():
+                return
+            self._send_json(200, self.runtime.run_sync(self.runtime.memory()))
+            return
         if parsed.path == "/api/context":
             if not self._authorized():
                 return
@@ -1883,6 +1923,7 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             "/api/trigger",
             "/api/approve",
             "/api/reject",
+            "/api/memory",
             "/api/connector/test",
             "/api/connector/run",
             "/api/connector/cancel",
@@ -1899,6 +1940,7 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             "/api/trigger",
             "/api/approve",
             "/api/reject",
+            "/api/memory",
             "/api/connector/test",
             "/api/connector/run",
             "/api/connector/cancel",
@@ -1933,6 +1975,16 @@ class _EyraWebHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/tasks/clear-completed":
             self._send_json(200, self.runtime.run_sync(self.runtime.clear_completed_tasks()))
+            return
+        if parsed.path == "/api/memory":
+            payload = self._read_json()
+            action = str(payload.get("action", "")).strip()
+            text = str(payload.get("text", "")).strip()
+            if not action:
+                self._send_json(400, {"error": "action is required."})
+                return
+            result = self.runtime.run_sync(self.runtime.update_memory(action, text))
+            self._send_json(200 if "error" not in result else 400, result)
             return
         if parsed.path == "/api/trigger":
             payload = self._read_json()

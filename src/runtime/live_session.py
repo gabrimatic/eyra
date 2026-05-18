@@ -33,6 +33,7 @@ from runtime.intents import (
     task_title,
 )
 from runtime.jobs import DurableJobStore, JobStatus, RiskLevel
+from runtime.memory.service import MemoryService
 from runtime.models import LiveRuntimeState, PreflightResult, RuntimeStatus
 from runtime.operator_loop import build_file_move_operator_loop
 from runtime.planner import plan_task
@@ -71,7 +72,7 @@ _COMMANDS = {
     "/goal", "/status", "/quit", "/clear", "/route", "/handsfree",
     "/mode", "/help", "/examples", "/tasks", "/task", "/cancel", "/pause", "/resume",
     "/approvals", "/approve", "/reject", "/operations", "/capabilities", "/context", "/triggers", "/trigger",
-    "/connectors", "/connector",
+    "/connectors", "/connector", "/memory",
 }
 
 _QUIT_WORDS = {"quit", "exit", "bye", "goodbye", "q"}
@@ -142,6 +143,7 @@ class LiveSession:
         self.approvals = ApprovalManager()
         self._trusted_overwrite_token = secrets.token_urlsafe(32)
         self._tool_registry = self._build_tool_registry()
+        self.memory_service = MemoryService(settings)
         self._router = RuntimeRouter(self.scorer)
         self._voice_task: asyncio.Task | None = None
         self._input_tasks: set[asyncio.Task] = set()
@@ -460,6 +462,10 @@ class LiveSession:
             self._print_status()
             return True
 
+        if command == "/memory":
+            await self._handle_memory_command(parts_original[1] if len(parts_original) > 1 else "")
+            return True
+
         if command == "/handsfree":
             arg = lower_parts[1] if len(lower_parts) > 1 else ""
             if arg == "on":
@@ -678,6 +684,7 @@ class LiveSession:
                 ("Web UI", "eyra-web" if _settings_bool(self.settings, "WEB_UI_ENABLED", False) else "off"),
                 ("Network", "on" if _settings_bool(self.settings, "NETWORK_TOOLS_ENABLED", False) else "off"),
                 ("OS tools", "on" if _settings_bool(self.settings, "OS_TOOLS_ENABLED", False) else "off"),
+                ("Memory", "on" if _settings_bool(self.settings, "MEMORY_ENABLED", True) else "off"),
                 ("MCP", "on" if _settings_bool(self.settings, "MCP_TOOLS_ENABLED", False) else "off"),
                 ("Connectors", "on" if _settings_bool(self.settings, "CONNECTORS_ENABLED", False) else "off"),
                 (
@@ -846,6 +853,56 @@ class LiveSession:
             return
         print("  Usage: /connector <id>|test <id>|enable <id>|disable <id>|run <id> <task>")
 
+    async def _handle_memory_command(self, arg: str) -> None:
+        from runtime.cli import _primary_env_path
+        from runtime.settings_catalog import write_setting
+
+        parts = arg.split(maxsplit=1)
+        action = parts[0].lower() if parts else "status"
+        rest = parts[1] if len(parts) > 1 else ""
+        try:
+            if action in {"status", ""}:
+                status = await self.memory_service.status()
+                ready = "ready" if status["ready"] else "needs setup" if status["enabled"] else "off"
+                print(f"  Memory is {ready}. Path: {status['path']}")
+                if status.get("error"):
+                    print(f"  {status['error']}")
+                return
+            if action in {"show", "list"}:
+                print(self._indent(await self.memory_service.show()))
+                return
+            if action == "remember":
+                if not rest:
+                    print("  Usage: /memory remember <short durable fact>")
+                    return
+                print(self._indent(await self.memory_service.remember(rest)))
+                return
+            if action == "forget":
+                if not rest:
+                    print("  Usage: /memory forget <text to match>")
+                    return
+                print(self._indent(await self.memory_service.forget(rest)))
+                return
+            if action in {"on", "off"}:
+                value = "true" if action == "on" else "false"
+                write_setting(_primary_env_path(), "MEMORY_ENABLED", value)
+                self.settings.MEMORY_ENABLED = action == "on"
+                self.memory_service = MemoryService(self.settings)
+                print_status_change(f"Memory {action}")
+                return
+            if action == "path":
+                status = await self.memory_service.status()
+                print(f"  {status['path']}")
+                return
+            if action == "reload":
+                self.memory_service = MemoryService(self.settings)
+                print_status_change("Memory context reloaded")
+                return
+        except Exception as exc:
+            print(f"  Memory error: {exc}")
+            return
+        print("  Usage: /memory status|show|remember <fact>|forget <query>|on|off|path|reload")
+
     async def _retry_job(self, job_id: str) -> None:
         job = self.job_store.get_job(job_id)
         if job is None:
@@ -876,6 +933,7 @@ class LiveSession:
         conversation_snapshot = list(self.state.conversation_messages)
         if await self._handle_local_intent(text):
             return
+        await self.memory_service.maybe_auto_remember(text)
 
         quality = self.quality_mode
         if self._needs_screen_context(text):
@@ -1004,6 +1062,10 @@ class LiveSession:
             {"show status", "status", "read status"}
         ):
             self._print_status()
+            return True
+        memory_result = await self.memory_service.handle_natural_memory_request(text)
+        if memory_result is not None:
+            print(f"  {CYAN}Eyra{NC} {memory_result}")
             return True
         if lowered_clean in {"overwrite it", "overwrite that", "overwrite that file", "replace it", "replace that file"}:
             if self._pending_overwrite is None:

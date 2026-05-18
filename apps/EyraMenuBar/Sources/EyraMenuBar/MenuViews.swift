@@ -16,6 +16,14 @@ struct MenuBarContentView: View {
         Label("Voice: \(appState.voiceSummary)", systemImage: "waveform")
         Label(appState.serviceRunning ? "Web control running" : "Web control stopped", systemImage: appState.serviceRunning ? "play.circle" : "pause.circle")
 
+        if !appState.lastOutput.isEmpty {
+            Text(appState.lastOutput)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(5)
+                .frame(maxWidth: 360, alignment: .leading)
+        }
+
         Divider()
 
         Button(appState.serviceRunning ? "Open Web UI" : "Start Eyra Control") {
@@ -60,6 +68,25 @@ struct MenuBarContentView: View {
             SettingToggle(key: "CONNECTORS_ENABLED", title: "Connectors")
             SettingToggle(key: "REALTIME_VOICE_ENABLED", title: "Realtime voice")
             Text("Advanced tools stay off until you enable them.")
+                .foregroundStyle(.secondary)
+        }
+
+        Menu("Memory") {
+            SettingToggle(key: "MEMORY_ENABLED", title: "Memory")
+            SettingToggle(key: "MEMORY_AUTO_SAVE_ENABLED", title: "Auto-save")
+            Button("Show memory") {
+                appState.showMemory()
+            }
+            Button("Reload memory") {
+                appState.reloadMemory()
+            }
+            Button("Open AGENTS.md") {
+                appState.openAgentsFile()
+            }
+            Button("Open personality.md") {
+                appState.openPersonalityFile()
+            }
+            Text("Only compact local facts are stored.")
                 .foregroundStyle(.secondary)
         }
 
