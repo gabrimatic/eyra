@@ -59,7 +59,7 @@ Changelog = "https://github.com/gabrimatic/eyra/blob/main/CHANGELOG.md"
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=0.23",
-    "ruff>=0.15.10",
+    "ruff>=0.15.13",
 ]
 
 [tool.ruff]
