@@ -8,7 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
-No unreleased changes.
+### Fixed
+
+- `MEMORY_WRITE_REQUIRE_CONFIRMATION=true` now blocks automatic non-explicit memory saves while keeping direct `remember` commands active.
+- Memory readiness now probes the MCP server by requesting a compact context, so doctor/status can distinguish missing commands, MCP failures, and memory-file errors.
 
 ## [4.3.0] - 2026-05-18
 

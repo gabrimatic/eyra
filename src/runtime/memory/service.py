@@ -20,16 +20,21 @@ class MemoryService:
 
     async def status(self) -> dict[str, Any]:
         availability = self.client.availability()
+        health = await self.health_check(availability=availability)
         files = load_instruction_files(self.settings)
+        ready = bool(self.settings.MEMORY_ENABLED and health["contextAvailable"])
         return {
             "enabled": bool(self.settings.MEMORY_ENABLED),
             "autoSaveEnabled": bool(self.settings.MEMORY_AUTO_SAVE_ENABLED),
+            "writeRequiresConfirmation": bool(self.settings.MEMORY_WRITE_REQUIRE_CONFIRMATION),
             "provider": self.settings.MEMORY_PROVIDER,
-            "ready": bool(self.settings.MEMORY_ENABLED and availability["available"]),
+            "ready": ready,
             "commandAvailable": bool(availability["available"]),
+            "contextAvailable": bool(health["contextAvailable"]),
+            "health": health["state"],
             "command": availability["command"],
             "commandArgs": availability["args"],
-            "error": availability["error"],
+            "error": health["error"] or availability["error"],
             "path": str(Path(self.settings.MEMORY_PATH).expanduser()),
             "contextMaxChars": self.settings.MEMORY_CONTEXT_MAX_CHARS,
             "factMaxChars": self.settings.MEMORY_FACT_MAX_CHARS,
@@ -43,6 +48,42 @@ class MemoryService:
                 }
                 for item in files
             ],
+        }
+
+    async def health_check(self, *, availability: dict[str, Any] | None = None) -> dict[str, Any]:
+        availability = availability or self.client.availability()
+        if not self.settings.MEMORY_ENABLED:
+            return {
+                "state": "disabled",
+                "commandAvailable": bool(availability["available"]),
+                "contextAvailable": False,
+                "error": "",
+            }
+        if not availability["available"]:
+            return {
+                "state": "command_missing",
+                "commandAvailable": False,
+                "contextAvailable": False,
+                "error": availability["error"],
+            }
+        try:
+            await self.client.call_tool(
+                "memory_context",
+                {"format": "compact", "maxChars": 200},
+                timeout=5,
+            )
+        except Exception as exc:
+            return {
+                "state": _classify_health_error(str(exc)),
+                "commandAvailable": True,
+                "contextAvailable": False,
+                "error": _human_memory_error(str(exc)),
+            }
+        return {
+            "state": "ready",
+            "commandAvailable": True,
+            "contextAvailable": True,
+            "error": "",
         }
 
     async def show(self, *, max_chars: int | None = None, format: str = "compact") -> str:
@@ -140,6 +181,7 @@ class MemoryService:
         if (
             not self.settings.MEMORY_ENABLED
             or not self.settings.MEMORY_AUTO_SAVE_ENABLED
+            or self.settings.MEMORY_WRITE_REQUIRE_CONFIRMATION
             or self.settings.USE_MOCK_CLIENT
         ):
             return
@@ -185,3 +227,15 @@ def _render_fact(fact: Any) -> str:
         value = str(fact.get("value", "")).strip()
         return f"{key}={value}" if key else value
     return str(fact)
+
+
+def _classify_health_error(error: str) -> str:
+    lowered = error.lower()
+    if any(token in lowered for token in ("json", "parse", "memory_path", "memory path", "enoent", "eacces")):
+        return "memory_file_error"
+    return "mcp_error"
+
+
+def _human_memory_error(error: str) -> str:
+    compact = " ".join(error.split())
+    return compact[:500] or "Memory MCP did not respond."

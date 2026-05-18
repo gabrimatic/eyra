@@ -362,7 +362,7 @@ async def _doctor(settings_override: Settings | None = None) -> CommandResult:
     }
     voice_requested = settings.LIVE_LISTENING_ENABLED or settings.LIVE_SPEECH_ENABLED
     voice_ok = not voice_requested or bool(preflight and preflight.wh_available)
-    memory_ok = not settings.MEMORY_ENABLED or memory_status.get("commandAvailable", False)
+    memory_ok = not settings.MEMORY_ENABLED or memory_status.get("ready", False)
     ok = not preflight_error and bool(
         preflight and preflight.backend_reachable and not preflight.models_missing and voice_ok and memory_ok
     )
@@ -470,7 +470,16 @@ def _format_doctor(data: dict[str, Any], ok: bool) -> str:
     lines.append(f"Screen capture: {'ready' if preflight.get('screenCaptureAvailable') else 'not ready'}")
     memory = data.get("memory", {})
     if memory.get("enabled"):
-        lines.append(f"Memory: {'ready' if memory.get('ready') else 'needs setup'}")
+        state = str(memory.get("health") or ("ready" if memory.get("ready") else "needs_setup"))
+        label = {
+            "ready": "ready",
+            "disabled": "off",
+            "command_missing": "command missing",
+            "memory_file_error": "memory file error",
+            "mcp_error": "MCP error",
+            "needs_setup": "needs setup",
+        }.get(state, "needs setup")
+        lines.append(f"Memory: {label}")
     else:
         lines.append("Memory: off")
     lines.append(f"Web UI: {'enabled' if data['settings']['webUiEnabled'] else 'disabled'}")
@@ -483,7 +492,12 @@ def _format_doctor(data: dict[str, Any], ok: bool) -> str:
     elif voice_enabled and not wh.get("available"):
         lines.append("Next: install or start Local Whisper, then rerun `eyra doctor`.")
     elif memory.get("enabled") and not memory.get("ready"):
-        lines.append("Next: install mcp-prose-memory with `npm install -g mcp-prose-memory`, then rerun `eyra doctor`.")
+        if memory.get("health") == "command_missing":
+            lines.append("Next: install mcp-prose-memory with `npm install -g mcp-prose-memory`, then rerun `eyra doctor`.")
+        elif memory.get("health") == "memory_file_error":
+            lines.append("Next: check or repair the local memory file, then rerun `eyra doctor`.")
+        else:
+            lines.append("Next: run `eyra memory status` for local memory details.")
     lines.append("Run `eyra certify` for the release matrix.")
     return "\n".join(lines)
 

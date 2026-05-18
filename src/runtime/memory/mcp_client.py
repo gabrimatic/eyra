@@ -35,8 +35,9 @@ class MemoryMcpClient:
             return {"available": False, "command": self.settings.MEMORY_MCP_COMMAND, "args": [], "error": str(exc)}
         return {"available": True, "command": command, "args": args, "error": ""}
 
-    async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> str:
-        async with _LineMcpSession(self.server_config(), timeout=max(5, int(self.settings.TOOL_TIMEOUT_SECONDS))) as session:
+    async def call_tool(self, name: str, arguments: dict[str, Any] | None = None, *, timeout: int | None = None) -> str:
+        session_timeout = timeout if timeout is not None else max(5, int(self.settings.TOOL_TIMEOUT_SECONDS))
+        async with _LineMcpSession(self.server_config(), timeout=session_timeout) as session:
             result = await session.request("tools/call", {"name": name, "arguments": arguments or {}})
         return _result_text(result)
 

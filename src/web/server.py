@@ -961,7 +961,7 @@ class WebAssistantRuntime:
     async def memory(self) -> dict[str, Any]:
         status = await self.memory_service.status()
         summary = ""
-        if status.get("enabled") and status.get("commandAvailable"):
+        if status.get("enabled") and status.get("ready"):
             summary = await self.memory_service.show()
         return {"memory": _redact_api_value({**status, "summary": summary})}
 

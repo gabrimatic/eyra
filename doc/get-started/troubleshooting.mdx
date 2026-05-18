@@ -110,6 +110,31 @@ If non-health endpoints return unauthorized, use the tokenized URL printed at st
 
 Do not set `WEB_UI_REQUIRE_TOKEN=false` for `0.0.0.0`; Eyra forces auth for non-localhost binds.
 
+## Memory needs setup
+
+Check the real memory path:
+
+```bash
+eyra memory status
+eyra doctor
+```
+
+`doctor` checks command availability and asks the memory MCP server for a small compact context. If the command is missing:
+
+```bash
+npm install -g mcp-prose-memory
+```
+
+If the status says `memory file error`, the local JSON file may be corrupt or unreadable. The path is shown by `eyra memory status`. Move the file aside if you want Eyra to start a fresh memory file.
+
+If you want every automatic memory write to require an explicit request, set:
+
+```env
+MEMORY_WRITE_REQUIRE_CONFIRMATION=true
+```
+
+With that setting, `remember` commands still save, but ordinary auto-save candidates are skipped.
+
 ## Menu bar app does not open
 
 Check the menu bar state:

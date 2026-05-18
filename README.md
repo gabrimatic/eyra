@@ -168,6 +168,8 @@ Inside a session:
 
 Eyra stores compact facts like `answer_style: prefers short answers`, not raw transcripts or long files. Secrets, stack traces, screenshots, clipboard dumps, and long payloads are refused.
 
+`MEMORY_WRITE_REQUIRE_CONFIRMATION=true` disables automatic non-explicit saves. Direct `remember` commands still save because you asked for that exact memory write.
+
 Advanced settings are still documented for power users, but they are not required for first use.
 
 ## For Developers

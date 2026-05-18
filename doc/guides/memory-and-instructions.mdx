@@ -55,6 +55,20 @@ answer_style: Prefers concise answers
 
 Eyra refuses to save raw conversations, secrets, screenshots, clipboard dumps, stack traces, PDF text, connector payloads, and long tool outputs.
 
+Explicit memory requests save immediately:
+
+- `eyra memory remember "I prefer short answers"`
+- `/memory remember I prefer short answers`
+- `Remember that I prefer short answers.`
+
+Automatic saves are narrower. Eyra may save short preference/profile facts from ordinary turns when `MEMORY_AUTO_SAVE_ENABLED=true`. If you want stricter control, set:
+
+```env
+MEMORY_WRITE_REQUIRE_CONFIRMATION=true
+```
+
+With that setting on, ordinary automatic saves are skipped. Direct `remember` commands still save because you asked for that exact write.
+
 ## Files
 
 `eyra setup` creates these files if they do not exist:
@@ -87,6 +101,7 @@ MEMORY_AUTO_SAVE_ENABLED=true
 MEMORY_PATH=~/.mcp-prose-memory/memory.json
 MEMORY_CONTEXT_MAX_CHARS=1500
 MEMORY_FACT_MAX_CHARS=220
+MEMORY_WRITE_REQUIRE_CONFIRMATION=false
 AGENTS_FILE=~/.config/eyra/AGENTS.md
 AGENTS_MAX_CHARS=1200
 PERSONALITY_FILE=~/.config/eyra/personality.md
@@ -115,3 +130,5 @@ eyra doctor
 ```
 
 If memory is unavailable, Eyra can still answer without memory. `eyra doctor` will show the repair step.
+
+`eyra doctor` checks more than whether the command exists. It starts the memory MCP server and asks for a small compact context, so missing commands, MCP startup failures, and memory-file errors show as separate repair states.
