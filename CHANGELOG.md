@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 No unreleased changes.
 
-## [4.3.3] - 2026-05-18
+## [4.3.4] - 2026-05-18
 
 ### Changed
 

@@ -101,7 +101,7 @@ eyra
 Supported overrides:
 
 ```bash
-EYRA_VERSION=v4.3.3 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
+EYRA_VERSION=v4.3.4 EYRA_INSTALL_DIR="$HOME/.local/share/eyra/app" ./install.sh
 ```
 
 The installer reads GitHub release JSON, prefers release assets with checksum files, and refuses unverified tag-archive fallback unless you explicitly set `EYRA_ALLOW_UNVERIFIED_TAG_ARCHIVE=true`. For testing from a checked-out tree, use `EYRA_SOURCE_PATH=/path/to/eyra ./install.sh`; the installed app still writes user config to `~/.config/eyra/.env`, not into the app directory.

@@ -2,9 +2,9 @@ class Eyra < Formula
   desc "Local-first voice coordinator for macOS terminals"
   homepage "https://github.com/gabrimatic/eyra"
 
-  url "https://github.com/gabrimatic/eyra/releases/download/v4.3.3/eyra-4.3.3.tar.gz"
-  sha256 "656668d34ef5b64fd0cac00bdcd5fc8dbb9f77092e1e46458d3df9b128edb2ae"
-  version "4.3.3"
+  url "https://github.com/gabrimatic/eyra/releases/download/v4.3.4/eyra-4.3.4.tar.gz"
+  sha256 "26f56a4d830aeadf567090960974cf0aaa27d97c48e55ec1786a11f85eaf745b"
+  version "4.3.4"
   license "PolyForm-Noncommercial-1.0.0"
   head "https://github.com/gabrimatic/eyra.git", branch: "main"
 
@@ -67,9 +67,6 @@ class Eyra < Formula
       First run:
         eyra setup
         eyra doctor
-
-      This formula currently installs from the main branch. Switch it to a
-      tagged release asset and sha256 before using it as a stable public tap.
 
       Voice requires Local Whisper:
         brew tap gabrimatic/local-whisper
