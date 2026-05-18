@@ -2,9 +2,9 @@ class Eyra < Formula
   desc "Local-first voice coordinator for macOS terminals"
   homepage "https://github.com/gabrimatic/eyra"
 
-  url "https://github.com/gabrimatic/eyra/releases/download/v4.3.4/eyra-4.3.4.tar.gz"
-  sha256 "26f56a4d830aeadf567090960974cf0aaa27d97c48e55ec1786a11f85eaf745b"
-  version "4.3.4"
+  url "https://github.com/gabrimatic/eyra/releases/download/v4.3.5/eyra-4.3.5.tar.gz"
+  sha256 "afa0c393115fa8d1f08796b107bf6fc6c0e4177fbe5569bff59a14fe15176daa"
+  version "4.3.5"
   license "PolyForm-Noncommercial-1.0.0"
   head "https://github.com/gabrimatic/eyra.git", branch: "main"
 

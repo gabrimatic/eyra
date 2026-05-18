@@ -147,6 +147,39 @@ class TestRunCommandTool:
         assert "approved" in result.content
         assert "Approval required" in reused.content
 
+    def test_approved_command_string_does_not_use_shell(self, tmp_path):
+        manager = ApprovalManager(ttl_seconds=60)
+        tool = RunCommandTool(allowed_roots=(tmp_path,), default_path=tmp_path, approval_manager=manager)
+
+        pending = _run(tool.execute(command="echo approved", cwd=str(tmp_path)))
+        approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+        assert manager.approve(approval_id) is True
+
+        with patch("tools.operator.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = "approved\n"
+            run.return_value.stderr = ""
+
+            result = _run(tool.execute(command="echo approved", cwd=str(tmp_path), approval_id=approval_id))
+
+        assert "exit_code=0" in result.content
+        run.assert_called_once()
+        assert run.call_args.args[0] == ["echo", "approved"]
+        assert run.call_args.kwargs.get("shell") is None
+
+    def test_approved_command_string_rejects_shell_syntax(self, tmp_path):
+        manager = ApprovalManager(ttl_seconds=60)
+        tool = RunCommandTool(allowed_roots=(tmp_path,), default_path=tmp_path, approval_manager=manager)
+
+        pending = _run(tool.execute(command="echo safe | cat", cwd=str(tmp_path)))
+        approval_id = pending.content.split("/approve ", 1)[1].split()[0]
+        assert manager.approve(approval_id) is True
+
+        result = _run(tool.execute(command="echo safe | cat", cwd=str(tmp_path), approval_id=approval_id))
+
+        assert "Shell syntax is not supported" in result.content
+        assert "exit_code=0" not in result.content
+
     def test_approval_expires(self, tmp_path):
         now = {"value": 1000.0}
         manager = ApprovalManager(ttl_seconds=1, clock=lambda: now["value"])

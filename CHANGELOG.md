@@ -10,6 +10,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 No unreleased changes.
 
+## [4.3.5] - 2026-05-18
+
+### Fixed
+
+- Removed shell execution from Eyra's approved local command-string path. Approved command strings are now parsed into argv and run without `shell=True`; shell metacharacters are rejected with guidance to use explicit argv instead.
+
 ## [4.3.4] - 2026-05-18
 
 ### Changed

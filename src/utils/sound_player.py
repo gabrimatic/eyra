@@ -32,18 +32,16 @@ async def play_sound(sound_type: str = "camera"):
 
         elif system == "Windows":
             subprocess.Popen(
-                r"powershell -c (New-Object Media.SoundPlayer 'C:\Windows\Media\Camera.wav').PlaySync()",
+                ["powershell", "-c", r"(New-Object Media.SoundPlayer 'C:\Windows\Media\Camera.wav').PlaySync()"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                shell=True,
             )
 
         elif system == "Linux":
             subprocess.Popen(
-                "paplay /usr/share/sounds/freedesktop/stereo/camera-shutter.oga",
+                ["paplay", "/usr/share/sounds/freedesktop/stereo/camera-shutter.oga"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                shell=True,
             )
 
     except Exception:

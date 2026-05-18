@@ -24,6 +24,7 @@ from utils.settings import Settings
 _MAX_OUTPUT = 12_000
 _MAX_TIMEOUT = 120
 _MAX_SESSION_BYTES = 64_000
+_SHELL_METACHARS = re.compile(r"[|&;<>()$`\\\n]")
 _DANGEROUS_TOKENS = {
     "rm",
     "rmdir",
@@ -180,13 +181,13 @@ class RunCommandTool(BaseTool):
     name = "run_command"
     description = (
         "Run a bounded local command inside an allowed filesystem root. Prefer argv. "
-        "Shell strings and risky commands require server-side user approval."
+        "Command strings are parsed safely and risky commands require server-side user approval."
     )
     parameters = {
         "type": "object",
         "properties": {
             "argv": {"type": "array", "items": {"type": "string"}, "description": "Command argv, e.g. ['pwd']."},
-            "command": {"type": "string", "description": "Shell command string. Requires approval."},
+            "command": {"type": "string", "description": "Command string. Shell syntax is not supported. Requires approval."},
             "cwd": {"type": "string", "description": "Working directory under an allowed root."},
             "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": _MAX_TIMEOUT},
             "approval_id": {"type": "string", "description": "Server-issued approval id for this exact action."},
@@ -227,13 +228,13 @@ class RunCommandTool(BaseTool):
             approval = _approval_or_result(
                 self._approvals,
                 tool_name=self.name,
-                title="shell command",
+                title="command string",
                 details={"command": command, "cwd": str(workdir), "timeout_seconds": timeout},
                 approval_id=approval_id,
             )
             if approval is not None:
                 return approval
-            return await asyncio.to_thread(self._run_shell, command, workdir, timeout)
+            return await asyncio.to_thread(self._run_command_string, command, workdir, timeout)
 
         if not argv:
             return ToolResult(content="Missing argv or command.")
@@ -268,12 +269,25 @@ class RunCommandTool(BaseTool):
             return ToolResult(content=f"Command timed out after {timeout}s: {shlex.join(argv)}")
         return self._format_result(completed.returncode, shlex.join(argv), completed.stdout, completed.stderr)
 
-    def _run_shell(self, command: str, cwd: Path, timeout: int) -> ToolResult:
+    def _run_command_string(self, command: str, cwd: Path, timeout: int) -> ToolResult:
         try:
-            completed = subprocess.run(command, cwd=cwd, shell=True, capture_output=True, text=True, timeout=timeout, check=False)
-        except subprocess.TimeoutExpired:
-            return ToolResult(content=f"Command timed out after {timeout}s: {command}")
-        return self._format_result(completed.returncode, command, completed.stdout, completed.stderr)
+            argv = self._parse_command_string(command)
+        except ValueError as exc:
+            return ToolResult(content=str(exc))
+        return self._run_argv(argv, cwd, timeout)
+
+    def _parse_command_string(self, command: str) -> list[str]:
+        if _SHELL_METACHARS.search(command):
+            raise ValueError("Shell syntax is not supported. Use argv for exact command arguments.")
+        try:
+            argv = shlex.split(command)
+        except ValueError as exc:
+            raise ValueError(f"Invalid command string: {exc}. Use argv for exact command arguments.") from exc
+        if not argv:
+            raise ValueError("Missing command. Use argv for exact command arguments.")
+        if self._requires_confirmation(argv):
+            raise ValueError("Approved command string still looks risky. Use argv and request approval for the exact command.")
+        return argv
 
     def _format_result(self, code: int, command: str, stdout: str, stderr: str) -> ToolResult:
         parts = [f"command={command}", f"exit_code={code}"]
